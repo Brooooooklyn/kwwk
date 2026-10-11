@@ -375,6 +375,104 @@ struct DevinProviderStreamTests {
         #expect(DevinAgentProvider.trailerFailure(Data("{}".utf8), historyBytes: { 0 }) == nil)
     }
 
+    private func chatFinal(_ chunks: [Data]) async -> (events: [AssistantMessageEvent], final: AssistantMessage?) {
+        let client = DevinRouteStubClient([
+            DevinWire.getUserJwtPath: [.init(status: 200, chunks: [jwtResponse("jwt")])],
+            DevinWire.getChatMessagePath: [.init(status: 200, chunks: chunks)],
+        ])
+        return await collect(DevinAgentProvider(client: client).stream(
+            model: devinTestModel(), context: Context(messages: [.user(UserMessage(text: "x"))]),
+            options: StreamOptions(apiKey: "tok")
+        ))
+    }
+
+    @Test("a reply cut off before its end-of-stream frame fails as a transport error, not a tool call with {} arguments")
+    func truncatedStream() async throws {
+        let call = frame(chatDelta { $0.bytesField(6, toolCall(id: "call-1", name: "bash", args: "{\"command\":")) })
+        let rest = frame(chatDelta { $0.bytesField(6, toolCall(args: "\"ls\"}")) })
+        // Cut inside a frame, and cut cleanly between two frames.
+        for chunks in [[call, Data(rest.dropLast(3))], [call]] {
+            let (events, final) = await chatFinal(chunks)
+            let message = try #require(final)
+            #expect(message.stopReason == .error)
+            #expect(message.failure?.category == .transport)
+            #expect(!events.contains { if case .toolCallEnd = $0 { return true }; return false })
+        }
+        // The same frames with their end-of-stream frame are a tool call.
+        let (_, whole) = await chatFinal([call, rest, frame(Data("{}".utf8), flags: 0x02, gzip: true)])
+        #expect(whole?.stopReason == .toolUse)
+    }
+
+    @Test("an end-of-stream frame with nothing before it and no error is an empty reply, retried as transport")
+    func emptyReply() async throws {
+        let (_, final) = await chatFinal([frame(Data("{}".utf8), flags: 0x02, gzip: true)])
+        let message = try #require(final)
+        #expect(message.stopReason == .error)
+        #expect(message.failure?.category == .transport)
+        #expect(message.errorMessage?.contains("empty reply") == true)
+    }
+
+    @Test("a signature in a frame of its own signs the thinking before it, and is replayed with it")
+    func signatureOnlyFrame() async throws {
+        // Frame order as Opus 5 sent it: thinking deltas, the signature
+        // alone, then the text.
+        let (_, final) = await chatFinal([
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(9, "Red disc on white") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(9, " is Japan.") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(10, "CAIShAQKlw") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(3, "Tokyo.") }),
+            frame(Data("{}".utf8), flags: 0x02, gzip: true),
+        ])
+        let message = try #require(final)
+        #expect(message.stopReason == .stop)
+        guard case .thinking(let thinking)? = message.content.first else {
+            Issue.record("expected thinking first")
+            return
+        }
+        #expect(thinking.thinking == "Red disc on white is Japan.")
+        #expect(thinking.thinkingSignature == "CAIShAQKlw")
+
+        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(message)], cascadeId: "c", model: devinTestModel())
+        #expect(prompts.first?.thinking == "Red disc on white is Japan.")
+        #expect(prompts.first?.signature == "CAIShAQKlw")
+    }
+
+    @Test("several thinking blocks joined into one Cascade message go unsigned")
+    func joinedThinkingIsUnsigned() {
+        let assistant = AssistantMessage(
+            content: [.thinking(ThinkingContent(thinking: "a", thinkingSignature: "sig-a")),
+                      .text(TextContent(text: "ok")),
+                      .thinking(ThinkingContent(thinking: "b", thinkingSignature: "sig-b"))],
+            api: "devin-agent", provider: "devin", model: "swe-1-6", responseId: "resp-1"
+        )
+        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(assistant)], cascadeId: "c", model: devinTestModel())
+        #expect(prompts.first?.thinking == "ab")
+        #expect(prompts.first?.signature == "")
+    }
+
+    @Test("tool choice goes as required only where Devin takes it")
+    func toolChoice() throws {
+        let read = Tool(name: "read", description: "Read a file", parameters: .object(["type": .string("object")]))
+        let list = Tool(name: "ls", description: "List files", parameters: .object(["type": .string("object")]))
+        func sent(_ choice: ToolChoice?, tools: [Tool]) throws -> String? {
+            let request = DevinAgentProvider.buildChatRequest(
+                model: devinTestModel(), context: Context(messages: [.user(UserMessage(text: "x"))], tools: tools),
+                messages: [.user(UserMessage(text: "x"))], options: StreamOptions(apiKey: "tok", toolChoice: choice),
+                apiKey: "k", userJwt: "jwt", cascadeId: "c", assignment: nil
+            )
+            return fields(try #require(fields(request.encode())[12]?.first?.asData))[1]?.first?.asString
+        }
+        #expect(try sent(nil, tools: [read]) == "auto")
+        #expect(try sent(.auto, tools: [read]) == "auto")
+        #expect(try sent(.required, tools: [read, list]) == "required")
+        #expect(try sent(.required, tools: []) == "auto")
+        // A tool's name is refused there; forcing the only tool is "required".
+        #expect(try sent(.tool(name: "read"), tools: [read]) == "required")
+        #expect(try sent(.tool(name: "read"), tools: [read, list]) == "auto")
+        // "none" comes back with no content at all.
+        #expect(try sent(ToolChoice.none, tools: [read]) == "auto")
+    }
+
     @Test("Gemini schema normalization folds type arrays into nullable")
     func geminiSchema() {
         let schema: JSONValue = .object([
