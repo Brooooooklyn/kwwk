@@ -76,6 +76,12 @@ public enum ModelsCatalog {
             let devin = loadBundledArray("devin-models")
             if !devin.isEmpty { out["devin"] = devin }
         }
+        // Kiro's list is each plan's own; the bundled one is a hand-kept seed
+        // (`KiroModels.fetch` asks an account for its real one).
+        if out["kiro"] == nil {
+            let kiro = loadBundledArray("kiro-models")
+            if !kiro.isEmpty { out["kiro"] = kiro }
+        }
         return out
     }
 

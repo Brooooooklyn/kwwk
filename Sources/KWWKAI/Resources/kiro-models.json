@@ -1,0 +1,101 @@
+[
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "auto",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "Auto",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-haiku-4.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Haiku 4.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-opus-5.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 128000,
+    "name": "Claude Opus 5.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-sonnet-4.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Sonnet 4.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-sonnet-5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Sonnet 5",
+    "provider": "kiro",
+    "reasoning": true
+  }
+]

@@ -23,23 +23,11 @@ public func parseAWSEventStream(
 ) -> AsyncThrowingStream<AWSEventMessage, Error> {
     AsyncThrowingStream { continuation in
         let task = Task {
-            var buffer = Data()
+            var decoder = AWSEventStreamDecoder()
             do {
                 for try await chunk in bytes {
-                    buffer.append(chunk)
-                    while buffer.count >= 12 {
-                        let totalLen = Int(readU32BE(buffer, offset: 0))
-                        if totalLen <= 0 || totalLen > 1 << 20 {
-                            throw NSError(domain: "AWSEventStream", code: 1, userInfo: [
-                                NSLocalizedDescriptionKey: "invalid frame length \(totalLen)",
-                            ])
-                        }
-                        if buffer.count < totalLen { break }
-                        let frame = Data(buffer.prefix(totalLen))
-                        if let msg = decodeFrame(frame) {
-                            continuation.yield(msg)
-                        }
-                        buffer.removeFirst(totalLen)
+                    for msg in try decoder.append(chunk) {
+                        continuation.yield(msg)
                     }
                 }
                 continuation.finish()
@@ -48,6 +36,43 @@ public func parseAWSEventStream(
             }
         }
         continuation.onTermination = { _ in task.cancel() }
+    }
+}
+
+/// Incremental form of `parseAWSEventStream`, for a reader that must know
+/// whether the bytes stopped inside a frame: Kiro's replies carry no closing
+/// event, so a cut-off one shows only as a frame left unfinished.
+struct AWSEventStreamDecoder {
+    private var buffer = Data()
+    /// The longest frame taken: Bedrock's megabyte unless the reader's
+    /// vendor sends longer ones.
+    private let maxFrameLength: Int
+
+    init(maxFrameLength: Int = 1 << 20) {
+        self.maxFrameLength = maxFrameLength
+    }
+
+    /// True while bytes of a frame not yet complete are held.
+    var isMidFrame: Bool { !buffer.isEmpty }
+
+    mutating func append(_ chunk: Data) throws -> [AWSEventMessage] {
+        buffer.append(chunk)
+        var messages: [AWSEventMessage] = []
+        while buffer.count >= 12 {
+            let totalLen = Int(readU32BE(buffer, offset: 0))
+            if totalLen <= 0 || totalLen > maxFrameLength {
+                throw NSError(domain: "AWSEventStream", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "invalid frame length \(totalLen)",
+                ])
+            }
+            if buffer.count < totalLen { break }
+            let frame = Data(buffer.prefix(totalLen))
+            if let msg = decodeFrame(frame) {
+                messages.append(msg)
+            }
+            buffer.removeFirst(totalLen)
+        }
+        return messages
     }
 }
 

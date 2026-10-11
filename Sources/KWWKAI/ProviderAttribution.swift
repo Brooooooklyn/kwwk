@@ -35,6 +35,7 @@ public enum ProviderAttribution {
         "groq": "Groq",
         "huggingface": "Hugging Face",
         "kimi-coding": "Kimi For Coding",
+        "kiro": "Kiro",
         "mistral": "Mistral",
         "minimax": "MiniMax",
         "minimax-cn": "MiniMax (China)",

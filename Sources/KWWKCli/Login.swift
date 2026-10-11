@@ -45,6 +45,11 @@ let loginProviders: [LoginEntry] = [
         flow: .oauth
     ),
     LoginEntry(
+        id: "kiro",
+        display: "Kiro (AWS Builder ID / Identity Center, Google or GitHub)",
+        flow: .oauth
+    ),
+    LoginEntry(
         id: "kimi-coding",
         display: "Kimi For Coding (Moonshot coding plan)",
         flow: .oauth
@@ -292,6 +297,8 @@ func runOAuthFlow(providerId: String) async throws {
             return try await OAuthLogin.loginCursor(callbacks: callbacks)
         case "devin":
             return try await OAuthLogin.loginDevin(callbacks: callbacks)
+        case "kiro":
+            return try await OAuthLogin.loginKiro(callbacks: callbacks)
         case "kimi-coding":
             return try await OAuthLogin.loginKimiCoding(callbacks: callbacks)
         case "xai":
