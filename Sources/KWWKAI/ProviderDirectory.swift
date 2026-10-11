@@ -121,6 +121,20 @@ public let providerDirectory: [ProviderDescriptor] = [
         formTitle: nil
     ),
     ProviderDescriptor(
+        storeId: "qoder",
+        scope: "qoder",
+        catalogKey: "qoder",
+        displayName: "Qoder",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
+        storeId: "qoder-cn",
+        scope: "qoder-cn",
+        catalogKey: "qoder-cn",
+        displayName: "Qoder CN",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
         storeId: "kimi-coding",
         scope: "kimi-coding",
         catalogKey: "kimi-coding",

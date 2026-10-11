@@ -47,6 +47,8 @@ public enum ProviderAttribution {
         "openai-codex": "ChatGPT Codex",
         "openai-compatible": "OpenAI-compatible",
         "openrouter": "OpenRouter",
+        "qoder": "Qoder",
+        "qoder-cn": "Qoder CN",
         "together": "Together AI",
         "vercel-ai-gateway": "Vercel AI Gateway",
         "xai": "xAI",

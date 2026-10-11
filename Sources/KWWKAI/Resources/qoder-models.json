@@ -1,0 +1,87 @@
+[
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 200000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "kmodel_latest",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 32000,
+    "name" : "Kimi-K3",
+    "provider" : "qoder",
+    "reasoning" : true
+  },
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 200000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "qfmodel",
+    "input" : [
+      "text",
+      "image"
+    ],
+    "maxTokens" : 32000,
+    "name" : "Qwen3.8-Flash",
+    "provider" : "qoder",
+    "reasoning" : true,
+    "thinkingLevelMap" : {
+      "high" : null,
+      "low" : "low",
+      "max" : null,
+      "medium" : "medium",
+      "minimal" : null,
+      "xhigh" : "xhigh"
+    }
+  },
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 200000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "qmodel_38max",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 32000,
+    "name" : "Qwen3.8-Max",
+    "provider" : "qoder",
+    "reasoning" : true
+  },
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 200000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "qmodel_latest",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 32000,
+    "name" : "Qwen3.7-Max",
+    "provider" : "qoder",
+    "reasoning" : true
+  }
+]
