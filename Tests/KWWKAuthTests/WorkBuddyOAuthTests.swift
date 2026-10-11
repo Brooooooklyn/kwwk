@@ -103,6 +103,26 @@ struct WorkBuddySignInTests {
         #expect(Int64(refreshEnds) >= before + 7200 * 1000)
     }
 
+    @Test("The page's own query goes out as WorkBuddy encoded it, its version and session replaced by the client's")
+    func pageQueryKept() async throws {
+        let client = QueuedHTTPClient([
+            answered(
+                #"{"state":"a+b==","authUrl":"https://login.codebuddy.cn/oauth?version=1&redirect_uri=https%3A%2F%2Fa.b%2Fcb%3Fx%3D1%26y%3D2&state=a%2Bb%3D%3D"}"#
+            ),
+            tokenGiven,
+            answered(#"{"uid":"u2"}"#),
+        ])
+        let presenter = RecordingPresenter()
+        _ = try await signIn(.china, client, presenter: presenter)
+        let page = try #require(presenter.shown.first?.absoluteString)
+        #expect(page.hasPrefix(
+            "https://login.codebuddy.cn/oauth?redirect_uri=https%3A%2F%2Fa.b%2Fcb%3Fx%3D1%26y%3D2&state=a%2Bb%3D%3D&version=2.0.0&loginSessionId="
+        ))
+        // The polls name the state as it was given, encoded once.
+        #expect(client.requests[1].url.absoluteString == "https://copilot.tencent.com/v2/plugin/auth/token?state=a%2Bb%3D%3D")
+        #expect(client.requests[2].url.absoluteString == "https://copilot.tencent.com/v2/plugin/login/account?state=a%2Bb%3D%3D")
+    }
+
     @Test("WorkBuddy AI signs in at its own endpoint as its own platform")
     func internationalBuild() async throws {
         let client = QueuedHTTPClient([
@@ -220,8 +240,8 @@ struct WorkBuddySignInTests {
             statePage, tokenGiven, answered(#"{"uid":"u1","type":"enterprise"}"#),
             answered(#"""
             {"accounts":[
-              {"uid":"u1","type":"enterprise","enterpriseId":"ent-2"},
-              {"uid":"u1","type":"enterprise","enterpriseId":"ent-3","lastLogin":true}]}
+              {"uid":"u1","type":"enterprise","enterpriseId":"ent-2","lastLogin":0},
+              {"uid":"u1","type":"enterprise","enterpriseId":"ent-3","lastLogin":1790000000000}]}
             """#),
         ])
         #expect(try await signIn(.china, lastUsed).extras["enterpriseId"] == .string("ent-3"))

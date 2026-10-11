@@ -239,11 +239,15 @@ extension OAuthLogin {
             throw OAuthError.invalidResponse("\(site.name) gave no sign-in page")
         }
         // The page is told the client's version and a session of its own.
+        // The rest of its query stays as WorkBuddy encoded it: read decoded
+        // and written back, a `%2B` in its state would go out as `+`, which
+        // the page reads as a space.
         let ours = [
             URLQueryItem(name: "version", value: WorkBuddyOAuth.appVersion),
             URLQueryItem(name: "loginSessionId", value: PKCE.randomHex()),
         ]
-        page.queryItems = (page.queryItems ?? []).filter { item in !ours.contains { $0.name == item.name } } + ours
+        page.percentEncodedQueryItems = (page.percentEncodedQueryItems ?? [])
+            .filter { item in !ours.contains { $0.name == item.name } } + ours
         guard let pageURL = page.url else {
             throw OAuthError.invalidResponse("\(site.name) gave no sign-in page")
         }
@@ -342,8 +346,9 @@ extension OAuthLogin {
         let lastUsed = mine.filter { entry in
             switch entry["lastLogin"] {
             case nil, is NSNull: false
-            case let flag as Bool: flag
             case let text as String: !text.isEmpty
+            // A flag, or a time: 0 is never.
+            case let number as NSNumber: number.doubleValue != 0
             default: true
             }
         }
