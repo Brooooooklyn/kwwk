@@ -82,6 +82,8 @@ public enum OAuthUsage {
             AnthropicUsageReader(),
             OpenAICodexUsageReader(),
             KimiCodingUsageReader(),
+            QoderUsageReader(site: .global),
+            QoderUsageReader(site: .cn),
         ] as [any OAuthUsageReader]).map { ($0.providerId, $0) }
     )
 
