@@ -568,6 +568,70 @@ struct BedrockCacheAndAuthTests {
         #expect(extras?["anthropic_beta"] == nil)
     }
 
+    // Claude from 4.6 on answers a budget with 400 "claude-opus-5-5 requires
+    // adaptive thinking" (magpie 72fd0cb4); the catalog's ids for Opus 5 and
+    // 5.5 on Bedrock used to fall to the budget branch.
+    @Test("Opus 5 and 5.5 think adaptively, under every Bedrock spelling of the id",
+          arguments: ["anthropic.claude-opus-5-5", "global.anthropic.claude-opus-5-5",
+                      "us.anthropic.claude-opus-5", "au.anthropic.claude-opus-5"])
+    func opus5ThinksAdaptively(id: String) async throws {
+        var m = Self.model
+        m.id = id
+        m.name = "Claude Opus"
+        m.reasoning = true
+        m.thinkingLevelMap = ["max": "max", "xhigh": "xhigh"]
+        let client = await Self.send(model: m, options: StreamOptions(reasoning: .medium))
+        let extras = try Self.decode(client)["additionalModelRequestFields"] as? [String: Any]
+        let thinking = extras?["thinking"] as? [String: Any]
+        #expect(thinking?["type"] as? String == "adaptive")
+        #expect(thinking?["budget_tokens"] == nil)
+        #expect((extras?["output_config"] as? [String: Any])?["effort"] as? String == "medium")
+        #expect(extras?["anthropic_beta"] == nil)
+    }
+
+    @Test("Opus 4.5 keeps its thinking budget")
+    func opus45KeepsBudget() async throws {
+        var m = Self.model
+        m.id = "anthropic.claude-opus-4-5-20251101-v1:0"
+        m.name = "Claude Opus 4.5"
+        m.reasoning = true
+        let client = await Self.send(model: m, options: StreamOptions(reasoning: .medium))
+        let extras = try Self.decode(client)["additionalModelRequestFields"] as? [String: Any]
+        #expect((extras?["thinking"] as? [String: Any])?["type"] as? String == "enabled")
+    }
+
+    // Claude answers a root union with 400 "input_schema does not support
+    // oneOf, allOf, or anyOf at the top level", on Bedrock as elsewhere.
+    @Test("a Claude tool whose schema is a union at its root is sent with an object root")
+    func claudeToolRootUnionFolded() async throws {
+        let union: JSONValue = .object(["anyOf": .array([
+            .object(["type": .string("object"),
+                     "properties": .object(["path": .object(["type": .string("string")])]),
+                     "required": .array([.string("path")])]),
+            .object(["type": .string("object"),
+                     "properties": .object(["url": .object(["type": .string("string")])]),
+                     "required": .array([.string("url")])]),
+        ])])
+        let context = Context(messages: [.user(UserMessage(text: "hi"))],
+                              tools: [Tool(name: "open", description: "Open it.", parameters: union)])
+        func schema(_ model: Model) async throws -> [String: Any]? {
+            let json = try Self.decode(await Self.send(model: model, options: nil, context: context))
+            let tools = (json["toolConfig"] as? [String: Any])?["tools"] as? [[String: Any]]
+            let spec = tools?.first?["toolSpec"] as? [String: Any]
+            return (spec?["inputSchema"] as? [String: Any])?["json"] as? [String: Any]
+        }
+        let claude = try #require(try await schema(Self.model))
+        #expect(claude["anyOf"] == nil)
+        #expect(claude["type"] as? String == "object")
+        #expect(Set((claude["properties"] as? [String: Any] ?? [:]).keys) == ["path", "url"])
+
+        // Another vendor's model is sent the schema as the tool wrote it.
+        var nova = Self.model
+        nova.id = "amazon.nova-pro-v1:0"
+        nova.name = "Nova Pro"
+        #expect(try await schema(nova)?["anyOf"] != nil)
+    }
+
     @Test("GovCloud target suppresses thinking.display")
     func govCloudSuppressesDisplay() async throws {
         var m = Self.model
