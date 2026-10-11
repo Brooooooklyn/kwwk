@@ -397,6 +397,14 @@ struct WorkBuddyProviderTests {
         #expect(!failure.isRetryable)
     }
 
+    @Test("Credits used up read as quota whatever status the refusal comes under", arguments: [400, 401, 403, 429])
+    func creditsExhaustedStatus(status: Int) async throws {
+        let failure = try #require(await refusal(status: status, #"{"code":14018,"msg":"额度已用尽"}"#))
+        #expect(failure.message == "额度已用尽 — \(WorkBuddyWire.exhaustedHint)")
+        #expect(failure.category == .quota)
+        #expect(!failure.isRetryable)
+    }
+
     @Test("A code that only begins with 14018 is another error")
     func otherCode() async throws {
         let failure = try #require(await refusal(status: 429, #"{"code":140185,"msg":"busy"}"#))
