@@ -1022,10 +1022,15 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         guard page || type.contains("json") else { return nil }
         var head: [Data] = []
         var bytes = Data()
+        let opening = UInt8(ascii: page ? "<" : "{")
+        let blank: Set<UInt8> = [0x20, 0x09, 0x0A, 0x0D, 0xEF, 0xBB, 0xBF]
         for try await chunk in body {
             head.append(chunk)
             bytes.append(chunk)
             if bytes.count >= 4096 { break }
+            // A mislabelled stream shows in its first byte; reading on would
+            // hold its events back until 4K of them had arrived.
+            if let first = bytes.first(where: { !blank.contains($0) }), first != opening { break }
         }
         let text = String(decoding: bytes.prefix(4096), as: UTF8.self)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(["\u{FEFF}"]))

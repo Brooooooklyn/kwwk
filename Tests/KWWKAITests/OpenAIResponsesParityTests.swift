@@ -185,6 +185,30 @@ struct OpenAIResponsesParityTests {
         }
     }
 
+    @Test("a mislabelled event stream is handed on at its first bytes, not after a full buffer")
+    func mislabelledStreamIsNotHeldBack() async throws {
+        let (stream, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
+        let first = Data("data: {\"type\":\"response.created\"}\n\n".utf8)
+        continuation.yield(first)
+        let response = HTTPURLResponse(url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: "HTTP/1.1",
+                                       headerFields: ["content-type": "application/json"])!
+        // The rest of the turn is slow, as a reasoning model's is.
+        let rest = Task {
+            try? await Task.sleep(for: .seconds(3))
+            continuation.yield(Data("data: {\"type\":\"later\"}\n\n".utf8))
+            continuation.finish()
+        }
+        var body = stream
+        let started = ContinuousClock.now
+        #expect(try await OpenAIResponsesProvider.notAnEventStream(response, body: &body) == nil)
+        #expect(ContinuousClock.now - started < .seconds(1.5))
+        rest.cancel()
+        var chunks: [Data] = []
+        for try await chunk in body { chunks.append(chunk) }
+        #expect(chunks.first == first)
+        #expect(chunks.count == 2)
+    }
+
     // MARK: Refused seals
 
     /// The 400 the ChatGPT backend gave a reasoning item with one character
