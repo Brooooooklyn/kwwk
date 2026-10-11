@@ -305,6 +305,153 @@ struct GoogleGeminiTests {
         #expect(tc?["includeThoughts"] == nil)
     }
 
+    // gemini-3.8-flash has low, medium and high and answers MINIMAL with 400
+    // "Thinking level is unsupported: THINKING_LEVEL_MINIMAL" (magpie #1062),
+    // which is what both reasoning off and `.minimal` were sent as.
+    static func levelModel(_ id: String, _ map: [String: String?]) -> Model {
+        var model = reasoningModel(id)
+        model.thinkingLevelMap = map
+        return model
+    }
+
+    static func sentThinkingConfig(_ model: Model, _ reasoning: ReasoningLevel?) async throws -> [String: Any]? {
+        let json = try await encodedBody(
+            model: model, context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(reasoning: reasoning))
+        return (json["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+    }
+
+    @Test("a Gemini 3 Flash with no minimal level is asked at LOW, off or minimal")
+    func flashWithoutMinimal() async throws {
+        let model = Self.levelModel("gemini-3.8-flash", [
+            "off": nil, "minimal": nil, "low": "low", "medium": "medium", "high": "high", "xhigh": nil, "max": nil,
+        ])
+        let off = try await Self.sentThinkingConfig(model, nil)
+        #expect(off?["thinkingLevel"] as? String == "LOW")
+        #expect(off?["includeThoughts"] == nil)
+        #expect(try await Self.sentThinkingConfig(model, .minimal)?["thinkingLevel"] as? String == "LOW")
+        #expect(try await Self.sentThinkingConfig(model, .medium)?["thinkingLevel"] as? String == "MEDIUM")
+    }
+
+    @Test("a level the catalog lists, or a model it does not describe, goes as before")
+    func listedLevelsUnchanged() async throws {
+        let flash = Self.levelModel("gemini-3.5-flash", [
+            "off": nil, "minimal": "minimal", "low": "low", "medium": "medium", "high": "high",
+        ])
+        #expect(try await Self.sentThinkingConfig(flash, nil)?["thinkingLevel"] as? String == "MINIMAL")
+        #expect(try await Self.sentThinkingConfig(flash, .minimal)?["thinkingLevel"] as? String == "MINIMAL")
+        let unlisted = Self.reasoningModel("gemini-3.8-flash")
+        #expect(try await Self.sentThinkingConfig(unlisted, nil)?["thinkingLevel"] as? String == "MINIMAL")
+        // Gemma 4 has minimal and high; low still goes at its MINIMAL.
+        let gemma = Self.levelModel("gemma-4-31b-it", [
+            "off": nil, "minimal": "MINIMAL", "low": nil, "medium": nil, "high": "HIGH",
+        ])
+        #expect(try await Self.sentThinkingConfig(gemma, .low)?["thinkingLevel"] as? String == "MINIMAL")
+    }
+
+    @Test("a model with minimal and high only is asked at HIGH for low and medium")
+    func levelClampedUpward() async throws {
+        let model = Self.levelModel("gemini-3.1-flash-lite-image", [
+            "off": nil, "minimal": "minimal", "low": nil, "medium": nil, "high": "high",
+        ])
+        #expect(try await Self.sentThinkingConfig(model, .low)?["thinkingLevel"] as? String == "HIGH")
+        #expect(try await Self.sentThinkingConfig(model, .medium)?["thinkingLevel"] as? String == "HIGH")
+        #expect(try await Self.sentThinkingConfig(model, nil)?["thinkingLevel"] as? String == "MINIMAL")
+    }
+
+    // Gemini 2.5 Pro cannot stop thinking and answers a budget of 0 with 400
+    // "does not support setting thinking_budget to 0".
+    @Test("reasoning-off Gemini 2.5 Pro sends its least budget, not 0")
+    func disabledThinking25Pro() async throws {
+        let tc = try await Self.sentThinkingConfig(Self.reasoningModel("gemini-2.5-pro"), nil)
+        #expect(tc?["thinkingBudget"] as? Int == 128)
+        #expect(tc?["includeThoughts"] == nil)
+    }
+
+    // MARK: - Replies that say nothing
+
+    // The three bodies are magpie's fixtures for #667 (gemini_empty_reply_test.go).
+    static func settle(_ sse: String) async -> AssistantMessage {
+        let provider = GoogleGeminiProvider(client: StubSSEClient(body: sse), defaultAPIKey: "k")
+        return await provider.stream(
+            model: model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil
+        ).result()
+    }
+
+    static let emptyReplies: [String] = [
+        """
+        data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":0}}
+
+
+        """,
+        """
+        data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me see.","thought":true}]}}]}
+
+        data: {"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"STOP"}]}
+
+
+        """,
+        """
+        data: {"usageMetadata":{"promptTokenCount":0}}
+
+
+        """,
+    ]
+
+    @Test("a reply that says nothing is a replayable error, not a turn that ended", arguments: emptyReplies)
+    func emptyReplyIsAnError(sse: String) async throws {
+        let result = await Self.settle(sse)
+        #expect(result.stopReason == .error)
+        #expect(result.providerFailure?.isRetryable == true)
+        // Thoughts alone can be asked again; nothing has reached the reader.
+        #expect(!result.hasReplayUnsafeContent)
+    }
+
+    @Test("a reply with text, a tool call, or cut at its length ends as it came")
+    func repliesThatSaySomethingUnchanged() async throws {
+        #expect(await Self.settle(Self.textSSE).stopReason == .stop)
+        #expect(await Self.settle(Self.toolUseSSE).stopReason == .toolUse)
+        let cut = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me see.","thought":true}]},"finishReason":"MAX_TOKENS"}]}"#
+                + "\n\n")
+        #expect(cut.stopReason == .length)
+    }
+
+    @Test("a call the model wrote badly is replayable; a refusal is not",
+          arguments: ["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"])
+    func malformedCallIsReplayable(reason: String) async throws {
+        let result = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"\#(reason)"}]}"# + "\n\n")
+        #expect(result.stopReason == .error)
+        #expect(result.providerFailure?.rawStopReason == reason)
+        #expect(result.providerFailure?.isRetryable == true)
+
+        let refused = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY"}]}"# + "\n\n")
+        #expect(refused.stopReason == .error)
+        #expect(refused.providerFailure?.isRetryable == false)
+    }
+
+    // UNEXPECTED_TOOL_CALL fails only the reply that said nothing; one that
+    // wrote its answer first ended as a normal stop before and still does.
+    @Test("text before UNEXPECTED_TOOL_CALL is still an answer")
+    func unexpectedToolCallAfterTextStops() async throws {
+        let result = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Done."}]},"finishReason":"UNEXPECTED_TOOL_CALL"}]}"#
+                + "\n\n")
+        #expect(result.stopReason == .stop)
+    }
+
+    // The image is not read into the message, but asking again would only
+    // draw it again.
+    @Test("a reply that is an image alone is not replayed as empty")
+    func imageReplyIsNotEmpty() async throws {
+        let result = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]},"finishReason":"STOP"}]}"#
+                + "\n\n")
+        #expect(result.stopReason == .stop)
+    }
+
     // MARK: - Feature 2: thought-signature preservation
 
     @Test("preserves valid base64 textSignature on replayed same-model text part")
@@ -437,6 +584,52 @@ struct GoogleGeminiTests {
         #expect((imgParts?.first?["inlineData"] as? [String: Any])?["data"] as? String == "QUJD")
         let resp = fr?["response"] as? [String: Any]
         #expect(resp?["output"] as? String == "(see attached image)")
+    }
+
+    // Gemini 3 answers a step whose first call comes back unsigned with 400
+    // "Function call is missing a thought_signature in functionCall parts"
+    // (magpie #687).
+    static func sentCallParts(model: Model, calls: [ToolCall], from source: Model) async throws -> [[String: Any]] {
+        let assistant = AssistantMessage(
+            content: calls.map { .toolCall($0) }, api: source.api, provider: source.provider,
+            model: source.id, stopReason: .toolUse)
+        var messages: [Message] = [.user(UserMessage(text: "hi")), .assistant(assistant)]
+        for call in calls {
+            messages.append(.toolResult(ToolResultMessage(
+                toolCallId: call.id, toolName: call.name, content: [.text(TextContent(text: "ok"))])))
+        }
+        let json = try await encodedBody(model: model, context: Context(messages: messages), options: nil)
+        let contents = try #require(json["contents"] as? [[String: Any]])
+        let turn = try #require(contents.first { $0["role"] as? String == "model" })
+        return try #require(turn["parts"] as? [[String: Any]])
+    }
+
+    @Test("Gemini 3 gets the skip value on the first call of a step it did not sign")
+    func unsignedStepGetsSkipValue() async throws {
+        let model = Self.reasoningModel("gemini-3.8-flash")
+        let foreign = Model(id: "claude-src", name: "Claude", api: "anthropic-messages", provider: "anthropic",
+                            baseURL: "", contextWindow: 200_000, maxTokens: 8192)
+        let parts = try await Self.sentCallParts(model: model, calls: [
+            ToolCall(id: "c1", name: "read", arguments: .object([:]), thoughtSignature: "Zm9yZWlnbg=="),
+            ToolCall(id: "c2", name: "read", arguments: .object([:])),
+        ], from: foreign)
+        #expect(parts.map { $0["thoughtSignature"] as? String } == [GoogleGeminiProvider.skipThoughtSignature, nil])
+    }
+
+    @Test("a step Gemini signed goes back as it came, and Gemini 2.5 gets no skip value")
+    func signedStepUnchanged() async throws {
+        let model = Self.reasoningModel("gemini-3.8-flash")
+        let signed = try await Self.sentCallParts(model: model, calls: [
+            ToolCall(id: "c1", name: "read", arguments: .object([:]), thoughtSignature: "c2lnbmVk"),
+            ToolCall(id: "c2", name: "read", arguments: .object([:])),
+        ], from: model)
+        #expect(signed.map { $0["thoughtSignature"] as? String } == ["c2lnbmVk", nil])
+
+        let older = Self.reasoningModel("gemini-2.5-flash")
+        let unsigned = try await Self.sentCallParts(model: older, calls: [
+            ToolCall(id: "c1", name: "read", arguments: .object([:])),
+        ], from: older)
+        #expect(unsigned.first?["thoughtSignature"] == nil)
     }
 
     // MARK: - Feature 4: usage accounting

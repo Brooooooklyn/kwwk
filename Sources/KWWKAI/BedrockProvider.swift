@@ -366,9 +366,15 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         if let m = maxTokens { inference["maxTokens"] = m }
         if !inference.isEmpty { root["inferenceConfig"] = inference }
         if let tools = context.tools, !tools.isEmpty {
+            let claude = isAnthropicClaudeModel(model)
             var toolConfig: [String: Any] = [
                 "tools": tools.map { tool -> [String: Any] in
-                    let schema: Any = anyFromJSONValue(tool.parameters) ?? [String: Any]()
+                    // Claude refuses a tool whose schema is a union at its
+                    // root wherever it is served ("input_schema does not
+                    // support oneOf, allOf, or anyOf at the top level"), and
+                    // one such tool fails every request that offers it.
+                    let parameters = claude ? ToolSchemaRoot.objectRoot(tool.parameters) : tool.parameters
+                    let schema: Any = anyFromJSONValue(parameters) ?? [String: Any]()
                     return [
                         "toolSpec": [
                             "name": tool.name,
@@ -404,10 +410,14 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         }
     }
 
+    /// Claude from 4.6 on thinks only adaptively: a budget is answered 400
+    /// "claude-opus-5-5 requires adaptive thinking" (magpie 72fd0cb4, measured
+    /// on the Messages API; its adaptiveOnly test carries Bedrock's spelling
+    /// of the id). `opus-5` covers Opus 5 and 5.5, `sonnet-5` Sonnet 5 and 5.5.
     private static func supportsAdaptiveThinking(_ model: Model) -> Bool {
         let c = modelMatchCandidates(model)
         return c.contains { $0.contains("opus-4-6") || $0.contains("opus-4-7")
-            || $0.contains("opus-4-8") || $0.contains("sonnet-4-6")
+            || $0.contains("opus-4-8") || $0.contains("opus-5") || $0.contains("sonnet-4-6")
             || $0.contains("sonnet-5") || $0.contains("fable-5") }
     }
 
