@@ -270,20 +270,38 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                 }
                 // Tool calls — each entry is indexed by `index` and may
                 // partially populate id/name/arguments.
+                //
+                // Relays stray from that shape, and magpie's Chat decoder
+                // records each way one did: a fragment with no `index` is
+                // read at its place in the list, and a new id on an index
+                // whose call already has another id starts the next call
+                // (parallel calls all sent at index 0) rather than being
+                // spliced into the open one's arguments (magpie #395).
+                // WorkBuddy repeats `"function": {"name": ""}` on every
+                // argument fragment after the first (magpie chattidy.go), so
+                // an empty id or name says nothing and never replaces the
+                // real one.
                 if case .array(let toolCalls) = delta["tool_calls"] ?? .null {
-                    for entry in toolCalls {
-                        guard case .object(let call) = entry,
-                              case .int(let rawIndex) = call["index"] ?? .null else { continue }
-                        let (contentIndex, firstSeen) = state.noteToolCallBlock(at: rawIndex)
+                    for (position, entry) in toolCalls.enumerated() {
+                        guard case .object(let call) = entry else { continue }
+                        let rawIndex: Int = {
+                            if case .int(let index) = call["index"] ?? .null { return index }
+                            return position
+                        }()
+                        let id: String? = {
+                            if case .string(let id) = call["id"] ?? .null, !id.isEmpty { return id }
+                            return nil
+                        }()
+                        let (contentIndex, firstSeen) = state.noteToolCallBlock(at: rawIndex, id: id)
                         if !emittedStart {
                             out.push(.start(partial: state.snapshot()))
                             emittedStart = true
                         }
-                        if case .string(let id) = call["id"] ?? .null {
+                        if let id {
                             state.updateToolCallID(rawIndex: rawIndex, id: id)
                         }
                         if case .object(let function) = call["function"] ?? .null {
-                            if case .string(let name) = function["name"] ?? .null {
+                            if case .string(let name) = function["name"] ?? .null, !name.isEmpty {
                                 state.updateToolCallName(rawIndex: rawIndex, name: name)
                             }
                             if firstSeen {
@@ -318,7 +336,11 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                 }
             }
 
-            if case .string(let reason) = choice["finish_reason"] ?? .null {
+            // WorkBuddy's stream carries `"finish_reason": ""` on every chunk
+            // that has not finished, where the contract has null (magpie
+            // chattidy.go). An empty string is not a reason: read as one it
+            // closed every block after its first delta.
+            if case .string(let reason) = choice["finish_reason"] ?? .null, !reason.isEmpty {
                 state.stopReason = Self.mapStopReason(reason)
                 if state.stopReason == .error, state.errorMessage == nil {
                     state.errorMessage = "Provider finish_reason: \(reason)"
@@ -394,7 +416,14 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         ) {
             root[compat.maxTokensField] = maxTokens
         }
-        if let temp = options?.temperature { root["temperature"] = temp }
+        // Kimi locks the sampling temperature on kimi-k2.5 and later and
+        // refuses any other value with 400 "invalid temperature: only 1 is
+        // allowed for this model" (magpie #1197), so the caller's is left out
+        // and the server fills in the one the model and mode take.
+        if let temp = options?.temperature,
+           !(compat.isKimi && kimiLocksSampling(model.id)) {
+            root["temperature"] = temp
+        }
         var toolEntries: [[String: Any]]?
         if let tools = context.tools, !tools.isEmpty {
             toolEntries = encodeTools(tools, compat: compat)
@@ -466,6 +495,10 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         var sendSessionAffinityHeaders: Bool
         var sessionAffinityFormat: String
         var supportsLongCacheRetention: Bool
+        /// xAI's API: a tool's parameters must be an object at the root.
+        var requiresObjectSchemaRoot: Bool
+        /// Moonshot's API or Kimi's coding host.
+        var isKimi: Bool
     }
 
     static func resolveCompat(_ model: Model) -> ResolvedCompletionsCompat {
@@ -523,7 +556,9 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             // base-URL detection while preserving an explicit opt-out.
             sendSessionAffinityHeaders: c?.sendSessionAffinityHeaders ?? isOpenRouter,
             sessionAffinityFormat: c?.sessionAffinityFormat ?? (isOpenRouter ? "openrouter" : "openai"),
-            supportsLongCacheRetention: c?.supportsLongCacheRetention ?? !(isTogether || isCloudflareWorkers || isCfGateway || isNvidia || isAntLing)
+            supportsLongCacheRetention: c?.supportsLongCacheRetention ?? !(isTogether || isCloudflareWorkers || isCfGateway || isNvidia || isAntLing),
+            requiresObjectSchemaRoot: isGrok,
+            isKimi: isMoonshot || has("api.kimi.com") || has("api.kimi.ai")
         )
     }
 
@@ -860,7 +895,17 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                 "name": tool.name,
                 "description": tool.description,
             ]
-            if let params = anyFromJSONValue(tool.parameters) {
+            var schema = tool.parameters
+            // xAI refuses a root union with 400 "[invalid_client_tool_schema]
+            // ... tool parameter root must be an object type", and one such
+            // tool fails the whole request (magpie #1271).
+            if compat.requiresObjectSchemaRoot { schema = ToolSchemaRoot.objectRoot(schema) }
+            // Moonshot refuses an enum with no type, 400 "tools.function.
+            // parameters is not a valid moonshot flavored json schema ...
+            // type is not defined" (magpie #886), though the tool is never
+            // called.
+            if compat.isKimi { schema = kimiTypedEnums(schema) }
+            if let params = anyFromJSONValue(schema) {
                 fn["parameters"] = params
             }
             if compat.supportsStrictMode {
@@ -954,7 +999,12 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         case "tool_calls", "function_call": return .toolUse
         // pi surfaces these as errors rather than a clean stop so the agent
         // doesn't treat a filtered/aborted turn as a successful completion.
-        case "content_filter", "network_error": return .error
+        // Z.ai ends a 200 stream with `model_context_window_exceeded` when
+        // the conversation no longer fits and Zhipu with `sensitive` when its
+        // content review blocks the reply; neither is a finished answer. The
+        // raw reason is kept on the failure, where the first classifies as a
+        // context overflow and the second as a refusal.
+        case "content_filter", "network_error", "model_context_window_exceeded", "sensitive": return .error
         default: return .stop
         }
     }
@@ -1053,9 +1103,16 @@ final class OpenAICompletionsState: @unchecked Sendable {
         }
     }
 
-    func noteToolCallBlock(at rawIndex: Int) -> (index: Int, firstSeen: Bool) {
+    /// The content block a tool-call fragment at `rawIndex` belongs to. A
+    /// fragment naming an id other than the one the index's open call goes
+    /// by is the next call, not more of this one; a fragment with no id, or
+    /// repeating the open call's, continues it.
+    func noteToolCallBlock(at rawIndex: Int, id: String? = nil) -> (index: Int, firstSeen: Bool) {
         lock.withLock {
-            if let idx = toolCallIndexMap[rawIndex] { return (idx, false) }
+            if let idx = toolCallIndexMap[rawIndex] {
+                guard let id, case .toolUse(let openID, _, _, _) = blocks[idx],
+                      !openID.isEmpty, openID != id else { return (idx, false) }
+            }
             let idx = order.count
             toolCallIndexMap[rawIndex] = idx
             order.append(idx)
@@ -1235,6 +1292,84 @@ final class OpenAICompletionsState: @unchecked Sendable {
         }
         return .object([:])
     }
+}
+
+/// `schema` with a `type` written into each schema of it that has an `enum`
+/// (or a `const`) and none: the type every value has. Values of mixed types,
+/// or a null among them, are left as they were.
+func kimiTypedEnums(_ schema: JSONValue) -> JSONValue {
+    guard case .object(var object) = schema else { return schema }
+    if object["type"] == nil {
+        let values: [JSONValue]? = {
+            if case .array(let values)? = object["enum"] { return values }
+            return object["const"].map { [$0] }
+        }()
+        if let type = kimiValuesType(values ?? []) { object["type"] = .string(type) }
+    }
+    for (key, value) in object {
+        switch key {
+        case "properties", "$defs", "definitions", "dependentSchemas", "patternProperties":
+            guard case .object(let members) = value else { continue }
+            object[key] = .object(members.mapValues(kimiTypedEnums))
+        case "items", "additionalProperties", "contains", "propertyNames", "not", "if", "then", "else",
+             "allOf", "anyOf", "oneOf", "prefixItems", "unevaluatedProperties", "unevaluatedItems",
+             "contentSchema":
+            if case .array(let members) = value {
+                object[key] = .array(members.map(kimiTypedEnums))
+            } else {
+                object[key] = kimiTypedEnums(value)
+            }
+        default:
+            continue
+        }
+    }
+    return .object(object)
+}
+
+private func kimiValuesType(_ values: [JSONValue]) -> String? {
+    var type: String?
+    for value in values {
+        let own: String
+        switch value {
+        case .string: own = "string"
+        case .bool: own = "boolean"
+        case .int: own = "integer"
+        case .double: own = "number"
+        default: return nil
+        }
+        guard let seen = type, seen != own else {
+            type = own
+            continue
+        }
+        // whole numbers among fractions make them number
+        let numeric: Set<String> = ["integer", "number"]
+        guard numeric.contains(seen), numeric.contains(own) else { return nil }
+        type = "number"
+    }
+    return type
+}
+
+/// Whether Kimi's server locks the model's temperature: kimi-for-coding*
+/// and k3* on Kimi Code, kimi-k2.5 and later on either platform. Models that
+/// take a range (moonshot-v1-*, kimi-k2-0905-preview, kimi-k2-thinking,
+/// kimi-latest) keep the caller's. A leading "vendor/" is ignored.
+func kimiLocksSampling(_ modelId: String) -> Bool {
+    let id = modelId.lowercased().split(separator: "/").last.map(String.init) ?? ""
+    if id.hasPrefix("kimi-for-coding") { return true }
+    let version: Substring
+    if id.hasPrefix("kimi-k") {
+        version = id.dropFirst("kimi-k".count)
+    } else if id.hasPrefix("k") {
+        version = id.dropFirst()
+    } else {
+        return false
+    }
+    let majorDigits = version.prefix(while: \.isNumber)
+    guard let major = Int(majorDigits) else { return false }
+    if major != 2 { return major >= 3 }
+    let rest = version.dropFirst(majorDigits.count)
+    guard rest.hasPrefix(".") else { return false }
+    return (Int(rest.dropFirst().prefix(while: \.isNumber)) ?? -1) >= 5
 }
 
 /// Expand Cloudflare base-URL placeholders (`{CLOUDFLARE_ACCOUNT_ID}` /
