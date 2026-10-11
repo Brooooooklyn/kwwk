@@ -353,13 +353,16 @@ public enum OAuthLogin {
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 ]).utf8)
             )
-            // An error status or a body that isn't JSON (a proxy's page) is a
-            // hiccup, asked again — but five in a row end the sign-in with
-            // the last one, rather than wait out the 15 minutes saying
-            // nothing after GitHub's page said the device was connected
-            // (magpie #723, commit 63c382bb).
-            guard pollResponse.statusCode < 400,
-                  let polled = (try? JSONSerialization.jsonObject(with: pollBody)) as? [String: Any]
+            // A body that isn't JSON (a proxy's page), or an error status
+            // that names no OAuth error, is a hiccup, asked again — but five
+            // in a row end the sign-in with the last one, rather than wait
+            // out the 15 minutes saying nothing after GitHub's page said the
+            // device was connected (magpie #723, commit 63c382bb). An OAuth
+            // error is an answer whatever its status: RFC 8628 sends
+            // `authorization_pending` as a 400, and github.com's 200 is its
+            // own habit.
+            guard let polled = (try? JSONSerialization.jsonObject(with: pollBody)) as? [String: Any],
+                  pollResponse.statusCode < 400 || polled["error"] is String
             else {
                 misses += 1
                 if misses >= 5 {

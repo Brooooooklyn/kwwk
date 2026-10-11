@@ -154,6 +154,21 @@ struct OAuthLoginShapeTests {
         )
         #expect(creds.refresh == "ghp_access")
 
+        // An OAuth error on a 400, as RFC 8628 sends it, is an answer: any
+        // number of them is still the user taking their time.
+        let pending = SequentialStubClient()
+        pending.queue.append(device)
+        for _ in 0..<6 { pending.queue.append((status: 400, body: #"{"error":"authorization_pending"}"#)) }
+        pending.queue.append((status: 200, body: #"{"access_token":"ghp_access"}"#))
+        pending.queue.append((
+            status: 200,
+            body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
+        ))
+        let waited = try await OAuthLogin.loginGitHubCopilot(
+            clientID: "test-client", callbacks: callbacks, client: pending, pollSleep: { _ in }
+        )
+        #expect(waited.refresh == "ghp_access")
+
         // Five in a row is not a hiccup.
         let down = SequentialStubClient()
         down.queue.append(device)
