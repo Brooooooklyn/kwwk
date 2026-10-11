@@ -76,6 +76,11 @@ public enum ModelsCatalog {
             let devin = loadBundledArray("devin-models")
             if !devin.isEmpty { out["devin"] = devin }
         }
+        // WorkBuddy's two plans ship magpie's written-in lists, one resource
+        // for each build (`WorkBuddyModels`).
+        for provider in ["workbuddy", "workbuddy-ai"] where out[provider] == nil {
+            out[provider] = loadBundledArray("\(provider)-models")
+        }
         return out
     }
 

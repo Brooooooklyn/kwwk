@@ -281,6 +281,10 @@ public func registerStored(
         return await registerCursor(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "devin":
         return await registerDevin(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case WorkBuddySite.china.id, WorkBuddySite.international.id:
+        return await registerWorkBuddy(
+            site: WorkBuddySite.site(id: storeId)!, manager: manager, modelOverride: modelOverride, primeToken: primeToken
+        )
     case "kimi-coding":
         return await registerKimiCoding(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "xai":

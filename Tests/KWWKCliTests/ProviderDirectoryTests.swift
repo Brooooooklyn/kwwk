@@ -23,6 +23,8 @@ struct ProviderDirectoryTests {
         ("github-copilot", "github-copilot", "github-copilot", "GitHub Copilot", nil),
         ("cursor", "cursor", "cursor", "Cursor", nil),
         ("devin", "devin", "devin", "Devin", nil),
+        ("workbuddy", "workbuddy", "workbuddy", "WorkBuddy", nil),
+        ("workbuddy-ai", "workbuddy-ai", "workbuddy-ai", "WorkBuddy AI", nil),
         ("kimi-coding", "kimi-coding", "kimi-coding", "Kimi For Coding", nil),
         ("xai", "xai", "xai", "xAI Grok", nil),
         ("zai", "zai", "zai", "Z.AI Coding Plan", nil),

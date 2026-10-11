@@ -45,6 +45,16 @@ let loginProviders: [LoginEntry] = [
         flow: .oauth
     ),
     LoginEntry(
+        id: "workbuddy",
+        display: "WorkBuddy (Tencent CodeBuddy plan, China build)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "workbuddy-ai",
+        display: "WorkBuddy AI (CodeBuddy plan, international build)",
+        flow: .oauth
+    ),
+    LoginEntry(
         id: "kimi-coding",
         display: "Kimi For Coding (Moonshot coding plan)",
         flow: .oauth
@@ -292,6 +302,10 @@ func runOAuthFlow(providerId: String) async throws {
             return try await OAuthLogin.loginCursor(callbacks: callbacks)
         case "devin":
             return try await OAuthLogin.loginDevin(callbacks: callbacks)
+        case WorkBuddySite.china.id:
+            return try await OAuthLogin.loginWorkBuddy(site: .china, callbacks: callbacks)
+        case WorkBuddySite.international.id:
+            return try await OAuthLogin.loginWorkBuddy(site: .international, callbacks: callbacks)
         case "kimi-coding":
             return try await OAuthLogin.loginKimiCoding(callbacks: callbacks)
         case "xai":

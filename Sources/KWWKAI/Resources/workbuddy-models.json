@@ -1,0 +1,494 @@
+[
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 168000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "auto",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Auto",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "hy4-preview-f",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Hy4 preview",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": null,
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": null
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 192000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "hy3",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Hy3",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": null
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 192000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "hy3-x",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Hy3-X",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": null
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "deepseek-v4.1-flash",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Deepseek-V4.1-Flash",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5.3",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "GLM-5.3",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": null
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5.3-flash",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "GLM-5.3-Flash",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": "max",
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": null
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5.2",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "GLM-5.2",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": null,
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": "xhigh"
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5.1",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "GLM-5.1",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5v-turbo",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "GLM-5v-Turbo",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 512000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "minimax-m3",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "MiniMax-M3",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "kimi-k3-1",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Kimi-K3",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": "low",
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": null,
+      "xhigh": "xhigh"
+    }
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 256000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "kimi-k2.7",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Kimi-K2.7-Code",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 256000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "kimi-k2.6",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Kimi-K2.6",
+    "provider": "workbuddy",
+    "reasoning": false
+  },
+  {
+    "api": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "compat": {
+      "maxTokensField": "max_tokens",
+      "supportsDeveloperRole": false,
+      "supportsLongCacheRetention": false,
+      "supportsReasoningEffort": true,
+      "supportsStore": false,
+      "supportsStrictMode": false,
+      "thinkingFormat": "openai"
+    },
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "deepseek-v4-pro",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 0,
+    "name": "Deepseek-V4-Pro",
+    "provider": "workbuddy",
+    "reasoning": true,
+    "thinkingLevelMap": {
+      "high": "high",
+      "low": null,
+      "max": null,
+      "medium": null,
+      "minimal": null,
+      "off": "none",
+      "xhigh": "xhigh"
+    }
+  }
+]
