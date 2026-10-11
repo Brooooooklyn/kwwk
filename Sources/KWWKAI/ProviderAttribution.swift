@@ -52,6 +52,8 @@ public enum ProviderAttribution {
         "qoder-cn": "Qoder CN",
         "together": "Together AI",
         "vercel-ai-gateway": "Vercel AI Gateway",
+        "workbuddy": "WorkBuddy",
+        "workbuddy-ai": "WorkBuddy AI",
         "xai": "xAI",
         "zai": "ZAI Coding Plan (Global)",
         "zai-coding-cn": "ZAI Coding Plan (China)",

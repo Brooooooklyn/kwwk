@@ -285,6 +285,10 @@ public func registerStored(
         return await registerKiro(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
     case "qoder", "qoder-cn":
         return await registerQoder(site: .of(storeId), manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case WorkBuddySite.china.id, WorkBuddySite.international.id:
+        return await registerWorkBuddy(
+            site: WorkBuddySite.site(id: storeId)!, manager: manager, modelOverride: modelOverride, primeToken: primeToken
+        )
     case "kimi-coding":
         return await registerKimiCoding(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "xai":

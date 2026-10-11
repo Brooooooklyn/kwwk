@@ -75,6 +75,8 @@ public actor OAuthManager {
             KiroOAuthProvider(),
             QoderOAuthProvider(site: .global),
             QoderOAuthProvider(site: .cn),
+            WorkBuddyOAuthProvider(site: .china),
+            WorkBuddyOAuthProvider(site: .international),
             KimiCodingOAuthProvider(),
             XaiOAuthProvider(),
         ]

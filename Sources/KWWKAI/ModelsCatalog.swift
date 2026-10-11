@@ -88,6 +88,11 @@ public enum ModelsCatalog {
         for site in QoderSite.all where out[site.id] == nil {
             out[site.id] = loadBundledArray("qoder-models").mapValues { QoderModels.placed($0, on: site) }
         }
+        // WorkBuddy's two plans ship magpie's written-in lists, one resource
+        // for each build (`WorkBuddyModels`).
+        for provider in ["workbuddy", "workbuddy-ai"] where out[provider] == nil {
+            out[provider] = loadBundledArray("\(provider)-models")
+        }
         return out
     }
 
