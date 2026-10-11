@@ -696,4 +696,230 @@ struct OpenAICompletionsTests {
         #expect(sawError)
         #expect(r.stopReason == .error)
     }
+
+    // MARK: - Relay stream shapes (magpie chat.go / chattidy.go)
+
+    private static func toolCalls(_ sse: String) async -> AssistantMessage {
+        let client = StubSSEClient(body: sse)
+        let provider = OpenAICompletionsProvider(client: client, defaultAPIKey: "sk-test")
+        let s = provider.stream(model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "x"))]), options: nil)
+        return await s.result()
+    }
+
+    private static func calls(_ message: AssistantMessage) -> [ToolCall] {
+        message.content.compactMap { if case .toolCall(let call) = $0 { return call } else { return nil } }
+    }
+
+    @Test("an empty finish_reason and an empty name or id on later fragments say nothing")
+    func emptyFinishReasonAndNames() async throws {
+        // WorkBuddy's shape: "finish_reason": "" until the reply ends, and
+        // "name": "" repeated on every argument fragment after the first.
+        let sse = """
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"","delta":{"content":"On"}}]}
+
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"","delta":{"content":" it"}}]}
+
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"","delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"calc","arguments":"{\\"a\\""}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"","delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":":1}"}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"tool_calls","delta":{}}]}
+
+        data: [DONE]
+
+        """
+        let client = StubSSEClient(body: sse)
+        let provider = OpenAICompletionsProvider(client: client, defaultAPIKey: "sk-test")
+        let s = provider.stream(model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "x"))]), options: nil)
+        var textEnds: [String] = []
+        var callEnds: [ToolCall] = []
+        for await event in s {
+            if case .textEnd(_, let content, _) = event { textEnds.append(content) }
+            if case .toolCallEnd(_, let call, _) = event { callEnds.append(call) }
+        }
+        let result = await s.result()
+        #expect(textEnds == ["On it"])
+        #expect(callEnds.count == 1)
+        #expect(result.stopReason == .toolUse)
+        let call = try #require(Self.calls(result).first)
+        #expect(call.id == "call_1")
+        #expect(call.name == "calc")
+        #expect(call.arguments == .object(["a": 1]))
+    }
+
+    @Test("a stream whose finish_reason is only ever empty still ends as an error")
+    func onlyEmptyFinishReason() async throws {
+        let sse = """
+        data: {"id":"c","choices":[{"index":0,"finish_reason":"","delta":{"content":"partial"}}]}
+
+        """
+        let result = await Self.toolCalls(sse)
+        #expect(result.stopReason == .error)
+        #expect(result.errorMessage == "Stream ended without finish_reason")
+    }
+
+    @Test("a new id on an open index starts the next call; a repeated id continues it")
+    func reusedToolCallIndex() async throws {
+        let sse = """
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"weather","arguments":"{\\"city\\""}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"arguments":":\\"Paris\\"}"}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"time","arguments":"{\\"zone\\""}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"CET\\"}"}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+        data: [DONE]
+
+        """
+        let calls = Self.calls(await Self.toolCalls(sse))
+        #expect(calls.map(\.id) == ["call_a", "call_b"])
+        #expect(calls.map(\.name) == ["weather", "time"])
+        #expect(calls.map(\.arguments) == [.object(["city": "Paris"]), .object(["zone": "CET"])])
+    }
+
+    @Test("a tool-call fragment with no index is read at its place in the list")
+    func toolCallWithoutIndex() async throws {
+        let sse = """
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_a","type":"function","function":{"name":"weather","arguments":"{}"}},{"id":"call_b","type":"function","function":{"name":"time","arguments":"{\\"zone\\""}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":":\\"CET\\"}"}}]}}]}
+
+        data: {"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+        data: [DONE]
+
+        """
+        let calls = Self.calls(await Self.toolCalls(sse))
+        #expect(calls.map(\.id) == ["call_a", "call_b"])
+        #expect(calls.map(\.arguments) == [.object([:]), .object(["zone": "CET"])])
+    }
+
+    @Test("Z.ai's overflow and review finish reasons are failures, classified",
+          arguments: [("model_context_window_exceeded", ProviderFailure.Category.contextOverflow),
+                      ("sensitive", ProviderFailure.Category.refusal)])
+    func zaiFinishReasons(reason: String, category: ProviderFailure.Category) async throws {
+        let sse = """
+        data: {"id":"c","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"\(reason)"}]}
+
+        data: [DONE]
+
+        """
+        let result = await Self.toolCalls(sse)
+        #expect(result.stopReason == .error)
+        #expect(result.failure?.rawStopReason == reason)
+        #expect(result.failure?.category == category)
+    }
+
+    // MARK: - Vendor tool-schema and sampling rules
+
+    private static func parameters(_ body: [String: Any]) -> [String: Any]? {
+        let tools = body["tools"] as? [[String: Any]]
+        return (tools?.first?["function"] as? [String: Any])?["parameters"] as? [String: Any]
+    }
+
+    @Test("xAI gets a tool's root union folded to an object; other endpoints get it as sent")
+    func xaiRootUnionFolded() throws {
+        let union: JSONValue = .object(["anyOf": .array([
+            .object(["type": "object", "properties": .object(["a": .object(["type": "string"])]), "required": .array(["a"])]),
+            .object(["type": "object", "properties": .object(["b": .object(["type": "integer"])])]),
+        ])])
+        let context = Context(
+            messages: [.user(UserMessage(text: "hi"))],
+            tools: [Tool(name: "update", description: "d", parameters: union)]
+        )
+        var xai = Self.model
+        xai.provider = "xai"
+        xai.baseURL = "https://api.x.ai/v1"
+        let folded = try #require(Self.parameters(
+            try OpenAICompletionsProvider.encodeBodyDict(model: xai, context: context, options: nil)))
+        #expect(folded["anyOf"] == nil)
+        #expect(folded["type"] as? String == "object")
+        #expect(Set((folded["properties"] as? [String: Any] ?? [:]).keys) == ["a", "b"])
+
+        let untouched = try #require(Self.parameters(
+            try OpenAICompletionsProvider.encodeBodyDict(model: Self.model, context: context, options: nil)))
+        #expect(untouched["anyOf"] != nil)
+    }
+
+    @Test("Moonshot gets an untyped enum or const with the type its values have")
+    func moonshotTypedEnums() throws {
+        // #886's shape: cua-driver's kinds, whose items are {"enum": [...]}.
+        let schema: JSONValue = .object([
+            "type": "object",
+            "properties": .object([
+                "kinds": .object(["anyOf": .array([
+                    .object(["type": "array", "items": .object(["enum": .array(["text", "icon"])])]),
+                    .object(["type": "null"]),
+                ])]),
+                "level": .object(["enum": .array([1, 2])]),
+                "ratio": .object(["enum": .array([1, .double(2.5)])]),
+                "flag": .object(["const": true]),
+                "mixed": .object(["enum": .array(["a", 1])]),
+                "nullable": .object(["enum": .array(["a", .null])]),
+                "typed": .object(["type": "string", "enum": .array(["a"])]),
+            ]),
+        ])
+        let context = Context(
+            messages: [.user(UserMessage(text: "hi"))],
+            tools: [Tool(name: "parse", description: "d", parameters: schema)]
+        )
+        var moonshot = Self.model
+        moonshot.provider = "moonshotai"
+        moonshot.baseURL = "https://api.moonshot.ai/v1"
+        let sent = try #require(Self.parameters(
+            try OpenAICompletionsProvider.encodeBodyDict(model: moonshot, context: context, options: nil)))
+        let properties = try #require(sent["properties"] as? [String: [String: Any]])
+        let branches = try #require(properties["kinds"]?["anyOf"] as? [[String: Any]])
+        #expect((branches.first?["items"] as? [String: Any])?["type"] as? String == "string")
+        #expect(properties["level"]?["type"] as? String == "integer")
+        #expect(properties["ratio"]?["type"] as? String == "number")
+        #expect(properties["flag"]?["type"] as? String == "boolean")
+        #expect(properties["mixed"]?["type"] == nil)
+        #expect(properties["nullable"]?["type"] == nil)
+        #expect(properties["typed"]?["type"] as? String == "string")
+
+        let other = try #require(Self.parameters(
+            try OpenAICompletionsProvider.encodeBodyDict(model: Self.model, context: context, options: nil)))
+        let otherProperties = try #require(other["properties"] as? [String: [String: Any]])
+        #expect(otherProperties["level"]?["type"] == nil)
+    }
+
+    @Test("Kimi models that lock their temperature are not sent the caller's",
+          arguments: [("moonshotai", "https://api.moonshot.ai/v1", "kimi-k2.6", false),
+                      ("moonshotai", "https://api.moonshot.ai/v1", "kimi-k2.5", false),
+                      ("moonshotai-cn", "https://api.moonshot.cn/v1", "kimi-k3", false),
+                      ("moonshotai", "https://api.moonshot.ai/v1", "kimi-k2-0905-preview", true),
+                      ("moonshotai", "https://api.moonshot.ai/v1", "kimi-k2-thinking", true),
+                      ("moonshotai", "https://api.moonshot.ai/v1", "moonshot-v1-8k", true),
+                      ("moonshotai", "https://api.moonshot.ai/v1", "kimi-latest", true),
+                      ("openrouter", "https://openrouter.ai/api/v1", "moonshotai/kimi-k2.6", true)])
+    func kimiLockedTemperature(provider: String, baseURL: String, id: String, sent: Bool) throws {
+        var model = Self.model
+        model.provider = provider
+        model.baseURL = baseURL
+        model.id = id
+        let body = try OpenAICompletionsProvider.encodeBodyDict(
+            model: model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(temperature: 0.1)
+        )
+        #expect((body["temperature"] != nil) == sent)
+    }
+
+    @Test("every bundled kimi-coding model replays unsigned thinking, and K3-256K is priced as K3")
+    func kimiCodingCatalogRows() throws {
+        for id in ["k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"] {
+            let model = try #require(ModelsCatalog.model(provider: "kimi-coding", id: id))
+            #expect(model.compat?.allowEmptySignature == true, "\(id)")
+            #expect(model.compat?.forceAdaptiveThinking == true, "\(id)")
+        }
+        let k3 = try #require(ModelsCatalog.model(provider: "kimi-coding", id: "k3"))
+        let wide = try #require(ModelsCatalog.model(provider: "kimi-coding", id: "k3-256k"))
+        #expect(wide.cost == k3.cost)
+    }
 }
