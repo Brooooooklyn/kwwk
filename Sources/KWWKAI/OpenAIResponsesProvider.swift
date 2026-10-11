@@ -99,10 +99,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         var nativeContext = context
         // Compaction sends the full tool list; in-place tool changes would
         // otherwise leave later tools out of both `tools` and `input`.
+        let refusedSeals = sessions.session(for: options?.sessionId).refusedSeals
         nativeContext.messages = TransformMessages.normalize(
-            TranscriptTools.withoutSystemMessages(context.messages), model: model
+            Self.unsealingRefusedCompactions(TranscriptTools.withoutSystemMessages(context.messages),
+                                             refusedSeals: refusedSeals), model: model
         )
-        let input = Self.encodeInput(context: nativeContext, model: model)
+        let input = Self.encodeInput(context: nativeContext, model: model, refusedSeals: refusedSeals)
         var body: [String: JSONValue] = [
             "model": .string(model.id),
             "input": .array(input),
@@ -112,7 +114,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             // ChatGPT subscriptions expose V2 on /responses, not V1's
             // /responses/compact. Reuse the live request serializer.
             let request = try Self.makeRequest(model: model, context: nativeContext,
-                                               options: options, bodyOverrides: bodyOverrides)
+                                               options: options, bodyOverrides: bodyOverrides,
+                                               refusedSeals: refusedSeals)
             body = request.fields
             body["input"] = .array(input + [["type": "compaction_trigger"]])
             body["store"] = false
@@ -163,6 +166,35 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         context: Context,
         options: StreamOptions?
     ) async {
+        let session = sessions.session(for: options?.sessionId)
+        // A refusal of replayed sealed items is answered once by asking again
+        // without them (see `isForeignSeal`).
+        if await attempt(out: out, model: model, context: context, options: options,
+                         session: session, holdSealRefusal: true) == .sealsRefused {
+            await options?.emitVerbose(
+                source: "openai.responses",
+                message: "replayed encrypted content was refused; asking again without it"
+            )
+            _ = await attempt(out: out, model: model, context: context, options: options,
+                              session: session, holdSealRefusal: false)
+        }
+    }
+
+    private enum AttemptResult {
+        case finished
+        /// Nothing reached `out`; the seals of the request are now recorded
+        /// on the session and the next request leaves them out.
+        case sealsRefused
+    }
+
+    private func attempt(
+        out: AssistantMessageStream,
+        model: Model,
+        context: Context,
+        options: StreamOptions?,
+        session: OpenAIResponsesSessionState,
+        holdSealRefusal: Bool
+    ) async -> AttemptResult {
         let url = urlBuilder(model, options, defaultBaseURL)
 
         let request: OpenAIResponsesRequest
@@ -171,16 +203,19 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 model: model,
                 context: context,
                 options: options,
-                bodyOverrides: bodyOverrides
+                bodyOverrides: bodyOverrides,
+                refusedSeals: session.refusedSeals
             )
         } catch {
             let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
-            return
+            return .finished
         }
 
-        let session = sessions.session(for: options?.sessionId)
+        // Only a request that carries seals can be asked again without them.
+        let seals = Self.seals(in: request.input)
+        let holdSealRefusal = holdSealRefusal && !seals.isEmpty
         let transport = options?.transport ?? .auto
         if transport != .sse,
            let webSocketClient,
@@ -198,11 +233,15 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 out: out,
                 model: model,
                 options: options,
-                session: session
+                session: session,
+                holdSealRefusal: holdSealRefusal
             )
             switch wsResult {
             case .completed:
-                return
+                return .finished
+            case .sealsRefused:
+                session.refuse(seals: seals)
+                return .sealsRefused
             case .fallbackToHTTP:
                 await options?.emitVerbose(
                     source: "openai.responses.http",
@@ -210,7 +249,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 )
                 break
             case .failedWithoutFallback:
-                return
+                return .finished
             }
         } else if transport != .sse, session.webSocketDisabled {
             await options?.emitVerbose(
@@ -219,22 +258,30 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             )
         }
 
-        await runHTTP(
+        if await runHTTP(
             url: url,
             request: request,
             out: out,
             model: model,
-            options: options
-        )
+            options: options,
+            holdSealRefusal: holdSealRefusal
+        ) {
+            session.refuse(seals: seals)
+            return .sealsRefused
+        }
+        return .finished
     }
 
+    /// Returns true when the request was refused over its sealed items and
+    /// `holdSealRefusal` kept that refusal off `out`.
     private func runHTTP(
         url: URL,
         request: OpenAIResponsesRequest,
         out: AssistantMessageStream,
         model: Model,
-        options: StreamOptions?
-    ) async {
+        options: StreamOptions?,
+        holdSealRefusal: Bool
+    ) async -> Bool {
         let headers = makeHeaders(options: options, accept: "text/event-stream")
         await options?.emitVerbose(
             source: "openai.responses.http",
@@ -243,25 +290,35 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         )
 
         do {
-            let (response, stream) = try await client.stream(
+            var (response, stream) = try await client.stream(
                 url: url, method: "POST", headers: headers, body: try request.data(),
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
-                let failure = await ProviderFailure.http(response, body: stream)
+                let failure = Self.readingDetail(await ProviderFailure.http(response, body: stream))
+                if holdSealRefusal, Self.isForeignSeal(failure) { return true }
                 let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
-                return
+                return false
+            }
+            if let failure = try await Self.notAnEventStream(response, body: &stream) {
+                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                out.push(.error(reason: .error, error: msg))
+                out.end(msg)
+                return false
             }
             let state = OpenAIResponsesState(api: api, provider: model.provider, modelId: model.id)
             state.signal = options?.cancellation
             // Bridge external cancellation to the in-flight request (see
             // AnthropicProvider.run for the rationale).
-            let driveTask = Task { _ = try await self.drive(events: parseSSE(bytes: stream), out: out, state: state) }
+            let driveTask = Task {
+                try await self.drive(events: parseSSE(bytes: stream), out: out, state: state,
+                                     holdSealRefusal: holdSealRefusal).sealsRefused
+            }
             let cancelReg = options?.cancellation?.onCancel { _ in driveTask.cancel() }
             defer { cancelReg?.cancel() }
-            try await driveTask.value
+            return try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
                 let aborted = Self.makeAborted(api: api, model: model)
@@ -272,6 +329,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
+            return false
         }
     }
 
@@ -279,6 +337,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         case completed
         case fallbackToHTTP
         case failedWithoutFallback
+        case sealsRefused
     }
 
     private func runWebSocket(
@@ -288,7 +347,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         out: AssistantMessageStream,
         model: Model,
         options: StreamOptions?,
-        session: OpenAIResponsesSessionState
+        session: OpenAIResponsesSessionState,
+        holdSealRefusal: Bool = false
     ) async -> WebSocketRunResult {
         var headers = makeHeaders(options: options, accept: nil)
         // Match Codex's WebSocket transport: the Responses WebSocket beta
@@ -411,8 +471,15 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 out: out,
                 state: state,
                 progress: progress,
-                finishOnStreamEnd: false
+                finishOnStreamEnd: false,
+                holdSealRefusal: holdSealRefusal
             )
+            if result.sealsRefused {
+                // The refused request must not stay the baseline the next
+                // one is sent as an increment of.
+                session.resetWebSocketState()
+                return .sealsRefused
+            }
             if result.completed, let responseId = result.message.responseId {
                 session.recordCompletedResponse(
                     responseId: responseId,
@@ -527,6 +594,17 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         if let accept {
             headers["accept"] = accept
         }
+        // The ChatGPT backend finds a conversation's prompt cache by its
+        // session headers, not by the body's `prompt_cache_key`. Measured
+        // 2026-10-11 on a 5.4K-token prompt with 13 tools: key in the body
+        // only, cached 0 on three requests; with these headers 0, 4608, 4608
+        // (magpie #1473 saw the same). The names are the ones Codex CLI
+        // 0.162 sends; the WebSocket handshake takes them too.
+        if api == "chatgpt-codex", (options?.cacheRetention ?? .short) != .none,
+           let sid = OpenAICompletionsProvider.clampOpenAIPromptCacheKey(options?.sessionId) {
+            headers["session-id"] = sid
+            headers["thread-id"] = sid
+        }
         for (k, v) in extraHeaders { mergeHeader(&headers, name: k, value: v, append: false) }
         if let auth = options?.resolvedAuth {
             applyResolvedAuth(auth, to: &headers) { headers, name, value in
@@ -554,7 +632,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         out: AssistantMessageStream,
         state: OpenAIResponsesState,
         progress: WebSocketStreamProgress? = nil,
-        finishOnStreamEnd: Bool = true
+        finishOnStreamEnd: Bool = true,
+        holdSealRefusal: Bool = false
     ) async throws -> OpenAIResponsesDriveResult where S.Element == SSEMessage {
         var emittedStart = false
         for try await sse in events {
@@ -775,18 +854,29 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 }()
                 var err = state.asError(text: text)
                 err.failure = ProviderFailure.payload(obj["response"] ?? .object(obj), fallback: text)
+                if holdSealRefusal, !emittedStart, let failure = err.failure, Self.isForeignSeal(failure) {
+                    return OpenAIResponsesDriveResult(message: err, completed: false, sealsRefused: true)
+                }
                 out.push(.error(reason: .error, error: err))
                 out.end(err)
                 return OpenAIResponsesDriveResult(message: err, completed: false)
 
             case "error":
+                // Two shapes: the error nested, as the ChatGPT backend sends
+                // it ({"type":"error","error":{…},"status":400}, measured over
+                // WebSocket 2026-10-11), and the API's own with code and
+                // message at the top level.
                 let text: String = {
                     if case .object(let err) = obj["error"] ?? .null,
                        case .string(let m) = err["message"] ?? .null { return m }
-                    return "OpenAI Responses WebSocket error"
+                    if case .string(let m) = obj["message"] ?? .null { return m }
+                    return "OpenAI Responses error"
                 }()
                 var err = state.asError(text: text)
                 err.failure = ProviderFailure.payload(obj["response"] ?? .object(obj), fallback: text)
+                if holdSealRefusal, !emittedStart, let failure = err.failure, Self.isForeignSeal(failure) {
+                    return OpenAIResponsesDriveResult(message: err, completed: false, sealsRefused: true)
+                }
                 out.push(.error(reason: .error, error: err))
                 out.end(err)
                 return OpenAIResponsesDriveResult(message: err, completed: false)
@@ -850,12 +940,138 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         out.end(message)
     }
 
+    // MARK: - Refused seals
+
+    /// OpenAI and the ChatGPT backend refuse reasoning or a compaction that
+    /// another account or organisation sealed, and anything altered since:
+    /// 400 `invalid_encrypted_content`, "The encrypted content for item rs_…
+    /// could not be verified. Reason: Encrypted content could not be
+    /// decrypted or parsed." (measured 2026-10-11 over HTTP and, as an
+    /// `error` event with `status: 400`, over WebSocket). xAI words it "Could
+    /// not decrypt the provided encrypted_content" (magpie affinity.go). The
+    /// items ride on every later request, so the conversation stays refused
+    /// until they are left out (magpie #63).
+    static func isForeignSeal(_ failure: ProviderFailure) -> Bool {
+        if let status = failure.httpStatus, status != 400 { return false }
+        if failure.providerCode == "invalid_encrypted_content" { return true }
+        return failure.message.range(
+            of: #"invalid_encrypted_content|encrypted[ _]content.{0,80}could not be (verified|decrypted)|could not (decrypt|verify).{0,40}encrypted[ _]content"#,
+            options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// What a sealed input item is remembered by.
+    private static func seal(of item: JSONValue) -> String? {
+        guard case .string(let type) = item["type"],
+              ["reasoning", "compaction", "compaction_summary"].contains(type),
+              case .string(let sealed) = item["encrypted_content"], !sealed.isEmpty else { return nil }
+        return SHA256.hash(data: Data(sealed.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    fileprivate static func seals(in input: [JSONValue]) -> Set<String> {
+        Set(input.compactMap(seal(of:)))
+    }
+
+    private static func isRefused(_ item: JSONValue, _ refusedSeals: Set<String>) -> Bool {
+        guard !refusedSeals.isEmpty, let seal = seal(of: item) else { return false }
+        return refusedSeals.contains(seal)
+    }
+
+    /// A refused compaction gives way to the messages it was made from (or
+    /// its recap when none were kept), as it does for a foreign provider.
+    private static func unsealingRefusedCompactions(_ messages: [Message], refusedSeals: Set<String>) -> [Message] {
+        guard !refusedSeals.isEmpty else { return messages }
+        return messages.flatMap { message -> [Message] in
+            guard case .user(let user) = message, let native = user.nativeCompaction,
+                  native.items.contains(where: { isRefused($0, refusedSeals) }) else { return [message] }
+            return TransformMessages.expandNativeCompaction([message])
+        }
+    }
+
+    // MARK: - Replies that are not the API's
+
+    /// The ChatGPT backend's own refusals are `{"detail":"…"}` — 400
+    /// "Stream must be set to true", "The 'gpt-5.4' model is not supported
+    /// when using Codex with a ChatGPT account." (measured 2026-10-11) — or
+    /// `{"detail":{"message":…,"code":…}}`. Show the sentence, not the JSON.
+    static func readingDetail(_ failure: ProviderFailure) -> ProviderFailure {
+        guard case .object(let root)? = parseJSONObject(failure.message) else { return failure }
+        var failure = failure
+        switch root["detail"] {
+        case .string(let text) where !text.isEmpty:
+            failure.message = text
+        case .object(let detail):
+            guard case .string(let text) = detail["message"], !text.isEmpty else { return failure }
+            failure.message = text
+            if failure.providerCode == nil, case .string(let code) = detail["code"] { failure.providerCode = code }
+        default: break
+        }
+        return failure
+    }
+
+    /// A 200 that says it is a web page or JSON and begins as one is not an
+    /// event stream: a relay's sign-in or challenge page, or an error sent
+    /// as a plain body. Parsed as SSE it yields no event and reads as a
+    /// dropped stream (magpie #1012: a relay answered Codex 200 text/html).
+    /// Name what came back instead. Anything else, a mislabelled stream
+    /// included, is handed back untouched in `body`.
+    static func notAnEventStream(
+        _ response: HTTPURLResponse, body: inout AsyncThrowingStream<Data, Error>
+    ) async throws -> ProviderFailure? {
+        let type = (response.value(forHTTPHeaderField: "content-type") ?? "").lowercased()
+        let page = type.hasPrefix("text/html")
+        guard page || type.contains("json") else { return nil }
+        var head: [Data] = []
+        var bytes = Data()
+        let opening = UInt8(ascii: page ? "<" : "{")
+        let blank: Set<UInt8> = [0x20, 0x09, 0x0A, 0x0D, 0xEF, 0xBB, 0xBF]
+        for try await chunk in body {
+            head.append(chunk)
+            bytes.append(chunk)
+            if bytes.count >= 4096 { break }
+            // A mislabelled stream shows in its first byte; reading on would
+            // hold its events back until 4K of them had arrived.
+            if let first = bytes.first(where: { !blank.contains($0) }), first != opening { break }
+        }
+        let text = String(decoding: bytes.prefix(4096), as: UTF8.self)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(["\u{FEFF}"]))
+        if page, text.hasPrefix("<") {
+            let title = text.range(of: #"(?<=<title>)[^<]{1,200}"#, options: [.regularExpression, .caseInsensitive])
+                .map { ": " + text[$0].trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+            // A challenge or an edge's error page can pass; the dropped
+            // stream it used to read as was retried too.
+            return ProviderFailure(message: "The server answered HTTP 200 with a web page, not an event stream\(title)",
+                                   shouldRetry: true)
+        }
+        if !page, text.hasPrefix("{") {
+            if case .object(let root)? = parseJSONObject(text), root["error"] != nil || root["detail"] != nil {
+                return readingDetail(ProviderFailure.payload(.object(root), fallback: text))
+            }
+            return ProviderFailure(message: "The server answered HTTP 200 with JSON, not an event stream",
+                                   shouldRetry: false)
+        }
+        let rest = body
+        let buffered = head
+        body = AsyncThrowingStream { continuation in
+            let task = Task {
+                for chunk in buffered { continuation.yield(chunk) }
+                do {
+                    for try await chunk in rest { continuation.yield(chunk) }
+                    continuation.finish()
+                } catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        return nil
+    }
+
     private static func makeRequest(
         model: Model, context: Context, options: StreamOptions?,
-        bodyOverrides: [String: JSONValue] = [:]
+        bodyOverrides: [String: JSONValue] = [:],
+        refusedSeals: Set<String> = []
     ) throws -> OpenAIResponsesRequest {
         var context = context
-        context.messages = TransformMessages.normalize(context.messages, model: model)
+        context.messages = TransformMessages.normalize(
+            unsealingRefusedCompactions(context.messages, refusedSeals: refusedSeals), model: model)
         // Tools added mid-conversation are loaded in place (pi
         // openai-responses-shared.ts) so the cached prefix, which starts with
         // the top-level tool list, survives the change. Removals and
@@ -875,7 +1091,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             "input": .array(encodeInput(
                 context: context,
                 model: model,
-                anchorsToolChanges: toolChanges.anchorsChanges
+                anchorsToolChanges: toolChanges.anchorsChanges,
+                refusedSeals: refusedSeals
             )),
         ]
         if let maxTokens = OutputTokenPolicy.effectiveLimit(
@@ -1055,7 +1272,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     private static func encodeInput(
         context: Context,
         model: Model,
-        anchorsToolChanges: Bool = false
+        anchorsToolChanges: Bool = false,
+        refusedSeals: Set<String> = []
     ) -> [JSONValue] {
         var out: [JSONValue] = []
         let initialDeclaration = TranscriptTools.initialDeclarationIndex(in: context.messages)
@@ -1096,7 +1314,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                     for block in a.content {
                         guard case .thinking(let th) = block,
                               let sig = th.thinkingSignature, !sig.isEmpty,
-                              let item = Self.parseReasoningItem(sig) else { continue }
+                              let item = Self.parseReasoningItem(sig),
+                              !Self.isRefused(.object(item), refusedSeals) else { continue }
                         out.append(.object(item))
                     }
                 }
@@ -1273,6 +1492,8 @@ private struct OpenAIResponsesDriveResult: Sendable {
     var message: AssistantMessage
     var completed: Bool
     var endedWithoutTerminalEvent = false
+    /// The request was refused over its sealed items and nothing was pushed.
+    var sealsRefused = false
 }
 
 private struct WebSocketSSESequence: AsyncSequence, Sendable {
@@ -1408,6 +1629,15 @@ private final class OpenAIResponsesSessionState: @unchecked Sendable {
     private var disabled = false
     private var webSocketInFlight = false
     private var closed = false
+    private var refused: Set<String> = []
+
+    /// Sealed items this conversation was refused over; later requests leave
+    /// them out up front instead of being refused and asked again each turn.
+    var refusedSeals: Set<String> { lock.withLock { refused } }
+
+    func refuse(seals: Set<String>) {
+        lock.withLock { refused.formUnion(seals) }
+    }
 
     deinit {
         close()
@@ -1728,11 +1958,18 @@ final class OpenAIResponsesState: @unchecked Sendable {
     func applyUsage(_ obj: [String: JSONValue]) {
         if case .int(let v) = obj["input_tokens"] ?? .null { usage.input = v }
         if case .int(let v) = obj["output_tokens"] ?? .null { usage.output = v }
+        // `input_tokens` is the whole prompt: both cache figures are part of
+        // it. The ChatGPT backend reports `cache_write_tokens` beside
+        // `cached_tokens` and `reasoning_tokens` under the output details
+        // (measured 2026-10-11); reasoning stays inside `output`.
         if case .object(let details) = obj["input_tokens_details"] ?? .null {
-            if case .int(let v) = details["cached_tokens"] ?? .null {
-                usage.cacheRead = v
-                usage.input = max(0, usage.input - v)
-            }
+            if case .int(let v) = details["cached_tokens"] ?? .null { usage.cacheRead = v }
+            if case .int(let v) = details["cache_write_tokens"] ?? .null { usage.cacheWrite = v }
+            usage.input = max(0, usage.input - usage.cacheRead - usage.cacheWrite)
+        }
+        if case .object(let details) = obj["output_tokens_details"] ?? .null,
+           case .int(let v) = details["reasoning_tokens"] ?? .null {
+            usage.reasoning = v
         }
         usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
     }
