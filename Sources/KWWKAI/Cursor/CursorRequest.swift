@@ -36,9 +36,21 @@ enum CursorRequestBuilder {
         let activeIndex = activeUserMessageIndex(context.messages)
 
         let turns = buildTurns(context.messages, activeIndex: activeIndex, blobStore: blobStore)
-        let rootPromptIds = buildRootPromptIds(
+        var rootPromptIds = buildRootPromptIds(
             context.messages, activeIndex: activeIndex, systemId: systemId, blobStore: blobStore
         )
+        // The server puts its own system prompt in place of the first entry
+        // and shows the model the client's rules (how the system prompt
+        // reaches it, see `encodeRequestContextResult`) in a user message it
+        // writes only when the conversation has no messages yet. A request
+        // that carries history therefore has to carry that message itself:
+        // without it a model asked on the second turn for a word its system
+        // prompt gave it answered that it knew none (measured 2026-10-11).
+        if rootPromptIds.count > 1, let prompt = context.systemPrompt, !prompt.isEmpty {
+            rootPromptIds.insert(
+                storeJSONBlob(["role": "user", "content": rulesMessage(prompt)], in: blobStore), at: 1
+            )
+        }
 
         // Preserve cached non-history checkpoint fields (todos, file states,
         // summary archives, …) only while the system prompt is unchanged.
@@ -76,6 +88,22 @@ enum CursorRequestBuilder {
               case .user(let u) = messages[index] else { return nil }
         guard !userText(u).isEmpty || !userImages(u).isEmpty else { return nil }
         return index
+    }
+
+    /// The system prompt as the server words a user rule in the message it
+    /// opens a conversation with.
+    private static func rulesMessage(_ systemPrompt: String) -> String {
+        """
+        <rules>
+        The rules section has a number of possible rules/memories/context that you should consider. \
+        In each subsection, we provide instructions about what information the subsection contains \
+        and how you should consider/follow the contents of the subsection.
+
+        <user_rules description="These are rules set by the user that you should follow if appropriate.">
+        <user_rule>\(systemPrompt)</user_rule>
+        </user_rules>
+        </rules>
+        """
     }
 
     // MARK: - Content extraction
@@ -130,12 +158,28 @@ enum CursorRequestBuilder {
     /// `rootPromptMessagesJson` blob IDs: the system prompt followed by one
     /// JSON blob per prior message in Cursor's Vercel-AI-SDK-shaped format.
     /// The active user message is excluded — it rides in the action.
+    ///
+    /// Tool use is written the way Cursor's own server writes it into this
+    /// field (read back from its `set_blob` writes, 2026-10-11): an assistant
+    /// message per step whose content ends in `tool-call` parts, then one
+    /// `role: "tool"` message per call carrying its `tool-result`. Sent as
+    /// plain assistant text plus "[Tool Result]" user messages, a model asked
+    /// on the next turn which tools it had run answered that it could not see
+    /// any; in this shape it listed each call with its arguments.
     private static func buildRootPromptIds(
         _ messages: [Message], activeIndex: Int?, systemId: Data, blobStore: CursorBlobStore
     ) -> [Data] {
+        let history = messages.prefix(activeIndex ?? messages.count)
+        var results: [String: ToolResultMessage] = [:]
+        for case .toolResult(let tr) in history where results[tr.toolCallId] == nil {
+            results[tr.toolCallId] = tr
+        }
+        // Results already written beside their call; any other result has no
+        // call in this history and stays readable as text.
+        var paired: Set<String> = []
+
         var ids: [Data] = [systemId]
-        for (i, message) in messages.enumerated() {
-            if i == activeIndex { break }
+        for message in history {
             switch message {
             case .user(let u):
                 var parts: [[String: Any]] = []
@@ -147,13 +191,43 @@ enum CursorRequestBuilder {
                 if parts.isEmpty { continue }
                 ids.append(storeJSONBlob(["role": "user", "content": parts], in: blobStore))
             case .assistant(let a):
-                let text = assistantText(a)
-                if text.isEmpty { continue }
-                ids.append(storeJSONBlob(
-                    ["role": "assistant", "content": [["type": "text", "text": text]]],
-                    in: blobStore
-                ))
+                var parts: [[String: Any]] = []
+                var calls: [ToolCall] = []
+                // A step ends where text follows its calls: the calls' results
+                // go between the two assistant messages, as the server has them.
+                func flush() {
+                    if !parts.isEmpty {
+                        ids.append(storeJSONBlob(["role": "assistant", "content": parts], in: blobStore))
+                    }
+                    for call in calls {
+                        paired.insert(call.id)
+                        ids.append(storeJSONBlob(toolMessage(for: call, result: results[call.id]), in: blobStore))
+                    }
+                    parts = []
+                    calls = []
+                }
+                for block in a.content {
+                    switch block {
+                    case .text(let t):
+                        if t.text.isEmpty { continue }
+                        if !calls.isEmpty { flush() }
+                        parts.append(["type": "text", "text": t.text])
+                    case .toolCall(let call):
+                        // One result per id: a repeated id would leave a call
+                        // with no result of its own.
+                        if paired.contains(call.id) || calls.contains(where: { $0.id == call.id }) { continue }
+                        parts.append([
+                            "type": "tool-call", "toolCallId": call.id, "toolName": call.name,
+                            "args": jsonObject(call.arguments),
+                        ])
+                        calls.append(call)
+                    default:
+                        continue
+                    }
+                }
+                flush()
             case .toolResult(let tr):
+                if paired.contains(tr.toolCallId) { continue }
                 let text = toolResultText(tr)
                 if text.isEmpty { continue }
                 let prefix = tr.isError ? "[Tool Error]" : "[Tool Result]"
@@ -166,6 +240,31 @@ enum CursorRequestBuilder {
             }
         }
         return ids
+    }
+
+    /// `{ role: "tool", content: [tool-result] }` for one call. Every call
+    /// gets one: a call left without a result (an aborted turn) is answered
+    /// as an error, since a conversation with an unanswered call is refused
+    /// by the model APIs behind Cursor.
+    private static func toolMessage(for call: ToolCall, result: ToolResultMessage?) -> [String: Any] {
+        let text = result.map(toolResultText) ?? "No result was recorded for this tool call."
+        var part: [String: Any] = [
+            "type": "tool-result", "toolCallId": call.id, "toolName": call.name,
+            "result": text, "experimental_content": [["type": "text", "text": text]],
+        ]
+        if result?.isError ?? true { part["isError"] = true }
+        return ["role": "tool", "content": [part], "id": call.id]
+    }
+
+    /// Tool-call arguments as a JSON object for `JSONSerialization`; anything
+    /// that is not an object (a truncated call) goes as `{}`.
+    private static func jsonObject(_ value: JSONValue) -> Any {
+        guard case .object = value,
+              let data = try? JSONEncoder().encode(value),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return [String: Any]()
+        }
+        return object
     }
 
     /// Serialize prior messages into `ConversationTurnStructure` blob IDs. Each
