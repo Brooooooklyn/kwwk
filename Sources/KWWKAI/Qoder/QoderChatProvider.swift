@@ -154,7 +154,13 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             guard let envelope = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any] else {
                 return true
             }
-            let inner = envelope["body"] as? String ?? ""
+            // The chunk rides as JSON text; one sent as an object reads the
+            // same (magpie reads either).
+            var inner = envelope["body"] as? String ?? ""
+            if let object = envelope["body"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: object) {
+                inner = String(decoding: data, as: UTF8.self)
+            }
             if let status = Self.int(envelope["statusCodeValue"]), status != 200 {
                 throw Self.failure(status: status, body: Data((inner.isEmpty ? payload : inner).utf8))
             }

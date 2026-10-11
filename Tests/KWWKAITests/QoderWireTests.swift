@@ -99,6 +99,10 @@ struct QoderCosyTests {
         #expect(payload["requestId"]?.count == 32)
         #expect(Set(payload.keys) == ["version", "requestId", "info", "cosyVersion", "ideVersion"])
         #expect(!String(decoding: decoded, as: UTF8.self).contains("jt-abc"))
+        // Byte for byte what Go's json.Marshal of the map writes: keys
+        // sorted, and the base64 `info` with its slashes bare.
+        #expect(String(decoding: decoded, as: UTF8.self) == "{\"cosyVersion\":\"1.1.49\",\"ideVersion\":\"\","
+            + "\"info\":\"\(payload["info"] ?? "")\",\"requestId\":\"\(payload["requestId"] ?? "")\",\"version\":\"v1\"}")
 
         // The account blob is AES-encrypted; its key rides RSA-encrypted.
         #expect(Data(base64Encoded: try #require(payload["info"]))?.count == 96)
@@ -130,6 +134,22 @@ struct QoderCosyTests {
             "Cosy-Version": "1.1.49",
             "Login-Version": "v2",
         ])
+    }
+
+    @Test("The payload never escapes the slashes of its base64 blob")
+    func payloadSlashes() throws {
+        let account = QoderAccount(uid: "uid-1", name: "N", email: "e@x", token: "jt-abc", machineId: "machine-test")
+        // The blob's bytes are random per request (its key is); enough
+        // envelopes hold a `/` that one escaped would show.
+        var sawSlash = false
+        for _ in 0..<8 {
+            let headers = try QoderCosy.headers(url: chatURL, account: account, body: "", timestamp: 1)
+            let payload = try #require(headers["Authorization"]).dropFirst("Bearer COSY.".count).split(separator: ".")[0]
+            let text = String(decoding: try #require(Data(base64Encoded: String(payload))), as: UTF8.self)
+            #expect(!text.contains("\\"))
+            sawSlash = sawSlash || text.contains("/")
+        }
+        #expect(sawSlash)
     }
 
     @Test("Every request of an account names the machine id its sign-in made, and this platform")

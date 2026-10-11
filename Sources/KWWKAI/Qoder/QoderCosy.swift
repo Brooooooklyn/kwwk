@@ -37,6 +37,8 @@ enum QoderCosy {
         let key = Array(compactUUID().utf8.prefix(16))
         let info = Data(try userBlob(account, key: key)).base64EncodedString()
         let wrappedKey = Data(QoderRSA.encrypt(key)).base64EncodedString()
+        // `info` is base64 and holds `/`: it goes bare, as the client's JSON
+        // has it, not as the `\/` JSONSerialization writes by default.
         let payload = try JSONSerialization.data(
             withJSONObject: [
                 "version": "v1",
@@ -45,7 +47,7 @@ enum QoderCosy {
                 "cosyVersion": clientVersion,
                 "ideVersion": "",
             ],
-            options: [.sortedKeys]
+            options: [.sortedKeys, .withoutEscapingSlashes]
         ).base64EncodedString()
         let sig = signature(
             payload: payload, key: wrappedKey, timestamp: timestamp, body: body, path: signedPath(url)

@@ -519,6 +519,20 @@ struct QoderChatStreamTests {
         #expect(final.model == "qfmodel")
     }
 
+    @Test("A chunk sent as an object, not as JSON text, reads the same")
+    func objectBody() async throws {
+        let (_, final, _) = await turn(reply: .init(body: sse([
+            jsonText(["body": ["choices": [["delta": ["content": "ok"]]]], "statusCodeValue": 200] as [String: Any]),
+            jsonText([
+                "body": ["choices": [["delta": [String: Any](), "finish_reason": "stop"]], "usage": ["prompt_tokens": 3, "completion_tokens": 1]],
+                "statusCodeValue": "200",
+            ] as [String: Any]),
+        ])))
+        #expect(texts(final) == "ok")
+        #expect(final.stopReason == .stop)
+        #expect(final.usage.input == 3)
+    }
+
     @Test("Qoder's own tool_calls keep the ids their results are answered with")
     func nativeToolCalls() async throws {
         let (events, final, _) = await turn(reply: .init(body: sse([
