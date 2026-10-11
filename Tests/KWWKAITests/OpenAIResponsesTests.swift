@@ -930,7 +930,9 @@ struct OpenAIResponsesTests {
         let http = StubSSEClient(body: Self.textSSE.replacingOccurrences(of: "resp_1", with: "resp_http"))
         let connection = StubWebSocketConnection(
             batches: [Self.webSocketMessages(from: Self.textSSE)],
-            firstReceiveDelayNanoseconds: 300_000_000
+            // Long enough that the second request always meets the first
+            // still in flight, even when the whole suite runs in parallel.
+            firstReceiveDelayNanoseconds: 2_000_000_000
         )
         let ws = StubWebSocketClient(connection: connection)
         let provider = OpenAIResponsesProvider(client: http, webSocketClient: ws, defaultAPIKey: "k")
