@@ -289,6 +289,11 @@ struct QoderRefreshTests {
         #expect(refused?.kind == .rejected)
         #expect(refused?.providerId == "qoder")
         #expect(await refreshError(.response(status: 400, body: "{}"))?.kind == .rejected)
+        // magpie takes Qoder's 403 as the sign-in gone too (qoderRefreshFailed;
+        // its own test stubs only 401), where the shared rule reads an outage.
+        let forbidden = await refreshError(.response(status: 403, body: "no"))
+        #expect(forbidden?.kind == .rejected)
+        #expect(forbidden?.status == 403)
         #expect(await refreshError(.response(status: 503, body: "busy"))?.kind == .unavailable)
         #expect(await refreshError(.failure(URLError(.timedOut)))?.kind == .unavailable)
         // A pair with a half missing is not kept: the old one may still work.
@@ -369,6 +374,12 @@ struct QoderUsageTests {
         let body = #"{"displayMode":"qoder","qoderUsage":{"user_quota":{"total":200,"remaining":150},"add_on_quota":{"total":0,"used":0},"org_resource_package":{"total":20},"dedicated_resource_packages":[{"total":10,"used":-1}]}}"#
         let windows = try #require(QoderUsageReader.windows(fromJSON: Data(body.utf8)))
         #expect(windows.map(\.usedPercent) == [25])
+    }
+
+    @Test("A pool spent past its size reads full, as magpie caps it")
+    func overspent() throws {
+        let body = #"{"displayMode":"qoder","qoderUsage":{"userQuota":{"total":100,"used":130}}}"#
+        #expect(try #require(QoderUsageReader.windows(fromJSON: Data(body.utf8))).map(\.usedPercent) == [100])
     }
 
     @Test("An enterprise account has no personal pools; any other answer is no usage")

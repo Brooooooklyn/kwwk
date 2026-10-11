@@ -358,12 +358,20 @@ public struct QoderOAuthProvider: OAuthProvider {
     }
 
     private func rotate(_ path: String, _ refreshToken: String, client: HTTPClient) async throws -> Pair {
-        let (_, data) = try await OAuthRefreshError.post(
-            provider: id, url: URL(string: site.openAPI + path)!,
-            headers: QoderTokens.jsonHeaders,
-            body: try JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken]),
-            client: client
-        )
+        let data: Data
+        do {
+            (_, data) = try await OAuthRefreshError.post(
+                provider: id, url: URL(string: site.openAPI + path)!,
+                headers: QoderTokens.jsonHeaders,
+                body: try JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken]),
+                client: client
+            )
+        } catch let refused as OAuthRefreshError where refused.status == 403 {
+            // Qoder's account API refuses a dead refresh token with 401 or
+            // 403, and magpie takes either as the sign-in gone
+            // (`qoderRefreshFailed`); the shared rule reads 403 as an outage.
+            throw OAuthRefreshError(providerId: id, kind: .rejected, status: 403, detail: refused.detail)
+        }
         let answer = QoderTokens.object(data) ?? [:]
         // A device refresh may name its token `device_token` instead of
         // `token`; magpie reads either (TestQoderLoginUsage).
@@ -463,7 +471,7 @@ public struct QoderUsageReader: OAuthUsageReader {
             let own = (pool["name"] as? String) ?? ""
             windows.append(OAuthUsageWindow(
                 window: id == nil ? .primary : .secondary,
-                usedPercent: 100 * used / total,
+                usedPercent: min(100, 100 * used / total),
                 resetsAt: nil,
                 windowSeconds: nil,
                 limitID: id,
