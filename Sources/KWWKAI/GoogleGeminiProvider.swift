@@ -144,7 +144,8 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         state: GoogleGeminiState
     ) async throws {
         var emittedStart = false
-        var hasFinishReason = false
+        var rawFinishReason: String?
+        var sentImage = false
         for try await sse in events {
             if state.signal?.isCancelled == true {
                 let aborted = state.asAborted()
@@ -190,7 +191,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             if case .string(let finishReason) = candidate["finishReason"] ?? .null,
                finishReason != "FINISH_REASON_UNSPECIFIED", finishReason != "NULL" {
                 state.stopReason = Self.mapFinishReason(finishReason)
-                hasFinishReason = true
+                rawFinishReason = finishReason
                 if state.stopReason == .error {
                     // A call the model wrote badly is a blip of that one
                     // reply, not of the request: asked again it usually
@@ -199,7 +200,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                     // other reasons here are refusals and stay final.
                     state.failure = ProviderFailure(
                         message: "Gemini finish reason: \(finishReason)",
-                        shouldRetry: Self.isMalformedCall(finishReason) ? true : nil,
+                        shouldRetry: finishReason == "MALFORMED_FUNCTION_CALL" ? true : nil,
                         rawStopReason: finishReason)
                 }
             }
@@ -208,6 +209,9 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                case .array(let parts) = content["parts"] ?? .null {
                 for part in parts {
                     guard case .object(let p) = part else { continue }
+                    // An image is an answer even though it is not read into
+                    // the message: the reply is not one that said nothing.
+                    if p["inlineData"] != nil { sentImage = true }
                     let isThought: Bool = {
                         if case .bool(let v) = p["thought"] ?? .null { return v } else { return false }
                     }()
@@ -292,17 +296,18 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             state.stopReason = .toolUse
         }
         var final = state.finalize()
-        if !hasFinishReason {
+        if rawFinishReason == nil {
             final.stopReason = .error
             final.errorMessage = "Gemini stream ended without a finish reason"
-        } else if final.stopReason == .stop, !final.hasReplayUnsafeContent {
+        } else if final.stopReason == .stop, !final.hasReplayUnsafeContent, !sentImage {
             // Deep in a long session Gemini now and then ends with STOP and
             // no parts, or with its thoughts alone (magpie #667:
             // gemini-3.8-flash did it three turns running and the agent's run
             // ended mid-task). That is a failed reply, not an answer: report
             // it with the "ended without" wording the retry policy replays.
-            // A reply cut at its length or refused keeps its own reason.
-            let failure = ProviderFailure(message: "Gemini stream ended without content", rawStopReason: "STOP")
+            // A reply cut at its length or refused keeps its own reason, and
+            // so does one that wrote text before UNEXPECTED_TOOL_CALL.
+            let failure = ProviderFailure(message: "Gemini stream ended without content", rawStopReason: rawFinishReason)
             final.stopReason = .error
             final.errorMessage = failure.message
             final.failure = failure
@@ -674,14 +679,9 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         case "STOP", "MODEL_STOP": return .stop
         case "MAX_TOKENS": return .length
         case "SAFETY", "PROHIBITED_CONTENT", "RECITATION", "BLOCKLIST", "SPII", "OTHER": return .error
-        case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL": return .error
+        case "MALFORMED_FUNCTION_CALL": return .error
         default: return .stop
         }
-    }
-
-    /// Finish reasons for a tool call the model failed to write.
-    private static func isMalformedCall(_ raw: String) -> Bool {
-        raw == "MALFORMED_FUNCTION_CALL" || raw == "UNEXPECTED_TOOL_CALL"
     }
 
     private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {

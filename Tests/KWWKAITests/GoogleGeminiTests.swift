@@ -432,6 +432,26 @@ struct GoogleGeminiTests {
         #expect(refused.providerFailure?.isRetryable == false)
     }
 
+    // UNEXPECTED_TOOL_CALL fails only the reply that said nothing; one that
+    // wrote its answer first ended as a normal stop before and still does.
+    @Test("text before UNEXPECTED_TOOL_CALL is still an answer")
+    func unexpectedToolCallAfterTextStops() async throws {
+        let result = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Done."}]},"finishReason":"UNEXPECTED_TOOL_CALL"}]}"#
+                + "\n\n")
+        #expect(result.stopReason == .stop)
+    }
+
+    // The image is not read into the message, but asking again would only
+    // draw it again.
+    @Test("a reply that is an image alone is not replayed as empty")
+    func imageReplyIsNotEmpty() async throws {
+        let result = await Self.settle(
+            #"data: {"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]},"finishReason":"STOP"}]}"#
+                + "\n\n")
+        #expect(result.stopReason == .stop)
+    }
+
     // MARK: - Feature 2: thought-signature preservation
 
     @Test("preserves valid base64 textSignature on replayed same-model text part")
