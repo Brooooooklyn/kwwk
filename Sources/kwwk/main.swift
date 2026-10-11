@@ -161,6 +161,12 @@ struct KwwkCLI {
             ))
             Foundation.exit(1)
         }
+        guard ModelsCatalog.model(provider: "kiro", id: KiroModels.defaultModelId) != nil else {
+            FileHandle.standardError.write(Data(
+                "kwwk: self-test failed: Kiro model catalog is missing\n".utf8
+            ))
+            Foundation.exit(1)
+        }
         print("resources: ok")
         Foundation.exit(0)
     }
