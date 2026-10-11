@@ -48,6 +48,26 @@ enum CursorConnectResponse {
         return CursorConnectError.grpc(status: code, message: message(of: error) ?? code)
     }
 
+    /// The end-stream error as a ``ProviderFailure``, with Cursor's own word
+    /// on whether asking again can help. Each `details[].debug.details`
+    /// carries `isRetryable`; a refusal that asking again cannot change says
+    /// false — measured 2026-10-11 on a Free plan asking for a named model:
+    /// `resource_exhausted`, "Named models unavailable: Free plans can only
+    /// use Auto…", `isRetryable: false`. Read by its code alone that is a
+    /// rate limit, and was retried four more times with backoff.
+    static func failureFromEndStream(_ data: Data) -> ProviderFailure? {
+        guard let error = errorFromEndStream(data) else { return nil }
+        var failure = ProviderFailure.capture(error)
+        let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let details = (root?["error"] as? [String: Any])?["details"] as? [[String: Any]] ?? []
+        let refused = details.contains { detail in
+            let debug = (detail["debug"] as? [String: Any])?["details"] as? [String: Any]
+            return debug?["isRetryable"] as? Bool == false
+        }
+        if refused { failure.shouldRetry = false }
+        return failure
+    }
+
     /// Cursor's top-level `message` is often the bare word "Error"; what it
     /// means — "Model not available", a region refusal — sits in
     /// `details[].debug.details.{title,detail}`. The last such detail wins

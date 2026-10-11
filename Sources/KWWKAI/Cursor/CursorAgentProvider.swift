@@ -164,7 +164,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                         return
                     }
                 case .endStream(let data):
-                    if let err = CursorConnectResponse.errorFromEndStream(data) { throw err }
+                    if let failure = CursorConnectResponse.failureFromEndStream(data) { throw failure }
                 }
             }
             // Stream ended without an explicit turnEnded. A user cancel closes
@@ -187,8 +187,11 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                var msg = errorMessage(model: model, text: "\(error)")
-                msg.failure = .capture(error)
+                // The failure's own sentence: "\(error)" of a Connect error
+                // is the enum's dump, `grpc(status: …, message: …)`.
+                let failure = ProviderFailure.capture(error)
+                var msg = errorMessage(model: model, text: failure.message)
+                msg.failure = failure
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
