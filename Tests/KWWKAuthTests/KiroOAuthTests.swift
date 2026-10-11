@@ -123,6 +123,11 @@ struct KiroSignInTests {
         #expect(query["code_challenge_method"] == "S256")
         #expect(query["redirect_uri"] == "http://localhost:4649")
         #expect(loopback.offeredPorts == [3128, 4649, 6588, 8008, 9091, 49153, 50153, 51153, 52153, 53153])
+        // Byte for byte what magpie's `url.Values.Encode` opens (keys sorted,
+        // the redirect's `:` and `/` escaped).
+        #expect(page.absoluteString == "https://app.kiro.dev/signin?code_challenge=\(query["code_challenge"] ?? "")"
+            + "&code_challenge_method=S256&redirect_from=KiroIDE&redirect_uri=http%3A%2F%2Flocalhost%3A4649"
+            + "&state=\(query["state"] ?? "")")
         #expect(loopback.stopped)
 
         #expect(client.requestCount == 1)
@@ -181,6 +186,11 @@ struct KiroSignInTests {
         #expect(sent["scopes"]?.contains("codewhisperer:conversations,") == true)
         #expect(sent["redirect_uri"] == "http://127.0.0.1:4649/oauth/callback")
         #expect(sent["code_challenge_method"] == "S256")
+        #expect(authorize.absoluteString == "https://oidc.us-east-1.amazonaws.com/authorize"
+            + "?client_id=cid&code_challenge=\(sent["code_challenge"] ?? "")&code_challenge_method=S256"
+            + "&redirect_uri=http%3A%2F%2F127.0.0.1%3A4649%2Foauth%2Fcallback&response_type=code"
+            + "&scopes=codewhisperer%3Acompletions%2Ccodewhisperer%3Aanalysis%2Ccodewhisperer%3Aconversations"
+            + "%2Ccodewhisperer%3Atransformations%2Ccodewhisperer%3Ataskassist&state=\(sent["state"] ?? "")")
 
         #expect(client.requestCount == 2)
         #expect(client.requests[1].url.absoluteString == "https://oidc.us-east-1.amazonaws.com/token")
@@ -226,6 +236,20 @@ struct KiroSignInTests {
         #expect(credentials.extras["region"] == "eu-west-1")
         #expect(KiroOAuth.profileArn(credentials) == "arn:aws:codewhisperer:eu-central-1:9:profile/E")
         #expect(KiroOAuth.apiRegion(credentials) == "eu-central-1")
+    }
+
+    @Test("A region that cannot be reached is passed over for Kiro's other one")
+    func profileRegionUnreachable() async throws {
+        let loopback = ScriptedKiroLoopback([awsOption("awsidc"), awsBack])
+        let client = QueuedHTTPClient([
+            .response(status: 200, body: registerAnswer),
+            .response(status: 200, body: tokenAnswer),
+            .failure(URLError(.cannotConnectToHost)),
+            .response(status: 200, body: #"{"profiles":[{"arn":"arn:aws:codewhisperer:eu-central-1:9:profile/E"}]}"#),
+        ])
+        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        #expect(client.requests[3].url.host == "management.eu-central-1.kiro.dev")
+        #expect(KiroOAuth.profileArn(credentials) == "arn:aws:codewhisperer:eu-central-1:9:profile/E")
     }
 
     @Test("An AWS sign-in Kiro answers as Builder ID takes Builder ID's profile")

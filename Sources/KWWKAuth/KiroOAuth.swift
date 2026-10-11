@@ -119,16 +119,27 @@ public enum KiroOAuth {
         if provider.lowercased() == "builderid" { return builderIDProfile }
         var last = "Kiro has no profile for this sign-in"
         for region in ["us-east-1", "eu-central-1"] {
-            let (response, body) = try await client.request(
-                url: URL(string: managementURL(region: region) + "List-Available-Profiles")!,
-                method: "POST",
-                headers: [
-                    "Authorization": "Bearer \(access)",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                ],
-                body: Data("{}".utf8)
-            )
+            let response: HTTPURLResponse
+            let body: Data
+            do {
+                (response, body) = try await client.request(
+                    url: URL(string: managementURL(region: region) + "List-Available-Profiles")!,
+                    method: "POST",
+                    headers: [
+                        "Authorization": "Bearer \(access)",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    ],
+                    body: Data("{}".utf8)
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A region that cannot be reached is no answer; the other is
+                // still asked, as magpie asks it.
+                last = "Kiro: \(error.localizedDescription)"
+                continue
+            }
             let text = String(decoding: body, as: UTF8.self)
             let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
             guard (200..<300).contains(response.statusCode) else {
@@ -208,13 +219,15 @@ extension OAuthLogin {
         let redirect = "http://localhost:\(port)"
 
         var comps = URLComponents(url: KiroOAuth.portalURL, resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "redirect_uri", value: redirect),
-            URLQueryItem(name: "redirect_from", value: "KiroIDE"),
-        ]
+        // Encoded as a form, the redirect's `:` and `/` escaped, as the IDE's
+        // own link is (`URLQueryItem` would leave them bare).
+        comps.percentEncodedQuery = OAuth.urlEncodedForm([
+            "state": state,
+            "code_challenge": pkce.challenge,
+            "code_challenge_method": "S256",
+            "redirect_uri": redirect,
+            "redirect_from": "KiroIDE",
+        ])
         callbacks.onProgress("Sign in to Kiro in your browser — waiting for the callback on \(redirect)…")
         return try await present(comps.url!, callbacks: callbacks) {
             try await kiroAwaitSignIn(
@@ -331,16 +344,16 @@ extension OAuthLogin {
                         )
                         aws = step
                         var authorize = URLComponents(string: KiroOAuth.oidcURL(region: region) + "/authorize")!
-                        authorize.queryItems = [
-                            URLQueryItem(name: "response_type", value: "code"),
-                            URLQueryItem(name: "client_id", value: clientId),
-                            URLQueryItem(name: "redirect_uri", value: awsRedirect),
+                        authorize.percentEncodedQuery = OAuth.urlEncodedForm([
+                            "response_type": "code",
+                            "client_id": clientId,
+                            "redirect_uri": awsRedirect,
                             // AWS's authorize page takes them as `scopes`, comma-joined.
-                            URLQueryItem(name: "scopes", value: KiroOAuth.scopes.joined(separator: ",")),
-                            URLQueryItem(name: "state", value: step.state),
-                            URLQueryItem(name: "code_challenge", value: pkce.challenge),
-                            URLQueryItem(name: "code_challenge_method", value: "S256"),
-                        ]
+                            "scopes": KiroOAuth.scopes.joined(separator: ","),
+                            "state": step.state,
+                            "code_challenge": pkce.challenge,
+                            "code_challenge_method": "S256",
+                        ])
                         callback.reply(.redirect(authorize.url!))
                         continue
                     case "external_idp":
