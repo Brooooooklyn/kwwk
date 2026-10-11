@@ -152,6 +152,15 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
 
     /// Read Connect frames off the response body and feed each decoded delta
     /// into `state`.
+    ///
+    /// Every reply Devin sends ends with an end-of-stream frame (flags 0x03,
+    /// `{}` or the error), after at least its id and usage frames (measured
+    /// 2026-10-11 on SWE-1.6, Sonnet 5 and Opus 5, failed turns included). A
+    /// body that stops short of that frame was cut off, and one that holds
+    /// nothing else is no reply; both fail the turn as retryable transport
+    /// errors, as magpie's `decodeDevin` and `askDevin` do, instead of
+    /// passing for a finished answer whose half-received tool arguments
+    /// would decode to `{}`.
     private func drive(
         body: AsyncThrowingStream<Data, Error>,
         state: DevinStreamState,
@@ -160,6 +169,8 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         historyBytes: @escaping @Sendable () -> Int
     ) async throws {
         var parser = ConnectFrameParser(maxPayload: Self.maxFramePayload)
+        var messageFrames = 0
+        var sawEndStream = false
         for try await chunk in body {
             if cancellation?.isCancelled == true { return }
             for frame in try parser.append(chunk) {
@@ -168,10 +179,19 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
                     : frame.payload
                 if frame.flags & Self.endStreamFlag != 0 {
                     if let failure = Self.trailerFailure(payload, historyBytes: historyBytes) { throw failure }
+                    if messageFrames == 0 {
+                        throw ProviderFailure(message: "Devin stream ended before any reply frame (empty reply)")
+                    }
+                    sawEndStream = true
                     continue
                 }
+                messageFrames += 1
                 state.apply(DevinProto.GetChatMessageResponse.decode(payload), emit: { out.push($0) })
             }
+        }
+        if cancellation?.isCancelled == true { return }
+        if !sawEndStream || parser.hasPartialFrame {
+            throw ProviderFailure(message: "Devin stream ended before its end-of-stream frame")
         }
     }
 
@@ -284,6 +304,20 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         let requested = options?.temperature ?? 0.4
         let temperature = requested == 0 ? 1e-6 : requested
         let maxTokens = options?.maxTokens ?? (model.maxTokens > 0 ? model.maxTokens : 64_000)
+        // ChatToolChoice "required" forces a call (measured 2026-10-11 on
+        // Sonnet 5 and Opus 5). A tool's name there is refused with
+        // `invalid_argument`, so a named tool is forced only when it is the
+        // one tool offered; "none" ends the turn with no content at all, so
+        // it stays "auto".
+        var toolChoice = "auto"
+        switch options?.toolChoice {
+        case .required? where !tools.isEmpty:
+            toolChoice = "required"
+        case .tool(let name)? where tools.count == 1 && tools[0].name == name:
+            toolChoice = "required"
+        default:
+            break
+        }
         return DevinProto.GetChatMessageRequest(
             metadata: DevinWire.cliMetadata(apiKey: apiKey, userJwt: userJwt),
             prompt: context.systemPrompt ?? "",
@@ -297,6 +331,7 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
                 stopPatterns: defaultStopPatterns
             ),
             tools: tools,
+            toolChoice: toolChoice,
             disableParallelToolCalls: !(model.compat?.supportsParallelToolCalls ?? false)
                 || options?.parallelToolCalls == false,
             cascadeId: cascadeId,
@@ -341,13 +376,23 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
                 let native = assistant.api == "devin-agent"
                     && assistant.provider == model.provider && assistant.model == model.id
                 var prompt = DevinProto.ChatMessagePrompt(source: .system)
+                // A Cascade message holds one thinking text and one signature,
+                // and Devin's Claude models check the pair: a signature that
+                // doesn't match its text fails the turn with `invalid_argument`
+                // "There is an issue with this request" (measured 2026-10-11 on
+                // Opus 5). Several blocks joined into one text therefore go
+                // unsigned, which Devin takes, dropping the thinking.
+                let thinkingBlocks = assistant.content.reduce(0) { count, block in
+                    if case .thinking = block { return count + 1 }
+                    return count
+                }
                 for block in assistant.content {
                     switch block {
                     case .text(let t):
                         prompt.prompt += t.text
                     case .thinking(let th):
                         prompt.thinking += th.thinking
-                        if native, prompt.signature.isEmpty, let sig = th.thinkingSignature { prompt.signature = sig }
+                        if native, thinkingBlocks == 1, let sig = th.thinkingSignature { prompt.signature = sig }
                     case .toolCall(let call):
                         prompt.toolCalls.append(.init(id: call.id, name: call.name, argumentsJson: jsonString(call.arguments)))
                     case .fallback:
@@ -549,6 +594,9 @@ struct ConnectFrameParser {
     let maxPayload: Int
     private var buffer = Data()
 
+    /// Bytes of a frame whose rest never arrived.
+    var hasPartialFrame: Bool { !buffer.isEmpty }
+
     init(maxPayload: Int) {
         self.maxPayload = maxPayload
     }
@@ -619,6 +667,18 @@ final class DevinStreamState: @unchecked Sendable {
         if !msg.deltaThinking.isEmpty {
             endText(emit: emit)
             appendThinking(msg.deltaThinking, signature: msg.deltaSignature, emit: emit)
+        } else if !msg.deltaSignature.isEmpty {
+            // Devin's Claude models send the signature in a frame of its own
+            // after the last thinking delta and before the text (measured
+            // 2026-10-11 on Opus 5: 700 bytes in field 10, no field 9).
+            // Replayed with it, the thinking is kept; without, Devin drops it.
+            lock.withLock {
+                let index = thinkingIndex ?? blocks.lastIndex { if case .thinking = $0 { return true }; return false }
+                if let index, case .thinking(var t) = blocks[index] {
+                    t.thinkingSignature = msg.deltaSignature
+                    blocks[index] = .thinking(t)
+                }
+            }
         }
         if !msg.deltaText.isEmpty {
             endThinking(emit: emit)
