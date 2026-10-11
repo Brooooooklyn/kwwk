@@ -190,7 +190,7 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             }
         }
         if cancellation?.isCancelled == true { return }
-        if !sawEndStream || parser.hasPartialFrame {
+        if !sawEndStream {
             throw ProviderFailure(message: "Devin stream ended before its end-of-stream frame")
         }
     }
@@ -593,9 +593,6 @@ struct ConnectFrameParser {
 
     let maxPayload: Int
     private var buffer = Data()
-
-    /// Bytes of a frame whose rest never arrived.
-    var hasPartialFrame: Bool { !buffer.isEmpty }
 
     init(maxPayload: Int) {
         self.maxPayload = maxPayload
