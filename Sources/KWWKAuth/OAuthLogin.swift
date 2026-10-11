@@ -284,7 +284,12 @@ public enum OAuthLogin {
     public static func loginGitHubCopilot(
         clientID: String = "Iv1.b507a08c87ecfe98",
         callbacks: Callbacks,
-        client: HTTPClient = URLSessionHTTPClient()
+        client: HTTPClient = URLSessionHTTPClient(),
+        // Waits the given seconds before a poll; tests pass their own to read
+        // the waits without sitting through them.
+        pollSleep: @escaping @Sendable (Int) async throws -> Void = { seconds in
+            try await Task.sleep(nanoseconds: UInt64(max(seconds, 0)) * 1_000_000_000)
+        }
     ) async throws -> OAuthCredentials {
         callbacks.onProgress("requesting GitHub device code…")
         let (deviceResponse, deviceBody) = try await client.request(
@@ -315,7 +320,8 @@ public enum OAuthLogin {
         callbacks.onProgress("enter code in your browser: \(userCode)")
         return try await present(verifyURL, callbacks: callbacks) {
             try await pollGitHubCopilot(
-                clientID: clientID, deviceCode: deviceCode, interval: interval, client: client
+                clientID: clientID, deviceCode: deviceCode, interval: interval, client: client,
+                pollSleep: pollSleep
             )
         }
     }
@@ -323,14 +329,17 @@ public enum OAuthLogin {
     private static func pollGitHubCopilot(
         clientID: String,
         deviceCode: String,
-        interval: Int,
-        client: HTTPClient
+        interval initialInterval: Int,
+        client: HTTPClient,
+        pollSleep: @Sendable (Int) async throws -> Void
     ) async throws -> OAuthCredentials {
         // Poll for the access token.
         let pollURL = URL(string: "https://github.com/login/oauth/access_token")!
         let deadline = Date().addingTimeInterval(15 * 60)
+        var interval = initialInterval
+        var misses = 0
         while Date() < deadline {
-            try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
+            try await pollSleep(interval)
             let (pollResponse, pollBody) = try await client.request(
                 url: pollURL,
                 method: "POST",
@@ -344,16 +353,36 @@ public enum OAuthLogin {
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 ]).utf8)
             )
-            if pollResponse.statusCode >= 400 {
+            // A body that isn't JSON (a proxy's page), or an error status
+            // that names no OAuth error, is a hiccup, asked again — but five
+            // in a row end the sign-in with the last one, rather than wait
+            // out the 15 minutes saying nothing after GitHub's page said the
+            // device was connected (magpie #723, commit 63c382bb). An OAuth
+            // error is an answer whatever its status: RFC 8628 sends
+            // `authorization_pending` as a 400, and github.com's 200 is its
+            // own habit.
+            guard let polled = (try? JSONSerialization.jsonObject(with: pollBody)) as? [String: Any],
+                  pollResponse.statusCode < 400 || polled["error"] is String
+            else {
+                misses += 1
+                if misses >= 5 {
+                    let text = String(data: pollBody.prefix(200), encoding: .utf8) ?? ""
+                    throw OAuthError.refreshFailed("copilot device flow \(pollResponse.statusCode): \(text)")
+                }
                 continue
             }
-            guard let polled = try JSONSerialization.jsonObject(with: pollBody) as? [String: Any] else {
-                continue
-            }
+            misses = 0
             if let err = polled["error"] as? String {
                 if err == "authorization_pending" { continue }
                 if err == "slow_down" {
-                    try await Task.sleep(nanoseconds: UInt64(interval) * 2 * 1_000_000_000)
+                    // GitHub raises the interval it holds this device code
+                    // to by 5 s on every `slow_down` and names the new one;
+                    // the raise lasts (RFC 8628 §3.5). Waiting longer once
+                    // and then polling at the old pace again was answered
+                    // `slow_down` again and again, each one raising the
+                    // interval further.
+                    // magpie keeps the raise the same way (copilot_signin.go).
+                    interval = max(polled["interval"] as? Int ?? 0, interval + 5)
                     continue
                 }
                 throw OAuthError.refreshFailed("copilot device flow: \(err)")

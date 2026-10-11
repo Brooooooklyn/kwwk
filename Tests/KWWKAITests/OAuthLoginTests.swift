@@ -98,6 +98,89 @@ struct OAuthLoginShapeTests {
         #expect(server.redirectURI == "http://localhost:53982/callback")
     }
 
+    @Test("device-flow keeps the longer interval GitHub asks for after slow_down")
+    func copilotDeviceFlowSlowDown() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((
+            status: 200,
+            body: #"{"device_code":"DC","user_code":"UC","verification_uri":"https://github.com/login/device","interval":5}"#
+        ))
+        // GitHub's own answer: the error, and the interval it now holds the code to.
+        client.queue.append((
+            status: 200,
+            body: #"{"error":"slow_down","error_description":"Too many requests have been made in the same timeframe.","interval":10}"#
+        ))
+        client.queue.append((status: 200, body: #"{"error":"authorization_pending"}"#))
+        // A second one that names no interval still adds RFC 8628's 5 s.
+        client.queue.append((status: 200, body: #"{"error":"slow_down"}"#))
+        client.queue.append((status: 200, body: #"{"access_token":"ghp_access"}"#))
+        client.queue.append((
+            status: 200,
+            body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
+        ))
+
+        let waits = LockedBox<[Int]>([])
+        let creds = try await OAuthLogin.loginGitHubCopilot(
+            clientID: "test-client",
+            callbacks: OAuthLogin.Callbacks(onAuthURL: { _ in }, onProgress: { _ in }),
+            client: client,
+            pollSleep: { seconds in waits.set(waits.get() + [seconds]) }
+        )
+        #expect(creds.refresh == "ghp_access")
+        // One wait per poll: the raise holds for every poll after it.
+        #expect(waits.get() == [5, 10, 10, 15])
+    }
+
+    @Test("device-flow rides a poll hiccup, and fails after five in a row instead of waiting out the timeout")
+    func copilotDeviceFlowPollMisses() async throws {
+        let device = (
+            status: 200,
+            body: #"{"device_code":"DC","user_code":"UC","verification_uri":"https://github.com/login/device","interval":0}"#
+        )
+        let callbacks = OAuthLogin.Callbacks(onAuthURL: { _ in }, onProgress: { _ in })
+
+        // A proxy's page between two answers is asked again.
+        let hiccup = SequentialStubClient()
+        hiccup.queue.append(device)
+        hiccup.queue.append((status: 200, body: "<html>proxy</html>"))
+        hiccup.queue.append((status: 502, body: "<html>bad gateway</html>"))
+        hiccup.queue.append((status: 200, body: #"{"access_token":"ghp_access"}"#))
+        hiccup.queue.append((
+            status: 200,
+            body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
+        ))
+        let creds = try await OAuthLogin.loginGitHubCopilot(
+            clientID: "test-client", callbacks: callbacks, client: hiccup, pollSleep: { _ in }
+        )
+        #expect(creds.refresh == "ghp_access")
+
+        // An OAuth error on a 400, as RFC 8628 sends it, is an answer: any
+        // number of them is still the user taking their time.
+        let pending = SequentialStubClient()
+        pending.queue.append(device)
+        for _ in 0..<6 { pending.queue.append((status: 400, body: #"{"error":"authorization_pending"}"#)) }
+        pending.queue.append((status: 200, body: #"{"access_token":"ghp_access"}"#))
+        pending.queue.append((
+            status: 200,
+            body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
+        ))
+        let waited = try await OAuthLogin.loginGitHubCopilot(
+            clientID: "test-client", callbacks: callbacks, client: pending, pollSleep: { _ in }
+        )
+        #expect(waited.refresh == "ghp_access")
+
+        // Five in a row is not a hiccup.
+        let down = SequentialStubClient()
+        down.queue.append(device)
+        for _ in 0..<5 { down.queue.append((status: 502, body: "<html>bad gateway</html>")) }
+        await #expect(throws: OAuthError.self) {
+            _ = try await OAuthLogin.loginGitHubCopilot(
+                clientID: "test-client", callbacks: callbacks, client: down, pollSleep: { _ in }
+            )
+        }
+        #expect(down.recorded.count == 6)
+    }
+
     @Test("device-flow polls with device_code + grant_type")
     func copilotDeviceFlowShape() async throws {
         let client = SequentialStubClient()
