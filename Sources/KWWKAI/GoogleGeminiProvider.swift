@@ -192,7 +192,15 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                 state.stopReason = Self.mapFinishReason(finishReason)
                 hasFinishReason = true
                 if state.stopReason == .error {
-                    state.failure = ProviderFailure(message: "Gemini finish reason: \(finishReason)", rawStopReason: finishReason)
+                    // A call the model wrote badly is a blip of that one
+                    // reply, not of the request: asked again it usually
+                    // writes it properly (Gemini CLI retries it as an
+                    // invalid stream; magpie #667). Mark it replayable; the
+                    // other reasons here are refusals and stay final.
+                    state.failure = ProviderFailure(
+                        message: "Gemini finish reason: \(finishReason)",
+                        shouldRetry: Self.isMalformedCall(finishReason) ? true : nil,
+                        rawStopReason: finishReason)
                 }
             }
 
@@ -287,6 +295,17 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         if !hasFinishReason {
             final.stopReason = .error
             final.errorMessage = "Gemini stream ended without a finish reason"
+        } else if final.stopReason == .stop, !final.hasReplayUnsafeContent {
+            // Deep in a long session Gemini now and then ends with STOP and
+            // no parts, or with its thoughts alone (magpie #667:
+            // gemini-3.8-flash did it three turns running and the agent's run
+            // ended mid-task). That is a failed reply, not an answer: report
+            // it with the "ended without" wording the retry policy replays.
+            // A reply cut at its length or refused keeps its own reason.
+            let failure = ProviderFailure(message: "Gemini stream ended without content", rawStopReason: "STOP")
+            final.stopReason = .error
+            final.errorMessage = failure.message
+            final.failure = failure
         }
         if final.stopReason == .error { out.push(.error(reason: .error, error: final)) }
         else { out.push(.done(reason: final.stopReason, message: final)) }
@@ -341,7 +360,8 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             if usesThinkingLevel(id) {
                 // Gemini 3.x and Gemma 4 take a string `thinkingLevel`
                 // (MINIMAL/LOW/MEDIUM/HIGH) rather than an integer budget.
-                thinking["thinkingLevel"] = geminiThinkingLevel(reasoning, modelId: id)
+                thinking["thinkingLevel"] = catalogThinkingLevel(
+                    geminiThinkingLevel(reasoning, modelId: id), model: model)
             } else {
                 // Gemini 2.x integer budget. Always emit (per-level table for
                 // 2.5 models, -1 dynamic fallback otherwise) to match pi's
@@ -356,7 +376,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         } else if model.reasoning {
             // Reasoning-capable model with reasoning OFF: explicitly disable
             // thinking, mirroring pi's getDisabledThinkingConfig.
-            generationConfig["thinkingConfig"] = disabledThinkingConfig(model.id)
+            generationConfig["thinkingConfig"] = disabledThinkingConfig(model)
         }
         if !generationConfig.isEmpty {
             root["generationConfig"] = generationConfig
@@ -403,6 +423,25 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         }
     }
 
+    /// A `thinkingLevel` the family table chose, moved to one the model has
+    /// when the catalog's `thinkingLevelMap` says it has no such level.
+    /// Google answers a level a model lacks with 400: gemini-3.8-flash has no
+    /// minimal ("Thinking level is unsupported: THINKING_LEVEL_MINIMAL" on
+    /// Vertex, "Thinking level MINIMAL is not supported for this model" on AI
+    /// Studio; magpie #1062), which is what reasoning off and `.minimal` were
+    /// both sent as. A level the catalog lists, or a model it does not
+    /// describe, goes as the family table chose.
+    private static func catalogThinkingLevel(_ wire: String, model: Model) -> String {
+        guard let map = model.thinkingLevelMap,
+              let chosen = ModelThinkingLevel(rawValue: wire.lowercased()),
+              let entry = map[chosen.rawValue], entry == nil else { return wire }
+        // The nearest level the model has, looking upward first. A
+        // `thinkingLevel` model cannot stop thinking, so `off` is no answer.
+        let nearest = clampThinkingLevel(model, chosen)
+        guard nearest != .off else { return wire }
+        return ((map[nearest.rawValue] ?? nil) ?? nearest.rawValue).uppercased()
+    }
+
     /// Default per-level thinking budgets for Gemini 2.5 models, mirroring pi's
     /// getGoogleBudget. Returns -1 (dynamic) when no table matches. A custom
     /// `thinkingBudgets` table always wins.
@@ -429,11 +468,16 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
     /// Thinking config that disables reasoning on a reasoning-capable model,
     /// mirroring pi's getDisabledThinkingConfig.
-    private static func disabledThinkingConfig(_ id: String) -> [String: Any] {
-        let lower = id.lowercased()
-        if isGemini3Pro(lower) { return ["thinkingLevel": "LOW"] }
-        if isGemini3Flash(lower) { return ["thinkingLevel": "MINIMAL"] }
-        if isGemma4(lower) { return ["thinkingLevel": "MINIMAL"] }
+    private static func disabledThinkingConfig(_ model: Model) -> [String: Any] {
+        let lower = model.id.lowercased()
+        if isGemini3Pro(lower) { return ["thinkingLevel": catalogThinkingLevel("LOW", model: model)] }
+        if isGemini3Flash(lower) || isGemma4(lower) {
+            return ["thinkingLevel": catalogThinkingLevel("MINIMAL", model: model)]
+        }
+        // Gemini 2.5 Pro cannot stop thinking: Google answers a budget of 0
+        // with 400 "does not support setting thinking_budget to 0" (quoted in
+        // magpie's vertexThinking), so off goes at its least budget, 128.
+        if lower.contains("gemini-2.5-pro") { return ["thinkingBudget": 128] }
         return ["thinkingBudget": 0]
     }
 
@@ -446,6 +490,10 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         if sig.count % 4 != 0 { return false }
         return sig.range(of: #"^[A-Za-z0-9+/]+={0,2}$"#, options: .regularExpression) != nil
     }
+
+    /// Stands in for a thought signature on a function call Gemini did not
+    /// sign; Google documents it for history carried over from another model.
+    static let skipThoughtSignature = "skip_thought_signature_validator"
 
     /// Major Gemini version from a model id (`gemini-3-pro` -> 3). Returns nil
     /// for non-gemini ids. Mirrors pi's getGeminiMajorVersion.
@@ -538,6 +586,17 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                         parts.append(part)
                     }
                 }
+                // Gemini 3 signs the first call of each step and answers a
+                // step that comes back unsigned with 400 "Function call is
+                // missing a thought_signature in functionCall parts" (magpie
+                // #687). A step it never signed — another model's calls, or
+                // this model's through another provider — goes with the
+                // value Google documents for history it did not write.
+                if (geminiMajorVersion(model.id) ?? 0) >= 3,
+                   !parts.contains(where: { $0["functionCall"] != nil && $0["thoughtSignature"] != nil }),
+                   let first = parts.firstIndex(where: { $0["functionCall"] != nil }) {
+                    parts[first]["thoughtSignature"] = skipThoughtSignature
+                }
                 if !parts.isEmpty {
                     out.append(["role": "model", "parts": parts])
                 }
@@ -615,9 +674,14 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         case "STOP", "MODEL_STOP": return .stop
         case "MAX_TOKENS": return .length
         case "SAFETY", "PROHIBITED_CONTENT", "RECITATION", "BLOCKLIST", "SPII", "OTHER": return .error
-        case "MALFORMED_FUNCTION_CALL": return .error
+        case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL": return .error
         default: return .stop
         }
+    }
+
+    /// Finish reasons for a tool call the model failed to write.
+    private static func isMalformedCall(_ raw: String) -> Bool {
+        raw == "MALFORMED_FUNCTION_CALL" || raw == "UNEXPECTED_TOOL_CALL"
     }
 
     private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
