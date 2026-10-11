@@ -209,6 +209,101 @@ struct ProviderVariantsTests {
         #expect(client.lastRequest?.headers["copilot-vision-request"] == "true")
     }
 
+    @Test("A Copilot login registers a route for every wire its catalog models carry")
+    func copilotRoutesCoverCatalog() {
+        let routes = Set(ProviderVariants.githubCopilotProviders().map(\.api))
+        let catalog = ModelsCatalog.models(for: "github-copilot")
+        #expect(!catalog.isEmpty)
+        for model in catalog {
+            #expect(routes.contains(model.api), "no Copilot route for \(model.id) (\(model.api))")
+        }
+        // GPT-4.1 and the other models Copilot lists with no
+        // `supported_endpoints` are not in the catalog; they fall back to chat.
+        #expect(routes.contains("openai-completions"))
+    }
+
+    @Test("Copilot stamps X-Initiator and the vision flag on every wire, not chat alone")
+    func copilotDynamicHeadersOnEveryWire() async throws {
+        let bodies = [
+            "openai-completions": OpenAICompletionsTests.textSSE,
+            "anthropic-messages": Self.anthropicSSE,
+            "openai-responses": Self.openaiResponsesSSE,
+        ]
+        let paths = [
+            "openai-completions": "/chat/completions",
+            "anthropic-messages": "/v1/messages",
+            "openai-responses": "/responses",
+        ]
+        for (api, body) in bodies {
+            let client = StubSSEClient(body: body)
+            let provider = try #require(ProviderVariants.githubCopilotProviders(
+                client: client,
+                baseURL: URL(string: "https://api.business.githubcopilot.com")!
+            ).first { $0.api == api })
+            let model = Model(
+                id: "m", name: "m", api: api, provider: "github-copilot",
+                baseURL: "https://api.business.githubcopilot.com"
+            )
+            let options = StreamOptions(apiKey: "tid_session", transport: .sse)
+
+            // A tool's reply is the agent's turn, and its image is flagged.
+            _ = provider.stream(
+                model: model,
+                context: Context(messages: [
+                    .user(UserMessage(text: "hi")),
+                    .toolResult(ToolResultMessage(
+                        toolCallId: "t", toolName: "shot",
+                        content: [.image(ImageContent(data: "abcd", mimeType: "image/png"))]
+                    )),
+                ]),
+                options: options
+            )
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let agent = client.lastRequest?.headers ?? [:]
+            #expect(agent["x-initiator"] == "agent", "\(api)")
+            #expect(agent["openai-intent"] == "conversation-edits", "\(api)")
+            #expect(agent["copilot-vision-request"] == "true", "\(api)")
+            #expect(agent["authorization"] == "Bearer tid_session", "\(api)")
+            #expect(agent["copilot-integration-id"] == "vscode-chat", "\(api)")
+            #expect(
+                client.lastRequest?.url.absoluteString
+                    == "https://api.business.githubcopilot.com" + (paths[api] ?? ""),
+                "\(api)"
+            )
+
+            // What the user typed is the user's, and carries no vision flag.
+            _ = provider.stream(
+                model: model,
+                context: Context(messages: [.user(UserMessage(text: "hi"))]),
+                options: options
+            )
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let user = client.lastRequest?.headers ?? [:]
+            #expect(user["x-initiator"] == "user", "\(api)")
+            #expect(user["copilot-vision-request"] == nil, "\(api)")
+        }
+    }
+
+    @Test("Copilot's wrapped routes keep a header the caller set and what the registry finds by cast")
+    func copilotWrappedRoutesPassThrough() async throws {
+        let client = StubSSEClient(body: Self.anthropicSSE)
+        let routes = ProviderVariants.githubCopilotProviders(client: client)
+        let claude = try #require(routes.first { $0.api == "anthropic-messages" })
+        let gpt = try #require(routes.first { $0.api == "openai-responses" })
+        #expect(claude is any NativeCompactionProvider)
+        #expect(gpt is any APIProviderSessionLifecycle)
+
+        _ = claude.stream(
+            model: Model(id: "m", name: "m", api: "anthropic-messages", provider: "github-copilot"),
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(apiKey: "tid", headers: ["X-Initiator": "agent"])
+        )
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let headers = client.lastRequest?.headers ?? [:]
+        #expect(headers["X-Initiator"] == "agent")
+        #expect(headers["x-initiator"] == nil)
+    }
+
     // MARK: - ChatGPT Codex
 
     @Test("ChatGPT Codex routes to backend-api/codex/responses with account header")

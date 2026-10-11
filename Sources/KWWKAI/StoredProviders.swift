@@ -472,21 +472,11 @@ private func registerGitHubCopilot(
     // and COEXIST with (rather than replace) the direct-API anthropic/openai
     // providers — dispatch prefers the scoped instance only for models whose
     // `provider == "github-copilot"`, falling back to the flat map otherwise.
-    await APIRegistry.shared.register(ProviderVariants.githubCopilot(
-        sessionToken: nil,
-        integrationID: "vscode-chat",
-        baseURL: baseURL
-    ), scope: "github-copilot")
-    await APIRegistry.shared.register(ProviderVariants.githubCopilotAnthropic(
-        sessionToken: nil,
-        integrationID: "vscode-chat",
-        baseURL: baseURL
-    ), scope: "github-copilot")
-    await APIRegistry.shared.register(ProviderVariants.githubCopilotResponses(
-        sessionToken: nil,
-        integrationID: "vscode-chat",
-        baseURL: baseURL
-    ), scope: "github-copilot")
+    for provider in ProviderVariants.githubCopilotProviders(
+        integrationID: "vscode-chat", baseURL: baseURL
+    ) {
+        await APIRegistry.shared.register(provider, scope: "github-copilot")
+    }
 
     // Default to `gpt-5.5` — generally available on all Copilot tiers, no
     // policy-enable dependency. Users can /model to Claude/GPT-5/etc after
