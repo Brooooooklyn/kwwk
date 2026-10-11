@@ -104,7 +104,7 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
         cancellation: CancellationHandle?
     ) async -> AssistantMessage {
         var reply = reply
-        var decoder = AWSEventStreamDecoder()
+        var decoder = AWSEventStreamDecoder(maxFrameLength: maxFrameLength)
         do {
             for try await chunk in body {
                 if cancellation?.isCancelled == true { return reply.aborted() }
@@ -126,6 +126,10 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
             return reply.failed(.capture(error))
         }
     }
+
+    /// The longest frame a reply may hold, as magpie's `readKiroFrame` takes
+    /// it: a call's arguments can arrive as one object in one frame.
+    static let maxFrameLength = 16 << 20
 
     // MARK: - Request
 

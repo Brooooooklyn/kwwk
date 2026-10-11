@@ -236,6 +236,7 @@ struct KiroReply {
             switch piece {
             case .thinking(let delta):
                 endText(emit: emit)
+                endTool(emit: emit)
                 if thinkingIndex == nil {
                     blocks.append(.thinking(ThinkingContent(thinking: "")))
                     thinkingIndex = blocks.count - 1
@@ -247,6 +248,8 @@ struct KiroReply {
                 emit(.thinkingDelta(contentIndex: index, delta: delta, partial: snapshot()))
             case .text(let delta):
                 endThinking(emit: emit)
+                // Text after a call: the call's arguments are all in.
+                endTool(emit: emit)
                 if textIndex == nil {
                     blocks.append(.text(TextContent(text: "")))
                     textIndex = blocks.count - 1

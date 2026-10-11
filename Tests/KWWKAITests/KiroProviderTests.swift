@@ -289,6 +289,37 @@ struct KiroReplyTests {
         #expect(said(message) == #"|call:t1/read|args:{"p":1}|stop:toolUse"#)
     }
 
+    @Test("A frame past Bedrock's megabyte is still Kiro's (magpie reads up to 16 MiB)")
+    func longFrame() async throws {
+        let long = String(repeating: "x", count: (1 << 20) + 1)
+        let (message, _) = await turn(KiroStubClient(
+            kiroEvent("toolUseEvent", #"{"name":"write","toolUseId":"t1","input":{"text":""# + long + #""}}"#)
+        ))
+        #expect(message.stopReason == .toolUse)
+        guard case .toolCall(let call)? = message.content.first else {
+            Issue.record("no call: \(message)")
+            return
+        }
+        #expect(call.arguments["text"] == .string(long))
+    }
+
+    @Test("Text after a call closes the call before it is said")
+    func textAfterCall() async throws {
+        let (message, events) = await turn(KiroStubClient(
+            kiroEvent("toolUseEvent", #"{"name":"ls","toolUseId":"t1","input":"{\"a\":1}"}"#),
+            kiroEvent("assistantResponseEvent", #"{"content":"then"}"#)
+        ))
+        #expect(said(message) == #"|call:t1/ls|args:{"a":1}|text:then|stop:toolUse"#)
+        let order = events.compactMap { event -> String? in
+            switch event {
+            case .toolCallEnd: return "callEnd"
+            case .textStart: return "textStart"
+            default: return nil
+            }
+        }
+        #expect(order == ["callEnd", "textStart"])
+    }
+
     @Test("An exception in the stream fails the turn, what was said kept")
     func streamException() async throws {
         let (message, events) = await turn(KiroStubClient(

@@ -44,6 +44,13 @@ public func parseAWSEventStream(
 /// event, so a cut-off one shows only as a frame left unfinished.
 struct AWSEventStreamDecoder {
     private var buffer = Data()
+    /// The longest frame taken: Bedrock's megabyte unless the reader's
+    /// vendor sends longer ones.
+    private let maxFrameLength: Int
+
+    init(maxFrameLength: Int = 1 << 20) {
+        self.maxFrameLength = maxFrameLength
+    }
 
     /// True while bytes of a frame not yet complete are held.
     var isMidFrame: Bool { !buffer.isEmpty }
@@ -53,7 +60,7 @@ struct AWSEventStreamDecoder {
         var messages: [AWSEventMessage] = []
         while buffer.count >= 12 {
             let totalLen = Int(readU32BE(buffer, offset: 0))
-            if totalLen <= 0 || totalLen > 1 << 20 {
+            if totalLen <= 0 || totalLen > maxFrameLength {
                 throw NSError(domain: "AWSEventStream", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "invalid frame length \(totalLen)",
                 ])
