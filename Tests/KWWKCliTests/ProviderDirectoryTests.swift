@@ -24,6 +24,8 @@ struct ProviderDirectoryTests {
         ("cursor", "cursor", "cursor", "Cursor", nil),
         ("devin", "devin", "devin", "Devin", nil),
         ("kiro", "kiro", "kiro", "Kiro", nil),
+        ("qoder", "qoder", "qoder", "Qoder", nil),
+        ("qoder-cn", "qoder-cn", "qoder-cn", "Qoder CN", nil),
         ("kimi-coding", "kimi-coding", "kimi-coding", "Kimi For Coding", nil),
         ("xai", "xai", "xai", "xAI Grok", nil),
         ("zai", "zai", "zai", "Z.AI Coding Plan", nil),

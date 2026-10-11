@@ -82,6 +82,12 @@ public enum ModelsCatalog {
             let kiro = loadBundledArray("kiro-models")
             if !kiro.isEmpty { out["kiro"] = kiro }
         }
+        // Qoder's roster is the account's own and every request is built
+        // from the live listing; the bundled rows seed the model picker, the
+        // same ones for both sites.
+        for site in QoderSite.all where out[site.id] == nil {
+            out[site.id] = loadBundledArray("qoder-models").mapValues { QoderModels.placed($0, on: site) }
+        }
         return out
     }
 

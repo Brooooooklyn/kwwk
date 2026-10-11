@@ -73,6 +73,8 @@ public actor OAuthManager {
             CursorOAuthProvider(),
             DevinOAuthProvider(),
             KiroOAuthProvider(),
+            QoderOAuthProvider(site: .global),
+            QoderOAuthProvider(site: .cn),
             KimiCodingOAuthProvider(),
             XaiOAuthProvider(),
         ]

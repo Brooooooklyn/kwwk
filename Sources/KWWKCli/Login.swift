@@ -50,6 +50,16 @@ let loginProviders: [LoginEntry] = [
         flow: .oauth
     ),
     LoginEntry(
+        id: "qoder",
+        display: "Qoder (qoder.com subscription)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "qoder-cn",
+        display: "Qoder CN (qoder.cn subscription)",
+        flow: .oauth
+    ),
+    LoginEntry(
         id: "kimi-coding",
         display: "Kimi For Coding (Moonshot coding plan)",
         flow: .oauth
@@ -299,6 +309,8 @@ func runOAuthFlow(providerId: String) async throws {
             return try await OAuthLogin.loginDevin(callbacks: callbacks)
         case "kiro":
             return try await OAuthLogin.loginKiro(callbacks: callbacks)
+        case "qoder", "qoder-cn":
+            return try await OAuthLogin.loginQoder(site: .of(providerId), callbacks: callbacks)
         case "kimi-coding":
             return try await OAuthLogin.loginKimiCoding(callbacks: callbacks)
         case "xai":

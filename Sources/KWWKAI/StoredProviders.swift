@@ -283,6 +283,8 @@ public func registerStored(
         return await registerDevin(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
     case "kiro":
         return await registerKiro(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case "qoder", "qoder-cn":
+        return await registerQoder(site: .of(storeId), manager: manager, modelOverride: modelOverride, primeToken: primeToken)
     case "kimi-coding":
         return await registerKimiCoding(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "xai":

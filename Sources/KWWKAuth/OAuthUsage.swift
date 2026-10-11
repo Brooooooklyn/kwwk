@@ -83,6 +83,8 @@ public enum OAuthUsage {
             OpenAICodexUsageReader(),
             KimiCodingUsageReader(),
             KiroUsageReader(),
+            QoderUsageReader(site: .global),
+            QoderUsageReader(site: .cn),
         ] as [any OAuthUsageReader]).map { ($0.providerId, $0) }
     )
 
