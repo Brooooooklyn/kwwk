@@ -172,6 +172,10 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         if let status, (400..<500).contains(status), status != 408, status != 429 { return .invalidRequest }
         switch providerCode?.lowercased() {
         case "canceled", "cancelled": return .cancelled
+        // Cursor answers a team it does not serve in this region as
+        // `unauthenticated` "This region is not yet available for your
+        // team"; signing in again changes nothing.
+        case "permission_denied", "unauthenticated" where text.contains("region is not yet available"): return .invalidRequest
         case "permission_denied", "unauthenticated": return .authentication
         case "invalid_argument", "not_found", "already_exists", "failed_precondition", "aborted", "out_of_range", "unimplemented", "data_loss": return .invalidRequest
         default: break
@@ -183,6 +187,10 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             "monthly usage limit", "usage limit reached", "usage_limit_reached", "gousagelimiterror", "freeusagelimiterror",
             // Z.ai / Zhipu 429 code 1113: no balance or no plan behind the key.
             "insufficient balance", "no resource package", "余额不足", "请充值"].contains(where: text.contains) { return .quota }
+        // Cursor's plan refusals arrive as `resource_exhausted` marked not
+        // retryable ("Free plans can only use Auto…"); a bare
+        // `resource_exhausted` is still a busy server.
+        if providerCode?.lowercased() == "resource_exhausted", shouldRetry == false { return .quota }
         // An actual concurrency/short-window cap is backpressure, not spent
         // account credit. Match cap signals, not benign concurrency wording.
         if Self.isTransientLimit(text) { return .rateLimit }

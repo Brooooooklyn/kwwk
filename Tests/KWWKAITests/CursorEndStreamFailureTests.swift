@@ -15,6 +15,7 @@ struct CursorEndStreamFailureTests {
         #expect(failure.providerCode == "resource_exhausted")
         #expect(failure.shouldRetry == false)
         #expect(!failure.isRetryable)
+        #expect(failure.category == .quota)
         #expect(failure.message.hasSuffix(
             "Named models unavailable: Free plans can only use Auto. Switch to Auto or upgrade plans to continue."
         ))
@@ -32,5 +33,13 @@ struct CursorEndStreamFailureTests {
         }
         // A stream that ended well carries no error.
         #expect(CursorConnectResponse.failureFromEndStream(Data("{}".utf8)) == nil)
+    }
+
+    @Test("a region Cursor does not serve the team in is not a login failure")
+    func regionRefusal() throws {
+        let body = Data(#"{"error":{"code":"unauthenticated","message":"Error","details":[{"debug":{"details":{"title":"Unauthorized request.","detail":"This region is not yet available for your team"}}}]}}"#.utf8)
+        #expect(try #require(CursorConnectResponse.failureFromEndStream(body)).category == .invalidRequest)
+        let login = Data(#"{"error":{"code":"unauthenticated","message":"Error","details":[{"debug":{"error":"ERROR_NOT_LOGGED_IN","details":{"title":"Authentication error","detail":"If you are logged in, try logging out and back in."}}}]}}"#.utf8)
+        #expect(try #require(CursorConnectResponse.failureFromEndStream(login)).category == .authentication)
     }
 }
