@@ -119,10 +119,17 @@ struct AnthropicVendorQuirkTests {
         #expect(toolCalls(message).first?.arguments == ["command": "date"])
     }
 
-    @Test("a tool_use whose start carries its whole input keeps it")
-    func inputCarriedByBlockStart() async {
-        // The second delta is what a relay that sends both would add; it must
-        // not be appended to JSON that is already complete.
+    @Test("a tool_use whose start carries its whole input keeps it", arguments: [false, true])
+    func inputCarriedByBlockStart(repeatedAsDelta: Bool) async {
+        // The relay in the report sends no delta at all. One that sends the
+        // input again as a delta must not have it appended to JSON that is
+        // already complete.
+        let delta = repeatedAsDelta ? """
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\\"command\\\":\\\"date\\\"}"}}
+
+
+        """ : ""
         let message = await reply("""
         event: message_start
         data: {"type":"message_start","message":{"id":"msg","role":"assistant","content":[],"model":"grok","usage":{"input_tokens":1,"output_tokens":0}}}
@@ -130,10 +137,7 @@ struct AnthropicVendorQuirkTests {
         event: content_block_start
         data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"bash","input":{"command":"date"}}}
 
-        event: content_block_delta
-        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\\"command\\\":\\\"date\\\"}"}}
-
-        event: content_block_stop
+        \(delta)event: content_block_stop
         data: {"type":"content_block_stop","index":0}
 
         event: message_delta
