@@ -318,6 +318,18 @@ struct WorkBuddyProviderTests {
         let none = try await sent(ToolChoice.none)
         #expect(none["tool_choice"] == nil)
         #expect(none["tools"] == nil)
+        // What only says how tools are called goes with them, and stays
+        // with the tools that are sent.
+        func serial(_ choice: ToolChoice) async throws -> [String: Any] {
+            let client = StubSSEClient(body: textStream)
+            _ = await run(
+                client: client, context: context,
+                options: StreamOptions(resolvedAuth: auth, toolChoice: choice, parallelToolCalls: false)
+            )
+            return try body(client)
+        }
+        #expect(try await serial(ToolChoice.none)["parallel_tool_calls"] == nil)
+        #expect(try await serial(.auto)["parallel_tool_calls"] as? Bool == false)
     }
 
     @Test("A tool's parameters are given a shape every model takes")

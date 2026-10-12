@@ -171,12 +171,15 @@ enum WorkBuddyWire {
     /// its tools rather than with `none` (plugin 0.1.15, 80bd2d9 / #96;
     /// `request.test.mjs`). The name is the one the tool was sent under:
     /// the provider renames the choice before the body is encoded.
+    ///
+    /// `parallel_tool_calls` goes with the tools. That one is kwwk's own, not
+    /// the plugin's, whose client never sends the field: it says how tools
+    /// are called, and OpenAI's models refuse it on a chat that has none.
     static func mendToolChoice(_ root: inout [String: Any]) {
         guard let choice = root["tool_choice"] else { return }
         if let word = choice as? String {
             guard word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "none" else { return }
-            root["tool_choice"] = nil
-            root["tools"] = nil
+            withoutTools(&root)
             return
         }
         guard let object = choice as? [String: Any] else {
@@ -185,8 +188,7 @@ enum WorkBuddyWire {
         }
         switch (object["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "none":
-            root["tool_choice"] = nil
-            root["tools"] = nil
+            withoutTools(&root)
         case "auto":
             root["tool_choice"] = "auto"
         case "required":
@@ -198,6 +200,10 @@ enum WorkBuddyWire {
         default:
             root["tool_choice"] = nil
         }
+    }
+
+    private static func withoutTools(_ root: inout [String: Any]) {
+        for field in ["tool_choice", "tools", "functions", "parallel_tool_calls"] { root[field] = nil }
     }
 
     /// The words both builds answer 400 "Illegal API invocation from an
