@@ -479,7 +479,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     /// the model vendor's own reason (an effort the model refuses, say) rides
     /// as JSON text in `details`. A refused sign-in and a spent plan get
     /// magpie's wording, which the failure classifier reads as authentication
-    /// and quota.
+    /// and quota; a refused sign-in keeps what Qoder said of it.
     static func failure(status: Int, body: Data) -> ProviderFailure {
         let status = (400...599).contains(status) ? status : 502
         var message = String(decoding: body.prefix(4096), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -492,10 +492,15 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 message += ": " + reason
             }
         }
-        if message.isEmpty { message = HTTPURLResponse.localizedString(forStatusCode: status) }
+        // A refused chat reads as a lapsed sign-in, but Qoder's own words go
+        // with it: a 401 right after signing in is not a lapsed sign-in, and
+        // only its reason says what it is (magpie-plugins qoder 0.2.12,
+        // `usage.test.mjs` "a refused chat").
         if status == 401 || status == 403 {
-            return ProviderFailure(message: "Qoder: the sign-in lapsed — sign in again", httpStatus: 401)
+            let said = message.isEmpty ? "" : " (Qoder said \(status): \(message.prefix(300)))"
+            return ProviderFailure(message: "Qoder: the sign-in lapsed — sign in again" + said, httpStatus: 401)
         }
+        if message.isEmpty { message = HTTPURLResponse.localizedString(forStatusCode: status) }
         if status == 429 || message.lowercased().contains("quota") {
             return ProviderFailure(message: "usage limit reached: " + message, httpStatus: 429)
         }

@@ -636,8 +636,8 @@ struct QoderChatStreamTests {
     }
 
     @Test("A refusal inside the stream fails the turn with its status", arguments: [
-        (401, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again", 401, ProviderFailure.Category.authentication),
-        (403, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again", 401, .authentication),
+        (401, #"{"message":"device not trusted"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 401: device not trusted)", 401, ProviderFailure.Category.authentication),
+        (403, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 403: upstream failure)", 401, .authentication),
         (429, #"{"message":"额度已耗尽"}"#, "usage limit reached: 额度已耗尽", 429, .quota),
         (500, #"{"message":"upstream failure"}"#, "Qoder: upstream failure", 500, .server),
         (400, #"{"message":"Your quota is used up"}"#, "usage limit reached: Your quota is used up", 429, .quota),
@@ -662,7 +662,9 @@ struct QoderChatStreamTests {
     }
 
     @Test("A refused request fails with Qoder's reason, its status and a retry hint", arguments: [
-        (401, #"{"message":"token expired"}"#, "Qoder: the sign-in lapsed — sign in again", ProviderFailure.Category.authentication),
+        (401, #"{"message":"token expired"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 401: token expired)", ProviderFailure.Category.authentication),
+        // Qoder gave no reason: none is made up.
+        (403, "", "Qoder: the sign-in lapsed — sign in again", .authentication),
         (429, "slow down", "usage limit reached: slow down", .quota),
         (503, "", "Qoder: service unavailable", .server),
         (400, #"{"message":"prompt is too long: 250000 tokens > 200000 maximum"}"#,
