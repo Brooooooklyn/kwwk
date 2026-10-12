@@ -301,6 +301,22 @@ struct QoderRefreshTests {
         #expect(await refreshError(.response(status: 200, body: "<html>"))?.kind == .unavailable)
     }
 
+    // magpie-plugins qoder `refresh.test.mjs` "nothing to renew with".
+    @Test("A login with no refresh token is a sign-in to make again, and nothing is sent", arguments: [false, true])
+    func noRefreshToken(deviceChat: Bool) async throws {
+        let client = QueuedHTTPClient([.response(status: 200, body: #"{"token":"jt-new","refresh_token":"rt-new"}"#)])
+        var login = OAuthCredentials(access: "jt-old", refresh: " ", expires: 0, extras: ["uid": "one"])
+        if deviceChat { login.extras["deviceChat"] = true }
+        do {
+            _ = try await QoderOAuthProvider(site: deviceChat ? .cn : .global).refresh(login, using: client)
+            Issue.record("a login with no refresh token refreshed")
+        } catch let error as OAuthRefreshError {
+            #expect(error.kind == .rejected)
+            #expect(error.status == nil)
+        }
+        #expect(client.requests.isEmpty)
+    }
+
     @Test("A Qoder CN login that chats with its device token refreshes on the device refresh, not the job one")
     func cnDeviceChatRefresh() async throws {
         let expiresAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3 * 60 * 60))

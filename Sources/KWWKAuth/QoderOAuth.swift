@@ -358,6 +358,16 @@ public struct QoderOAuthProvider: OAuthProvider {
     }
 
     private func rotate(_ path: String, _ refreshToken: String, client: HTTPClient) async throws -> Pair {
+        // A login kept with no refresh token (a job token answer may carry
+        // none) has nothing to renew with: that is a sign-in to make again,
+        // not a request to send with an empty token (magpie-plugins qoder
+        // `refreshJob` / `refreshDevice`, `refresh.test.mjs` "nothing to
+        // renew with").
+        guard !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OAuthRefreshError(
+                providerId: id, kind: .rejected, status: nil, detail: "the stored login carries no refresh token"
+            )
+        }
         let data: Data
         do {
             (_, data) = try await OAuthRefreshError.post(
