@@ -195,6 +195,9 @@ Then depend on the libraries you need:
   This includes Claude Pro/Max: `OAuthLogin.loginAnthropic`,
   `AnthropicOAuthProvider` and `AnthropicUsageReader` share the same lightweight
   module. Usage keeps shared windows and model-scoped weekly limits separate.
+  `OAuthUsage.readers` covers Claude, Codex, Kimi For Coding and xAI Grok
+  (the period's credits and capped on-demand spending, as Grok Build's
+  `/usage` reads them).
   The host owns credential storage and refresh locking; usage only reads the
   access token.
 
