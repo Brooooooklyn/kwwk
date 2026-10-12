@@ -354,6 +354,17 @@ struct QoderChatRequestTests {
         #expect(messages[2]["content"] as? String == "second result")
         #expect(messages[3]["tool_call_id"] as? String == "call_A")
         #expect(messages[3]["content"] as? String == "Error: first result")
+
+        // Every text block of a turn that calls tools goes beside the calls.
+        let spoken = QoderChatProvider.chatMessages([.assistant(AssistantMessage(
+            content: [
+                .text(TextContent(text: "First. ")),
+                .toolCall(ToolCall(id: "call_C", name: "read", arguments: [:])),
+                .text(TextContent(text: "Then this.")),
+            ],
+            api: "qoder-chat", provider: "qoder", model: "qfmodel"
+        ))])
+        #expect(spoken[0]["content"] as? String == "First. Then this.")
     }
 
     @Test("A turn of plain text keeps its blocks; one with nothing to say is not sent")

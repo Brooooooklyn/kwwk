@@ -435,9 +435,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                     }
                 }
                 if !calls.isEmpty {
-                    // A turn that calls tools carries its first text as a
-                    // plain string beside them, as magpie sends it.
-                    let text = blocks.lazy.compactMap { $0["text"] as? String }.first { !$0.isEmpty } ?? ""
+                    // A turn that calls tools carries its text as a plain
+                    // string beside them — all of it, joined, as the plugin's
+                    // `textOf` sends it, not only the first block.
+                    let text = blocks.compactMap { $0["text"] as? String }.joined()
                     out.append(["role": "assistant", "content": text, "tool_calls": calls])
                 } else if !blocks.isEmpty {
                     out.append(["role": "assistant", "content": blocks])
