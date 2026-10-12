@@ -347,6 +347,39 @@ struct KiroReplyTests {
         #expect(message.failure?.category == .server)
     }
 
+    // magpie-plugins kiro errors.test.mjs (0.1.4): Kiro sends these as
+    // exceptions under a 200, before any of the answer. The plugin answers
+    // its host a 429 for a throttle or a quota and a 502 for the rest; here
+    // each is the category the rest of kwwk reads those by, and a spent
+    // allowance is not asked again as a throttle would be.
+    @Test("An exception before any of the answer is read by what it says", arguments: [
+        ("ThrottlingException", #"{"message":"Too many requests"}"#,
+         "Kiro: rate limited: Too many requests", ProviderFailure.Category.rateLimit, true),
+        ("ServiceQuotaExceededException", #"{"message":"You have reached the limit"}"#,
+         "Kiro: usage limit reached: You have reached the limit", .quota, false),
+        ("ThrottlingException", #"{"message":"You've reached the limit.","reason":"MONTHLY_REQUEST_COUNT"}"#,
+         "Kiro: usage limit reached: You've reached the limit. (MONTHLY_REQUEST_COUNT)", .quota, false),
+        ("ValidationException", #"{"message":"Input is too long."}"#,
+         "Kiro: ValidationException: Input is too long.", .contextOverflow, false),
+        ("InternalServerException", #"{"message":"boom"}"#,
+         "Kiro: InternalServerException: boom", .server, true),
+    ])
+    func earlyException(
+        kind: String, payload: String, expected: String, category: ProviderFailure.Category, retried: Bool
+    ) async throws {
+        let (message, events) = await turn(KiroStubClient(
+            kiroMessage([(":message-type", "exception"), (":exception-type", kind)], payload)
+        ))
+        #expect(said(message) == "|error:\(expected)|stop:error")
+        #expect(message.failure?.providerCode == kind)
+        #expect(message.failure?.category == category)
+        #expect(message.failure?.isRetryable == retried)
+        guard case .error(reason: .error, _)? = events.last else {
+            Issue.record("the turn did not end in an error: \(events)")
+            return
+        }
+    }
+
     @Test("A reply cut off mid-message is a transport failure, not a finished answer")
     func brokenOff() async throws {
         let full = kiroEvent("assistantResponseEvent", #"{"content":"hi"}"#)
@@ -546,6 +579,77 @@ struct KiroRequestTests {
         let client = KiroStubClient(kiroEvent("toolUseEvent", #"{"toolUseId":"t1","name":"\#(short)","input":"{}"}"#))
         let (message, _) = await turn(client, context: Context(messages: messages, tools: tools))
         #expect(said(message) == "|call:t1/\(long)|args:{}|stop:toolUse")
+    }
+
+    // magpie-plugins kiro tool-names.test.mjs (0.1.8, yetone/magpie#1393):
+    // the reporter's two Claude Code MCP names, 71 and 70 characters, alike
+    // for their first 40. Kiro answers either "Invalid tool use format."
+    @Test("Two long names of one MCP server stay two tools, named alike in the declaration and the history")
+    func longNamesOfOneServer() async throws {
+        let search = "mcp__plugin_cloudflare_cloudflare-docs__search_cloudflare_documentation"
+        let guide = "mcp__plugin_cloudflare_cloudflare-docs__migrate_pages_to_workers_guide"
+        let tools = [
+            Tool(name: search, description: "Search Cloudflare docs", parameters: objectSchema),
+            Tool(name: guide, description: "Guide", parameters: objectSchema),
+            Tool(name: "Read", description: "read", parameters: objectSchema),
+        ]
+        let messages: [Message] = [
+            .user(UserMessage(text: "search")),
+            assistant([call("toolu_1", search, ["q": "workers"])]),
+            result("toolu_1", [.text(TextContent(text: "found"))]),
+        ]
+        let body = try build(messages: messages, tools: tools)
+        let names = BuiltBody.toolNames(body.current)
+        #expect(names.count == 3)
+        #expect(Set(names).count == 3)
+        for name in names {
+            #expect(name.range(of: #"^[a-zA-Z0-9_-]{1,64}$"#, options: .regularExpression) != nil)
+        }
+        #expect(names[0].hasPrefix("mcp__plugin_cloudflare_cloudflare-docs__"))
+        #expect(names[2] == "Read")
+        // The call in the history names the tool as its declaration does,
+        // the same each turn, and its result still pairs by id.
+        let calls = try #require(body.assistant(1)["toolUses"] as? [[String: Any]])
+        #expect(calls.first?["name"] as? String == names[0])
+        #expect(KiroRequest.toolName(search) == names[0])
+        #expect(BuiltBody.results(body.current).first?["toolUseId"] as? String == "toolu_1")
+
+        // A call Kiro makes under the short name comes back under the caller's.
+        let client = KiroStubClient(
+            kiroEvent("toolUseEvent", #"{"toolUseId":"tooluse_x","name":"\#(names[1])","input":"{\"q\":\"r2\"}"}"#),
+            kiroEvent("toolUseEvent", #"{"toolUseId":"tooluse_x","name":"\#(names[1])","stop":true}"#)
+        )
+        let (message, _) = await turn(client, context: Context(messages: messages, tools: tools))
+        #expect(said(message) == #"|call:tooluse_x/\#(guide)|args:{"q":"r2"}|stop:toolUse"#)
+    }
+
+    // magpie-plugins kiro split-calls.test.mjs (yetone/magpie#1275, the
+    // request as Claude Code sent it): one turn's parallel calls split over
+    // two assistant messages are one reply to Kiro, each call answered by its
+    // real result in the message after.
+    @Test("A turn's parallel calls split over two replies keep their results")
+    func splitParallelCalls() throws {
+        let messages: [Message] = [
+            .user(UserMessage(text: "read a and b")),
+            assistant([call("toolu_a", "read", ["path": "a"])]),
+            assistant([call("toolu_b", "read", ["path": "b"])]),
+            result("toolu_a", [.text(TextContent(text: "A!"))]),
+            result("toolu_b", [.text(TextContent(text: "B!"))]),
+        ]
+        func answers(_ body: BuiltBody) -> [String] {
+            BuiltBody.results(body.current).map {
+                "\($0["toolUseId"] as? String ?? "")=\(BuiltBody.resultText($0) ?? "")"
+            }
+        }
+        let body = try build(messages: messages)
+        #expect(body.history.map { $0.keys.first } == ["userInputMessage", "assistantResponseMessage"])
+        let calls = try #require(body.assistant(1)["toolUses"] as? [[String: Any]])
+        #expect(calls.map { $0["toolUseId"] as? String } == ["toolu_a", "toolu_b"])
+        #expect(answers(body) == ["toolu_a=A!", "toolu_b=B!"])
+
+        // A call of the split turn that went unanswered is still answered for.
+        let unanswered = try build(messages: Array(messages[..<3]) + [messages[4]])
+        #expect(answers(unanswered) == ["toolu_b=B!", "toolu_a=\(KiroRequest.noResult)"])
     }
 
     @Test("Thinking is asked for in words at the head of the message, for Claude and Auto alone")

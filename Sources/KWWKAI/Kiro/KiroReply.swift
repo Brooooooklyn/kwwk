@@ -216,12 +216,22 @@ struct KiroReply {
 
     /// What an error in the stream says: `{"message": …, "reason": …}`, the
     /// kind in the frame's headers.
+    ///
+    /// Kiro sends a throttle, a spent allowance or a server error this way
+    /// too, under a 200 and before any of the answer (magpie-plugins kiro
+    /// 0.1.4, errors.test.mjs, where a quota exception is read as a quota).
+    /// A spent allowance is worded as `KiroProvider.httpFailure` words the
+    /// same reasons, so it ends the turn as a quota instead of being asked
+    /// again as a throttle: `ServiceQuotaExceededException`, or any kind
+    /// whose reason is the month's count.
     static func exception(kind: String, payload: Data) -> ProviderFailure {
         let object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
         var message = [object?["message"], object?["Message"]].compactMap { $0 as? String }.first { !$0.isEmpty }
             ?? String(decoding: payload, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         if let reason = object?["reason"] as? String, !reason.isEmpty { message += " (\(reason))" }
-        if kind.lowercased().contains("throttl") {
+        if kind.lowercased().contains("servicequotaexceeded") || KiroProvider.saysUsageLimit(message) {
+            message = "usage limit reached: " + message
+        } else if kind.lowercased().contains("throttl") {
             message = "rate limited: " + message
         } else if !kind.isEmpty {
             message = "\(kind): \(message)"
