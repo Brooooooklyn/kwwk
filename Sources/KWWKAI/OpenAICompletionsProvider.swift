@@ -137,6 +137,14 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                 headers["x-session-affinity"] = sid
             }
         }
+        // Grok keys a conversation's prompt cache by `x-grok-conv-id`; the
+        // Grok Build CLI names every request's conversation there
+        // (magpie-plugins packages/grok index.mjs). Chat Completions on xAI
+        // carries no `prompt_cache_key`, so this is the only name it gets.
+        if compat.isXai, retention != .none,
+           let sid = Self.clampOpenAIPromptCacheKey(options?.sessionId) {
+            headers["x-grok-conv-id"] = sid
+        }
         headersDecorator?(&headers, model, context, options)
         for (k, v) in options?.headers ?? [:] { headers[k] = v }
 
@@ -497,6 +505,8 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         var supportsLongCacheRetention: Bool
         /// xAI's API: a tool's parameters must be an object at the root.
         var requiresObjectSchemaRoot: Bool
+        /// xAI's API, by provider or host.
+        var isXai: Bool
         /// Moonshot's API or Kimi's coding host.
         var isKimi: Bool
     }
@@ -558,6 +568,7 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             sessionAffinityFormat: c?.sessionAffinityFormat ?? (isOpenRouter ? "openrouter" : "openai"),
             supportsLongCacheRetention: c?.supportsLongCacheRetention ?? !(isTogether || isCloudflareWorkers || isCfGateway || isNvidia || isAntLing),
             requiresObjectSchemaRoot: isGrok,
+            isXai: isGrok,
             isKimi: isMoonshot || has("api.kimi.com") || has("api.kimi.ai")
         )
     }
