@@ -261,8 +261,10 @@ struct WorkBuddyProviderTests {
             client: renamed, context: context,
             options: StreamOptions(resolvedAuth: auth, toolChoice: .tool(name: "fs.read"))
         )
-        let choice = try #require(try body(renamed)["tool_choice"] as? [String: Any])
-        #expect((choice["function"] as? [String: Any])?["name"] as? String == "fs_read_2")
+        // The choice follows the tool to the name it was sent under, as the
+        // string WorkBuddy takes (plugin request.test.mjs, "flattens
+        // tool_choice after tool names are made safe").
+        #expect(try body(renamed)["tool_choice"] as? String == "fs_read_2")
         // The call the model made of the renamed tool is the caller's.
         guard case .toolCall(let call)? = result.content.last else {
             Issue.record("no tool call in \(result.content)")
@@ -292,6 +294,30 @@ struct WorkBuddyProviderTests {
         let messages = sent["messages"] as? [[String: Any]] ?? []
         let calls = messages.compactMap { $0["tool_calls"] as? [[String: Any]] }.flatMap { $0 }
         #expect(calls.compactMap { ($0["function"] as? [String: Any])?["name"] as? String } == ["fs_read_2"])
+    }
+
+    @Test("The tool choice goes as WorkBuddy's string; a chat that may call no tool goes without its tools")
+    func toolChoice() async throws {
+        let context = Context(
+            systemPrompt: "You are kwwk.",
+            messages: [.user(UserMessage(text: "run it"))],
+            tools: [Tool(name: "read", description: "Read", parameters: .object(["type": .string("object")]))]
+        )
+        func sent(_ choice: ToolChoice?) async throws -> [String: Any] {
+            let client = StubSSEClient(body: textStream)
+            _ = await run(client: client, context: context, options: StreamOptions(resolvedAuth: auth, toolChoice: choice))
+            return try body(client)
+        }
+        #expect(try await sent(.tool(name: "read"))["tool_choice"] as? String == "read")
+        #expect(try await sent(.auto)["tool_choice"] as? String == "auto")
+        #expect(try await sent(.required)["tool_choice"] as? String == "required")
+        let unasked = try await sent(nil)
+        #expect(unasked["tool_choice"] == nil)
+        #expect((unasked["tools"] as? [[String: Any]])?.count == 1)
+        // plugin request.test.mjs, "removes tools when tool_choice is none".
+        let none = try await sent(ToolChoice.none)
+        #expect(none["tool_choice"] == nil)
+        #expect(none["tools"] == nil)
     }
 
     @Test("A tool's parameters are given a shape every model takes")
@@ -388,6 +414,9 @@ struct WorkBuddyProviderTests {
         #"{"code":14018,"msg":"credits used up","data":null}"#,
         #"{"code":"14018","msg":"额度已用尽"}"#,
         #"{"error":{"message":"Credits exhausted for this cycle","code":14018}}"#,
+        // The answer the plugin's refused.test.mjs holds, and one cut short.
+        #"{"error":{"data":{"code":14018,"msg":"Credits exhausted. Please visit the link below to purchase add-on packs and get more credits: https://www.codebuddy.ai/profile/usage ","requestId":"test-req"}}}"#,
+        #"{"error":{"data":{"code":14018,"msg":"Credits exh"#,
     ])
     func creditsExhausted(body: String) async throws {
         let failure = try #require(await refusal(status: 429, body))
@@ -453,6 +482,30 @@ struct WorkBuddyWireTests {
             let before = try #require(JSONSerialization.jsonObject(with: Data(same.utf8)) as? NSDictionary)
             #expect(try mended(same) as NSDictionary == before)
         }
+    }
+
+    @Test("An object tool choice of any spelling becomes a string, or goes")
+    func mendToolChoice() {
+        func mended(_ choice: Any) -> [String: Any] {
+            var root: [String: Any] = ["tools": [["type": "function"]], "tool_choice": choice]
+            WorkBuddyWire.mendToolChoice(&root)
+            return root
+        }
+        #expect(mended(["type": "function", "function": ["name": " fs_read "]])["tool_choice"] as? String == "fs_read")
+        // A named choice with no name leaves the model to choose.
+        #expect(mended(["type": "function"])["tool_choice"] as? String == "auto")
+        #expect(mended(["type": "Required"])["tool_choice"] as? String == "required")
+        #expect(mended(["type": "auto"])["tool_choice"] as? String == "auto")
+        for none: Any in ["none", ["type": "none"]] {
+            #expect(mended(none)["tool_choice"] == nil)
+            #expect(mended(none)["tools"] == nil)
+        }
+        // What isn't a choice WorkBuddy knows goes; the tools stay.
+        for unknown: Any in [["type": "allowed_tools"], 3] {
+            #expect(mended(unknown)["tool_choice"] == nil)
+            #expect(mended(unknown)["tools"] != nil)
+        }
+        #expect(mended("required")["tool_choice"] as? String == "required")
     }
 
     @Test("The words WorkBuddy refuses a chat for are reworded, in every message and whatever their case")
