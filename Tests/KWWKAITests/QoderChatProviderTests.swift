@@ -597,16 +597,41 @@ struct QoderChatStreamTests {
         #expect(final.usage.output == 2)
     }
 
-    @Test("Nothing after the finishing chunk is read")
-    func stopsAtFinish() async throws {
+    // magpie-plugins qoder `stream.test.mjs`, a reply shaped as a real
+    // qmodel one: the usage comes after the finish, in a chunk with no
+    // choices, then `[DONE]` and the timing line.
+    @Test("The usage Qoder sends after the finish is read, cached and reasoning tokens with it")
+    func usageAfterFinish() async throws {
+        let (_, final, _) = await turn(reply: .init(body: [
+            envelope(#"{"choices":[{"delta":{"content":"Hi","reasoning_content":""},"index":0}],"object":"chat.completion.chunk"}"#),
+            envelope(#"{"choices":[{"delta":{"content":""},"finish_reason":"stop","index":0}],"object":"chat.completion.chunk"}"#),
+            envelope(#"{"choices":[],"object":"chat.completion.chunk","usage":{"completion_tokens":106,"completion_tokens_details":{"reasoning_tokens":94},"prompt_tokens":40,"prompt_tokens_details":{"cached_tokens":32},"total_tokens":146}}"#),
+            envelope("[DONE]"),
+            #"{"firstTokenDuration":821,"totalDuration":1982}"#,
+        ].map { "data:\($0)\n\n" }.joined()))
+        #expect(texts(final) == "Hi")
+        #expect(final.stopReason == .stop)
+        #expect(final.content.count == 1)
+        // The prompt's 40 are 32 read from the cache and 8 that were not.
+        #expect(final.usage.input == 8)
+        #expect(final.usage.cacheRead == 32)
+        #expect(final.usage.output == 106)
+        #expect(final.usage.reasoning == 94)
+        #expect(final.usage.totalTokens == 146)
+    }
+
+    @Test("The reply is read to Qoder's [DONE], and nothing after it")
+    func stopsAtDone() async throws {
         let (_, final, _) = await turn(reply: .init(body: sse([
             content("done"),
-            envelope(#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#),
+            envelope(#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#),
             content(" and more"),
+            envelope("[DONE]"),
+            content(" and never this"),
             failedEnvelope(500, #"{"message":"late"}"#),
         ])))
-        #expect(texts(final) == "done")
-        #expect(final.stopReason == .stop)
+        #expect(texts(final) == "done and more")
+        #expect(final.stopReason == .length)
         #expect(final.usage.totalTokens == 0)
     }
 

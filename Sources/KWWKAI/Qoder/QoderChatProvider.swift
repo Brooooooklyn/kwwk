@@ -125,11 +125,14 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     }
 
     /// Reads the reply line by line. Qoder's chunks are single `data:` lines;
-    /// anything else (`[DONE]`, the closing timing line, blanks) is skipped.
-    /// The turn ends at the chunk that names a `finish_reason`. A stream that
-    /// ends without one is taken as it stands, as magpie's `decodeQoder`
-    /// takes it, unless it stopped inside a tool call's arguments — those
-    /// would run as `{}`.
+    /// anything else (blanks, the timing line that closes the stream) is
+    /// skipped. The turn ends at the envelope whose body is `[DONE]`, not at
+    /// the chunk that names a `finish_reason`: Qoder sends the token usage in
+    /// a chunk of its own after the finish, with no choices, so reading only
+    /// up to the finish counted every reply as 0 tokens (measured on a real
+    /// account, magpie-plugins qoder 0.2.4, `stream.test.mjs`). A stream that
+    /// ends without a finish is taken as it stands, unless it stopped inside
+    /// a tool call's arguments — those would run as `{}`.
     static func drive(
         body: AsyncThrowingStream<Data, Error>,
         state: QoderStreamState,
@@ -146,7 +149,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             if !held.isEmpty { state.appendText(held, emit: emit) }
         }
 
-        /// False once the turn has finished.
+        /// False once Qoder has said the reply is done.
         func handle(_ line: Data) throws -> Bool {
             let text = String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.hasPrefix("data:") else { return true }
@@ -164,6 +167,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             if let status = Self.int(envelope["statusCodeValue"]), status != 200 {
                 throw Self.failure(status: status, body: Data((inner.isEmpty ? payload : inner).utf8))
             }
+            if inner.trimmingCharacters(in: .whitespacesAndNewlines) == "[DONE]" { return false }
             guard let chunk = (try? JSONSerialization.jsonObject(with: Data(inner.utf8))) as? [String: Any] else {
                 return true
             }
@@ -203,18 +207,23 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 }
             }
             if let finish = choice?["finish_reason"] as? String, !finish.isEmpty {
-                if let usage = chunk["usage"] as? [String: Any] {
-                    state.setUsage(
-                        input: Self.int(usage["prompt_tokens"]) ?? 0, output: Self.int(usage["completion_tokens"]) ?? 0
-                    )
-                }
                 state.setFinishReason(finish)
-                return false
+            }
+            // Whichever chunk carries the usage: the finishing one, or the
+            // one of its own that follows it.
+            if let usage = chunk["usage"] as? [String: Any] {
+                state.setUsage(
+                    prompt: Self.int(usage["prompt_tokens"]) ?? 0,
+                    completion: Self.int(usage["completion_tokens"]) ?? 0,
+                    cached: Self.int((usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"]) ?? 0,
+                    reasoning: Self.int((usage["completion_tokens_details"] as? [String: Any])?["reasoning_tokens"]) ?? 0
+                )
             }
             return true
         }
 
         var received = false
+        var done = false
         do {
             reading: for try await chunk in body {
                 if cancellation?.isCancelled == true { return }
@@ -223,7 +232,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 while let newline = buffer.firstIndex(of: 0x0A) {
                     let line = buffer[buffer.startIndex..<newline]
                     buffer = Data(buffer[buffer.index(after: newline)...])
-                    if try !handle(Data(line)) { break reading }
+                    if try !handle(Data(line)) {
+                        done = true
+                        break reading
+                    }
                 }
             }
         } catch let failure as ProviderFailure {
@@ -235,7 +247,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             throw failure
         }
         if cancellation?.isCancelled == true { return }
-        if !state.sawFinishReason {
+        if !done {
             if !buffer.isEmpty { _ = try handle(buffer) }
             // Nothing at all under a 200 is no API reply (magpie #1012).
             if !received {
