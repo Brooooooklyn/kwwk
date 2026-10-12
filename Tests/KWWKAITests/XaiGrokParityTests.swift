@@ -144,6 +144,25 @@ struct XaiGrokParityTests {
         #expect((untouched[1]["parameters"] as? [String: Any])?["anyOf"] != nil)
     }
 
+    @Test("Responses: a tool added mid-conversation is folded for xAI the same")
+    func addedToolRootUnionFolded() throws {
+        let system = SystemMessage(toolsAdded: [Tool(name: "automation_update", description: "d", parameters: Self.rootUnion)])
+        for (flag, key) in [(\ModelCompat.supportsAdditionalTools, "additional_tools"), (\.supportsToolSearch, "tool_search_output")] {
+            for (base, folds) in [(Self.responses, true), (OpenAIResponsesTests.model, false)] {
+                var model = base
+                var compat = model.compat ?? ModelCompat()
+                compat[keyPath: flag] = true
+                model.compat = compat
+                let items = OpenAIResponsesProvider.encodeToolAdditions(system, model: model, seed: "s")
+                let item = try #require(items.compactMap { anyFromJSONValue($0) as? [String: Any] }
+                    .first { $0["type"] as? String == key })
+                let parameters = try #require((item["tools"] as? [[String: Any]])?.first?["parameters"] as? [String: Any])
+                #expect((parameters["type"] as? String == "object") == folds)
+                #expect((parameters["anyOf"] == nil) == folds)
+            }
+        }
+    }
+
     // MARK: Prompt cache
 
     @Test("Responses: xAI is told the conversation in x-grok-conv-id, the body's prompt_cache_key")

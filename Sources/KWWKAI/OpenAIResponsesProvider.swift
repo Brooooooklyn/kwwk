@@ -1250,11 +1250,14 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     static func encodeToolAdditions(_ system: SystemMessage, model: Model, seed: String) -> [JSONValue] {
         let tools = system.toolsAdded ?? []
         guard !tools.isEmpty else { return [] }
+        // A tool added mid-conversation is held to the same root rule as one
+        // in `tools`: xAI refuses the request over either.
+        let objectRoot = isXai(model)
         if model.compat?.supportsAdditionalTools == true {
             return [.object([
                 "type": .string("additional_tools"),
                 "role": .string("developer"),
-                "tools": .array(tools.map { encodeTool($0) }),
+                "tools": .array(tools.map { encodeTool($0, objectRoot: objectRoot) }),
             ])]
         }
         guard model.compat?.supportsToolSearch == true else { return [] }
@@ -1278,7 +1281,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 "call_id": .string(callId),
                 "execution": .string("client"),
                 "status": .string("completed"),
-                "tools": .array(tools.map { encodeTool($0, deferLoading: true) }),
+                "tools": .array(tools.map { encodeTool($0, deferLoading: true, objectRoot: objectRoot) }),
             ]),
         ]
     }
