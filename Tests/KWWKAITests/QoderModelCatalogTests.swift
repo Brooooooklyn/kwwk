@@ -14,6 +14,13 @@ let qoderFlashListing = #"""
  "thinking_config":{"disabled":{"description":"Disable thinking"},"enabled":{"is_default":true,"efforts":{"xhigh":{},"medium":{"is_default":true},"low":{}}}}}]}
 """#
 
+/// Qwen3.8-Flash with the windows Qoder's Context setting offers it, the
+/// fixture of magpie-plugins qoder `context.test.mjs`.
+let qoderWindowedFlashListing = #"""
+{"chat":[{"key":"qfmodel","enable":true,"display_name":"Qwen3.8-Flash","max_input_tokens":180000,"is_reasoning":true,
+ "context_config":{"1m":{"token_count":1000000},"200k":{"token_count":200000,"is_default":true},"400k":{"token_count":400000}}}]}
+"""#
+
 /// A model that cannot stop thinking: no `disabled` branch.
 let qoderAlwaysThinkingListing = #"{"chat":[{"key":"gf","enable":true,"is_reasoning":true,"thinking_config":{"enabled":{"is_default":true,"efforts":{"max":{"is_default":true},"high":{},"low":{}}}}}]}"#
 
@@ -61,6 +68,90 @@ struct QoderModelListingTests {
         // A dropped entry does not shift the ones after it.
         let kept = try parse(#"{"chat":[{"key":"auto","enable":true},\#(second)]}"#)
         #expect(kept.map(\.config) == [second])
+    }
+
+    // magpie-plugins qoder `models.test.mjs`, on the real listing.
+    @Test("The models are the app scene's, with any model only chat still lists kept where it stood")
+    func scenes() throws {
+        let models = try parse(qoderRealListing)
+        #expect(models.map(\.key) == [
+            "ultimate", "performance", "fast", "efficient", "smodel", "cmodel", "qmodel_38max", "qfmodel",
+            "qmodel_latest", "qmodel", "gmodel", "gfmodel", "kmodel_latest", "kmodel", "dmodel", "dfmodel", "mmodel",
+        ])
+        // The app's Fast is listed at its price, and chat's Performance stays.
+        let fast = try #require(models.first { $0.key == "fast" })
+        #expect(fast.displayName == "Fast")
+        #expect(fast.rate == 0.8)
+        #expect(models.first { $0.key == "performance" }?.rate == 1.1)
+    }
+
+    /// The real listing's two scenes as JSON objects, to change and re-list.
+    private func realScenes() throws -> (chat: [[String: Any]], app: [[String: Any]]) {
+        let root = try #require(JSONSerialization.jsonObject(with: Data(qoderRealListing.utf8)) as? [String: Any])
+        return (try #require(root["chat"] as? [[String: Any]]), try #require(root["app"] as? [[String: Any]]))
+    }
+
+    private func parse(scenes: [String: [[String: Any]]]) throws -> [QoderModelInfo] {
+        try QoderModels.parse(JSONSerialization.data(withJSONObject: scenes))
+    }
+
+    @Test("A model both scenes list is listed once, as the app gives it; one the app turns off is off")
+    func appWins() throws {
+        var (chat, app) = try realScenes()
+        chat = chat.map { $0["key"] as? String == "ultimate" ? $0.merging(["display_name": "Ultimate (chat)"]) { $1 } : $0 }
+        let models = try parse(scenes: ["chat": chat, "app": app])
+        #expect(models.filter { $0.key == "ultimate" }.map(\.displayName) == ["Ultimate"])
+        // The request sends the app's entry back, not chat's.
+        #expect(models.first { $0.key == "ultimate" }?.config.contains("(chat)") == false)
+
+        app = app.map { $0["key"] as? String == "efficient" ? $0.merging(["enable": false]) { $1 } : $0 }
+        #expect(try !parse(scenes: ["chat": chat, "app": app]).contains { $0.key == "efficient" })
+    }
+
+    @Test("A listing with only one scene lists that scene")
+    func oneScene() throws {
+        let (chat, app) = try realScenes()
+        let chatOnly = try parse(scenes: ["chat": chat]).map(\.key)
+        #expect(chatOnly.contains("performance"))
+        #expect(!chatOnly.contains("fast"))
+        let appOnly = try parse(scenes: ["app": app]).map(\.key)
+        #expect(appOnly.contains("fast"))
+        #expect(!appOnly.contains("performance"))
+    }
+
+    // magpie-plugins qoder `context.test.mjs`.
+    @Test("A model's context is the largest window Qoder offers it, not max_input_tokens")
+    func contextWindows() throws {
+        let flash = try qoderListed(qoderWindowedFlashListing)
+        #expect(flash.maxInputTokens == 180_000)
+        #expect(flash.windows == [200_000, 400_000, 1_000_000])
+        #expect(flash.defaultWindow == 200_000)
+        #expect(flash.contextWindow == 1_000_000)
+        #expect(QoderModels.model(flash, site: .global).contextWindow == 1_000_000)
+
+        // available_context_windows is read without context_config.
+        let listed = try qoderListed(
+            #"{"chat":[{"key":"x","enable":true,"max_input_tokens":180000,"available_context_windows":[400000,200000],"default_context_window":200000}]}"#
+        )
+        #expect(listed.windows == [200_000, 400_000])
+        #expect(listed.defaultWindow == 200_000)
+        #expect(listed.contextWindow == 400_000)
+
+        // A model with no windows keeps max_input_tokens.
+        let plain = try qoderListed(#"{"chat":[{"key":"y","enable":true,"max_input_tokens":180000}]}"#)
+        #expect(plain.windows.isEmpty)
+        #expect(plain.contextWindow == 180_000)
+
+        // The real listing: Qwen3.8-Flash offers 1M over a 180K
+        // max_input_tokens; Kimi-K2.8-Preview names no max_input_tokens at
+        // all; Efficient offers no windows.
+        let real = try parse(qoderRealListing)
+        #expect(real.first { $0.key == "qfmodel" }?.contextWindow == 1_000_000)
+        #expect(real.first { $0.key == "qfmodel" }?.defaultWindow == 200_000)
+        #expect(real.first { $0.key == "kmodel" }?.maxInputTokens == 0)
+        #expect(real.first { $0.key == "kmodel" }?.contextWindow == 1_000_000)
+        #expect(real.first { $0.key == "performance" }?.defaultWindow == 272_000)
+        #expect(real.first { $0.key == "efficient" }?.contextWindow == 200_000)
     }
 
     @Test("Efforts come from thinking_config, weakest first; a model with no disabled branch always thinks")
@@ -192,6 +283,16 @@ struct QoderCatalogTests {
         #expect(ModelsCatalog.models(for: "qoder").map(\.id) == ModelsCatalog.models(for: "qoder-cn").map(\.id))
         #expect(ModelsCatalog.models(for: "qoder").allSatisfy { $0.api == "qoder-chat" && $0.provider == "qoder" })
         #expect(qoderModel(id: QoderModels.defaultModelId, site: .cn) == cn)
+    }
+
+    @Test("The bundled seed is the real listing of 2026-10-12, each model as that listing gives it")
+    func seedIsTheRealListing() throws {
+        let listed = try QoderModels.parse(Data(qoderRealListing.utf8)).map { QoderModels.model($0, site: .global) }
+        let seed = ModelsCatalog.models(for: "qoder")
+        #expect(Set(seed.map(\.id)) == Set(listed.map(\.id)))
+        for model in listed {
+            #expect(ModelsCatalog.model(provider: "qoder", id: model.id) == model)
+        }
     }
 
     @Test("A model the seed doesn't carry still routes: the request is built from the live listing")

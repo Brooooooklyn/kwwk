@@ -268,6 +268,42 @@ struct QoderChatRequestTests {
         #expect(parameters["reasoning_effort"] == nil)
     }
 
+    // magpie-plugins qoder `context.test.mjs`.
+    @Test("A request is sent the default window while it fits, a larger one only when it needs it")
+    func contextLength() throws {
+        func sent(_ characters: Int, maxTokens: Int? = nil, ceiling: Int? = nil) throws -> Int? {
+            let context = Context(messages: [.user(UserMessage(text: String(repeating: "a", count: characters)))])
+            let data = try QoderChatProvider.chatBody(
+                model: try qoderListed(qoderWindowedFlashListing), context: context, messages: context.messages,
+                options: StreamOptions(maxTokens: maxTokens), windowCeiling: ceiling
+            )
+            let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return (body["parameters"] as? [String: Any])?["context_length"] as? Int
+        }
+        #expect(try sent(10) == 200_000)
+        #expect(try sent(300_000 * 3) == 400_000)
+        #expect(try sent(700_000 * 3) == 1_000_000)
+        #expect(try sent(1_200_000 * 3) == 1_000_000)
+
+        // A window holds the reply too: a prompt that fits 200K alone but
+        // not with the max_tokens asked for the reply is sent the next one
+        // (yetone/magpie#700). None asked: the 32000 Qoder is sent counts.
+        #expect(try sent(180_000 * 3, maxTokens: 1000) == 200_000)
+        #expect(try sent(180_000 * 3, maxTokens: 32_000) == 400_000)
+        #expect(try sent(180_000 * 3) == 400_000)
+
+        // The catalog row's context window is the most that is asked for: a
+        // caller that lowers it stays in the smaller windows.
+        #expect(try sent(700_000 * 3, ceiling: 400_000) == 400_000)
+        #expect(try sent(700_000 * 3, ceiling: 200_000) == 200_000)
+        #expect(try sent(700_000 * 3, ceiling: 100_000) == 200_000)
+
+        // A model with no windows is sent its max_input_tokens, and one
+        // with neither is sent none.
+        #expect(try parameters(nil)["context_length"] as? Int == 200_000)
+        #expect(try parameters(nil, #"{"chat":[{"key":"y","enable":true}]}"#)["context_length"] == nil)
+    }
+
     @Test("Tools are withheld for tool choice none; a required call is asked for in the system prompt")
     func toolChoice() throws {
         let context = Context(messages: [], tools: [Tool(name: "read", description: "", parameters: .null)])

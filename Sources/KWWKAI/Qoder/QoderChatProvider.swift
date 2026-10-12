@@ -65,9 +65,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 model.id, baseURL: baseURL, account: account, site: site, client: client, cancellation: cancellation
             )
             let messages = TransformMessages.normalize(context.messages, model: model)
-            let wire = QoderCodec.encodeRequestBody(
-                try Self.chatBody(model: listed, context: context, messages: messages, options: options)
-            )
+            let wire = QoderCodec.encodeRequestBody(try Self.chatBody(
+                model: listed, context: context, messages: messages, options: options,
+                windowCeiling: model.contextWindow
+            ))
             let url = baseURL + Self.chatPath
             var headers = try QoderCosy.headers(
                 url: url, account: account, body: wire, timestamp: Int64(Date().timeIntervalSince1970)
@@ -290,9 +291,12 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     /// The plaintext JSON `agent_chat_generation` takes: the system prompt
     /// (twice — as `system` and as the first message), the turns as OpenAI
     /// turns, the caller's tools as native function tools, and the model's
-    /// own listing entry.
+    /// own listing entry. `windowCeiling` is the catalog row's context
+    /// window, the most the caller means the model to be asked for (see
+    /// `contextLength`); nil asks for whatever the request needs.
     static func chatBody(
-        model: QoderModelInfo, context: Context, messages: [Message], options: StreamOptions?
+        model: QoderModelInfo, context: Context, messages: [Message], options: StreamOptions?,
+        windowCeiling: Int? = nil
     ) throws -> Data {
         let tools = context.tools ?? []
         var systemText = systemPreamble
@@ -302,13 +306,23 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         }
         let system: [String: Any] = ["type": "text", "text": systemText]
 
+        var sendsTools = !tools.isEmpty
+        if case .none? = options?.toolChoice { sendsTools = false }
+        let chatTools = sendsTools ? try tools.map(chatTool) : []
+        let turns = [["role": "system", "content": [system]] as [String: Any]] + chatMessages(messages)
+
         let thinking = thinking(options?.reasoning, model: model)
-        var parameters: [String: Any] = [
-            "enable_thinking": thinking.enabled,
-            "max_tokens": options?.maxTokens.flatMap { $0 > 0 ? $0 : nil } ?? QoderModels.defaultMaxTokens,
-        ]
+        let maxTokens = options?.maxTokens.flatMap { $0 > 0 ? $0 : nil } ?? QoderModels.defaultMaxTokens
+        var parameters: [String: Any] = ["enable_thinking": thinking.enabled, "max_tokens": maxTokens]
         if let effort = thinking.effort { parameters["reasoning_effort"] = effort }
-        if model.maxInputTokens > 0 { parameters["context_length"] = model.maxInputTokens }
+        let window = contextLength(
+            model: model,
+            requestBytes: model.windows.isEmpty ? 0 : try JSONSerialization.data(
+                withJSONObject: ["m": turns, "t": chatTools], options: [.withoutEscapingSlashes]
+            ).count,
+            reply: maxTokens, ceiling: windowCeiling
+        )
+        if window > 0 { parameters["context_length"] = window }
 
         let configPlaceholder = "model_config:" + UUID().uuidString
         var body: [String: Any] = [
@@ -323,11 +337,9 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             "session_type": "app",
             "model_config": configPlaceholder,
             "system": [system],
-            "messages": [["role": "system", "content": [system]] as [String: Any]] + chatMessages(messages),
+            "messages": turns,
         ]
-        var sendsTools = !tools.isEmpty
-        if case .none? = options?.toolChoice { sendsTools = false }
-        if sendsTools { body["tools"] = try tools.map(chatTool) }
+        if sendsTools { body["tools"] = chatTools }
 
         // The listing entry goes back exactly as Qoder listed it, so it is
         // spliced in as text rather than rebuilt.
@@ -337,6 +349,33 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             throw ProviderFailure(message: "Qoder: missing model configuration")
         }
         return Data(text.replacingCharacters(in: slot, with: model.config).utf8)
+    }
+
+    /// The context window a request asks for (`context_length`) on a model
+    /// that offers several: the one Qoder's client picks by default
+    /// (`max_input_tokens` when it flags none) while the request fits it,
+    /// else the smallest that holds it, else the largest. A larger window
+    /// may cost more — Qoder says changing the Context "may change the
+    /// rate" — so it is asked for only when the conversation needs it, and
+    /// never past `ceiling`, the catalog row's context window: a caller that
+    /// lowers the row keeps its requests in the smaller windows.
+    ///
+    /// The request is counted generously, a token for every 3 bytes of its
+    /// turns and tools as JSON, so a window is raised a little early rather
+    /// than late; and the reply's `max_tokens` is counted in it, since a
+    /// window holds the prompt and the reply: a 180K conversation asking 32K
+    /// for the reply is sent 400K, not the 200K it would overflow
+    /// (magpie-plugins qoder 0.2.5 and 0.2.6, yetone/magpie#722 and #700,
+    /// `context.test.mjs`). A model that lists no windows is sent its
+    /// `max_input_tokens`, as before.
+    static func contextLength(model: QoderModelInfo, requestBytes: Int, reply: Int, ceiling: Int? = nil) -> Int {
+        guard !model.windows.isEmpty else { return model.maxInputTokens }
+        let base = model.defaultWindow > 0 ? model.defaultWindow
+            : model.maxInputTokens > 0 ? model.maxInputTokens : model.contextWindow
+        let need = (requestBytes + 2) / 3 + max(0, reply)
+        if need <= base { return base }
+        let offered = model.windows.filter { $0 <= ceiling ?? .max }
+        return offered.first { $0 >= need } ?? max(offered.last ?? base, base)
     }
 
     /// The turns as OpenAI turns, the format Qoder's chat endpoint takes: an
