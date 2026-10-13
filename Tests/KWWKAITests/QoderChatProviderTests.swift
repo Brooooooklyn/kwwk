@@ -726,6 +726,73 @@ struct QoderChatStreamTests {
         #expect(client.requests(to: chatPath).count == 1)
     }
 
+    // magpie-plugins qoder `busy.test.mjs` (#98). The body is the one Qoder
+    // gave a real trial account on 2026-10-12, byte for byte
+    // (`testdata/queued-10605.json`).
+    private static let queued = #"{"code":"10605","message":"{\"isQueued\":false,\"modelKey\":\"efficient\",\"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,\"serviceAvailable\":false,\"waitTime\":0}"}"#
+
+    @Test("A 403 with Qoder's queue code 10605 is a busy model to ask again after its 30s, not a lapsed sign-in", arguments: [false, true])
+    func queueIsBusy(inStream: Bool) async throws {
+        let reply: QoderStubClient.Reply = inStream
+            ? .init(body: sse([failedEnvelope(403, Self.queued)]))
+            : .init(status: 403, contentType: "application/json", body: Self.queued)
+        let (_, final, _) = await turn(reply: reply)
+        #expect(final.errorMessage == "Qoder is busy for efficient (this plan's queue: p3); try again in 30s")
+        #expect(final.failure?.httpStatus == 503)
+        #expect(final.failure?.retryAfterMs == 30_000)
+        #expect(final.failure?.category == .server)
+        #expect(final.failure?.isRetryable == true)
+    }
+
+    @Test("The queue's own wait is used, a queued request says so, and with no wait it is 30s")
+    func queueWait() throws {
+        func queue(_ state: [String: Any], code: String = "10605", status: Int = 403) -> ProviderFailure {
+            QoderChatProvider.failure(status: status, body: Data(jsonText(["code": code, "message": jsonText(state)]).utf8))
+        }
+        let queued = queue(["isQueued": true, "modelKey": "ultimate", "retryAfterSeconds": 12.2])
+        #expect(queued.httpStatus == 503)
+        #expect(queued.retryAfterMs == 13_000)
+        #expect(queued.message == "Qoder queued the request for ultimate; try again in 13s")
+        let unavailable = queue(["serviceAvailable": false])
+        #expect(unavailable.httpStatus == 503)
+        #expect(unavailable.retryAfterMs == 30_000)
+        // The code alone, as a number or text, the message plain text.
+        for body in [#"{"code":"10605","message":"busy"}"#, #"{"code":10605,"message":"busy"}"#] {
+            let plain = QoderChatProvider.failure(status: 403, body: Data(body.utf8))
+            #expect(plain.httpStatus == 503)
+            #expect(plain.retryAfterMs == 30_000)
+        }
+        // A queue state under another status (429) is the same wait.
+        let limited = queue(["serviceAvailable": false, "retryAfterSeconds": 5], code: "", status: 429)
+        #expect(limited.httpStatus == 503)
+        #expect(limited.retryAfterMs == 5000)
+        #expect(limited.category == .server)
+    }
+
+    @Test("Qoder's other codes on a 403 aren't a lapsed sign-in either; 105 and no code are")
+    func codes() throws {
+        func failure(_ code: String, _ message: String) -> ProviderFailure {
+            QoderChatProvider.failure(status: 403, body: Data(jsonText(["code": code, "message": message]).utf8))
+        }
+        for code in ["110", "112", "113", "114", "115", "116", "117", "118", "119", "122"] {
+            let spent = failure(code, "credits used up")
+            #expect(spent.message == "usage limit reached: credits used up")
+            #expect(spent.httpStatus == 429)
+            #expect(spent.category == .quota)
+        }
+        for code in ["406", "416", "430", "80411", "80412", "100400", "100401", "100403"] {
+            let refused = failure(code, "no")
+            #expect(refused.message == "Qoder refused the request (\(code)): no")
+            #expect(refused.httpStatus == 400)
+            #expect(refused.category == .invalidRequest)
+        }
+        let expired = failure("105", "login expired")
+        #expect(expired.message == "Qoder: the sign-in lapsed — sign in again (Qoder said 403: login expired)")
+        #expect(expired.httpStatus == 401)
+        #expect(expired.category == .authentication)
+        #expect(QoderChatProvider.failure(status: 403, body: Data()).message == "Qoder: the sign-in lapsed — sign in again")
+    }
+
     @Test("A refused listing fails the turn before any chat")
     func listingRefused() async throws {
         let client = QoderStubClient([listPath: [.init(status: 403, contentType: "application/json", body: "{}")]])
