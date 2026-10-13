@@ -282,7 +282,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         options: StreamOptions?,
         holdSealRefusal: Bool
     ) async -> Bool {
-        let headers = makeHeaders(options: options, accept: "text/event-stream")
+        var headers = makeHeaders(options: options, accept: "text/event-stream")
+        Self.nameXaiConversation(&headers, model: model, options: options)
         await options?.emitVerbose(
             source: "openai.responses.http",
             message: "starting HTTP stream",
@@ -351,6 +352,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         holdSealRefusal: Bool = false
     ) async -> WebSocketRunResult {
         var headers = makeHeaders(options: options, accept: nil)
+        Self.nameXaiConversation(&headers, model: model, options: options)
         // Match Codex's WebSocket transport: the Responses WebSocket beta
         // header replaces the HTTP/SSE `responses=experimental` beta.
         mergeHeader(&headers, name: "OpenAI-Beta", value: "responses_websockets=2026-02-06", append: false)
@@ -619,6 +621,25 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             mergeHeader(&headers, name: k, value: v, append: false)
         }
         return headers
+    }
+
+    // MARK: - xAI
+
+    /// xAI's own API, by provider or host. Its rules below are the ones the
+    /// Grok Build backend applies too (magpie-plugins packages/grok).
+    static func isXai(_ model: Model) -> Bool {
+        model.provider == "xai" || model.baseURL.lowercased().contains("api.x.ai")
+    }
+
+    /// Grok keys a conversation's prompt cache by the `x-grok-conv-id`
+    /// header: the Grok Build CLI sends the request's `prompt_cache_key`
+    /// there (magpie-plugins packages/grok index.mjs, README "Requests").
+    /// Sent on the same terms as the body's key; a caller's own header wins.
+    static func nameXaiConversation(_ headers: inout [String: String], model: Model, options: StreamOptions?) {
+        guard isXai(model), (options?.cacheRetention ?? .short) != .none,
+              let sid = OpenAICompletionsProvider.clampOpenAIPromptCacheKey(options?.sessionId),
+              !headers.keys.contains(where: { $0.lowercased() == "x-grok-conv-id" }) else { return }
+        headers["x-grok-conv-id"] = sid
     }
 
     private func webSocketEvents(
@@ -1116,7 +1137,14 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             root["instructions"] = .string(sys)
         }
         if let tools = context.tools, !tools.isEmpty {
-            root["tools"] = .array(tools.map { encodeTool($0) })
+            // xAI answers 400 "[invalid_client_tool_schema] ... tool parameter
+            // root must be an object type (root schema is an anyOf/oneOf union
+            // with a non-object branch)" to a union at a tool's root, and one
+            // such tool fails every request (magpie #1271; magpie-plugins
+            // packages/grok schema.test.mjs sends Codex desktop's
+            // automation_update schema).
+            let objectRoot = isXai(model)
+            root["tools"] = .array(tools.map { encodeTool($0, objectRoot: objectRoot) })
             if let choice = encodeToolChoice(options?.toolChoice) {
                 root["tool_choice"] = choice
             }
@@ -1205,12 +1233,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
 
     /// One Responses function tool definition. Tools loaded through a
     /// client `tool_search_output` carry `defer_loading`.
-    static func encodeTool(_ tool: Tool, deferLoading: Bool = false) -> JSONValue {
+    static func encodeTool(_ tool: Tool, deferLoading: Bool = false, objectRoot: Bool = false) -> JSONValue {
         var entry: [String: JSONValue] = [
             "type": .string("function"),
             "name": .string(tool.name),
             "description": .string(tool.description),
-            "parameters": tool.parameters,
+            "parameters": objectRoot ? ToolSchemaRoot.objectRoot(tool.parameters) : tool.parameters,
         ]
         if deferLoading { entry["defer_loading"] = .bool(true) }
         return .object(entry)
@@ -1222,11 +1250,14 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     static func encodeToolAdditions(_ system: SystemMessage, model: Model, seed: String) -> [JSONValue] {
         let tools = system.toolsAdded ?? []
         guard !tools.isEmpty else { return [] }
+        // A tool added mid-conversation is held to the same root rule as one
+        // in `tools`: xAI refuses the request over either.
+        let objectRoot = isXai(model)
         if model.compat?.supportsAdditionalTools == true {
             return [.object([
                 "type": .string("additional_tools"),
                 "role": .string("developer"),
-                "tools": .array(tools.map { encodeTool($0) }),
+                "tools": .array(tools.map { encodeTool($0, objectRoot: objectRoot) }),
             ])]
         }
         guard model.compat?.supportsToolSearch == true else { return [] }
@@ -1250,7 +1281,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 "call_id": .string(callId),
                 "execution": .string("client"),
                 "status": .string("completed"),
-                "tools": .array(tools.map { encodeTool($0, deferLoading: true) }),
+                "tools": .array(tools.map { encodeTool($0, deferLoading: true, objectRoot: objectRoot) }),
             ]),
         ]
     }
@@ -1314,8 +1345,13 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                     for block in a.content {
                         guard case .thinking(let th) = block,
                               let sig = th.thinkingSignature, !sig.isEmpty,
-                              let item = Self.parseReasoningItem(sig),
+                              var item = Self.parseReasoningItem(sig),
                               !Self.isRefused(.object(item), refusedSeals) else { continue }
+                        // Grok cannot read the encrypted reasoning beside a
+                        // `"content": null` and refuses the request ("Could
+                        // not decode the compaction blob", magpie grok.go
+                        // grokBody; the plugin's rewrite drops it the same).
+                        if isXai(model), item["content"] == .null { item["content"] = nil }
                         out.append(.object(item))
                     }
                 }
