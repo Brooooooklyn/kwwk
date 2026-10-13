@@ -10,7 +10,7 @@ import FoundationNetworking
 //
 // Ported from magpie's `internal/provider/workbuddy.go` and, where the two
 // differ, from the plugin magpie now serves WorkBuddy through
-// (`@magpie-community/opencode-workbuddy-auth` 0.1.13): the enterprise
+// (`@magpie-community/opencode-workbuddy-auth` 0.1.15): the enterprise
 // headers come from the plugin alone.
 
 /// One WorkBuddy build. The China build and WorkBuddy AI, the international

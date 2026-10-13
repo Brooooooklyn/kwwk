@@ -11,7 +11,8 @@ import Foundation
 /// delta, an empty name repeated on a call's argument fragments (magpie
 /// `chattidy.go`). What is WorkBuddy's own goes around it: the client's
 /// headers and the chat's ids, the body's mends, tools in shapes its models
-/// take with the model's calls named back, and its refusals in its own words.
+/// take with the model's calls named back, the tool choice as the string its
+/// gateway takes, and its refusals in its own words.
 public struct WorkBuddyProvider: APIProvider {
     public let api = "openai-completions"
     public let site: WorkBuddySite
@@ -23,7 +24,10 @@ public struct WorkBuddyProvider: APIProvider {
             client: client,
             defaultBaseURL: URL(string: site.chatBaseURL)!,
             extraHeaders: WorkBuddyWire.clientHeaders(site),
-            bodyDecorator: { root, _, _, _ in WorkBuddyWire.mendMessages(&root) },
+            bodyDecorator: { root, _, _, _ in
+                WorkBuddyWire.mendMessages(&root)
+                WorkBuddyWire.mendToolChoice(&root)
+            },
             headersDecorator: { headers, _, context, options in
                 let ids = WorkBuddyWire.conversationHeaders(context: context, sessionId: options?.sessionId)
                 for (name, value) in ids { headers[name] = value }

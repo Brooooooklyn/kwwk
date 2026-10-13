@@ -5,7 +5,7 @@ import Crypto
 /// the client's headers, the conversation's ids, and the mends its gateway
 /// needs on the body. Ported from magpie's `internal/provider/workbuddy.go`
 /// and the plugin magpie serves WorkBuddy through
-/// (`@magpie-community/opencode-workbuddy-auth` 0.1.13), where the newer of
+/// (`@magpie-community/opencode-workbuddy-auth` 0.1.15), where the newer of
 /// these were tried against real accounts.
 enum WorkBuddyWire {
     // MARK: - Headers
@@ -161,6 +161,49 @@ enum WorkBuddyWire {
             messages.insert(["role": "system", "content": defaultSystemPrompt], at: 0)
         }
         root["messages"] = messages
+    }
+
+    /// The tool choice in the spelling WorkBuddy's gateway takes, a string:
+    /// `auto`, `required`, or the name of the tool the model must call.
+    /// OpenAI's object for a named tool (`{"type": "function", "function":
+    /// {"name"}}`) is answered 400 "Invalid request parameters", the GPT
+    /// family above all, and a chat that may call no tool is sent without
+    /// its tools rather than with `none` (plugin 0.1.15, 80bd2d9 / #96;
+    /// `request.test.mjs`). The name is the one the tool was sent under:
+    /// the provider renames the choice before the body is encoded.
+    ///
+    /// `parallel_tool_calls` goes with the tools. That one is kwwk's own, not
+    /// the plugin's, whose client never sends the field: it says how tools
+    /// are called, and OpenAI's models refuse it on a chat that has none.
+    static func mendToolChoice(_ root: inout [String: Any]) {
+        guard let choice = root["tool_choice"] else { return }
+        if let word = choice as? String {
+            guard word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "none" else { return }
+            withoutTools(&root)
+            return
+        }
+        guard let object = choice as? [String: Any] else {
+            root["tool_choice"] = nil
+            return
+        }
+        switch (object["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "none":
+            withoutTools(&root)
+        case "auto":
+            root["tool_choice"] = "auto"
+        case "required":
+            root["tool_choice"] = "required"
+        case "function":
+            let name = ((object["function"] as? [String: Any])?["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            root["tool_choice"] = name.isEmpty ? "auto" : name
+        default:
+            root["tool_choice"] = nil
+        }
+    }
+
+    private static func withoutTools(_ root: inout [String: Any]) {
+        for field in ["tool_choice", "tools", "functions", "parallel_tool_calls"] { root[field] = nil }
     }
 
     /// The words both builds answer 400 "Illegal API invocation from an
@@ -322,8 +365,10 @@ enum WorkBuddyWire {
         + "take them out of the system prompt, or use another provider"
 
     /// WorkBuddy wants an active credit package even for a model it serves
-    /// free: an account with no package, or none left, is answered code 14018
-    /// (magpie-community/plugins #25).
+    /// free: an account with no package, or none left, is answered 429 with
+    /// code 14018, "Credits exhausted. Please visit the link below to
+    /// purchase add-on packs…", under `error.data` (magpie-community/plugins
+    /// #25, `refused.test.mjs`).
     static let exhaustedHint =
         "WorkBuddy requires an active credit package even for 0-rate free models; check your account package balance"
 
