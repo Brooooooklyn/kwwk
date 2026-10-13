@@ -193,7 +193,10 @@ struct QoderCosyTests {
 
     @Test("RSA raises a padded block to 65537 modulo Qoder's key")
     func rsa() {
-        let block = [0x00, 0x02] + (0..<109).map { UInt8($0 % 255 + 1) } + [0x00] + Array("0123456789abcdef".utf8)
+        var block: [UInt8] = [0x00, 0x02]
+        block += (0..<109).map { UInt8($0 % 255 + 1) }
+        block.append(0x00)
+        block += Array("0123456789abcdef".utf8)
         #expect(QoderRSA.raw(block) == bytes(
             "0a3df0703dc7572dd84ad3fd6ac2be99a534c5a789fb48be00916fcba8be437f55827b897b41a7a8953431aca2f97a45"
                 + "58263333b45308121f075f1cf6b2830fe3e42659f9547a1ffe4eca279ca6040b0237e01f0c5014903147ecc7333c37ea"
