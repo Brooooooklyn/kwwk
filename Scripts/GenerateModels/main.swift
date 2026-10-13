@@ -40,7 +40,17 @@ struct GenerateModels {
 
     private static func run() throws {
         let options = try Options.parse(CommandLine.arguments.dropFirst())
-        let result = try GenerateModelsCore.generate(fromFile: URL(fileURLWithPath: options.inputPath))
+        // kwwk's own corrections ride every regeneration when the command is
+        // run from the repository root, where they live.
+        let overridesURL = URL(fileURLWithPath: GenerateModelsCore.defaultOverridesPath)
+        let hasOverrides = FileManager.default.fileExists(atPath: overridesURL.path)
+        let result = try GenerateModelsCore.generate(
+            fromFile: URL(fileURLWithPath: options.inputPath),
+            overridesFile: hasOverrides ? overridesURL : nil
+        )
+        print(hasOverrides
+            ? "applied \(GenerateModelsCore.defaultOverridesPath)"
+            : "no \(GenerateModelsCore.defaultOverridesPath) here; pi-mono's catalog as it is")
         let outputURL = URL(fileURLWithPath: options.outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -87,6 +97,9 @@ struct GenerateModels {
 
     options:
       -h, --help               show this help
+
+    \(GenerateModelsCore.defaultOverridesPath), read from the working directory,
+    is laid over pi-mono's catalog: kwwk's own corrections, kept across syncs.
 
     note: also run `swift run kwwk-generate-cursor-models` when syncing —
     the Cursor catalog (cursor-models.json) is regenerated separately.

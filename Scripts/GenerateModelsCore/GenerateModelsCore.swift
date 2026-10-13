@@ -3,16 +3,53 @@ import Foundation
 public enum GenerateModelsCore {
     public static let defaultOutputPath = "Sources/KWWKAI/Resources/models.json"
 
-    public static func generate(fromFile inputURL: URL) throws -> ModelGenerationResult {
+    /// What kwwk knows better than pi-mono, kept beside the generator so a
+    /// regeneration carries it instead of losing it.
+    public static let defaultOverridesPath = "Scripts/models.overrides.json"
+
+    public static func generate(fromFile inputURL: URL, overridesFile: URL? = nil) throws -> ModelGenerationResult {
         let raw = try String(contentsOf: inputURL, encoding: .utf8)
-        return try generate(from: raw, resolvingImportsRelativeTo: inputURL.deletingLastPathComponent())
+        let overrides = try overridesFile.map { try Data(contentsOf: $0) }
+        return try generate(
+            from: raw, resolvingImportsRelativeTo: inputURL.deletingLastPathComponent(), overrides: overrides
+        )
     }
 
-    public static func generate(from raw: String) throws -> ModelGenerationResult {
-        try generate(from: raw, resolvingImportsRelativeTo: nil)
+    public static func generate(from raw: String, overrides: Data? = nil) throws -> ModelGenerationResult {
+        try generate(from: raw, resolvingImportsRelativeTo: nil, overrides: overrides)
     }
 
-    private static func generate(from raw: String, resolvingImportsRelativeTo baseURL: URL?) throws -> ModelGenerationResult {
+    /// Lays `overrides` over pi-mono's catalog:
+    ///
+    ///     {"<provider>": {"<model id>": {"contextWindow": 264000, "compat": {"x": true}}}}
+    ///
+    /// An object merges into the one under it, key by key; any other value
+    /// replaces; `null` takes the key — or the model, or the provider — out.
+    /// A key beginning with `$` is a note to the reader and is dropped.
+    static func applying(overrides: Data, to root: [String: Any]) throws -> [String: Any] {
+        guard let patch = try JSONSerialization.jsonObject(with: overrides) as? [String: Any] else {
+            throw GenerateModelsCoreError.conversion("overrides are not a JSON object")
+        }
+        return merge(patch, into: root)
+    }
+
+    private static func merge(_ patch: [String: Any], into base: [String: Any]) -> [String: Any] {
+        var out = base
+        for (key, value) in patch where !key.hasPrefix("$") {
+            if value is NSNull {
+                out[key] = nil
+            } else if let object = value as? [String: Any] {
+                out[key] = merge(object, into: out[key] as? [String: Any] ?? [:])
+            } else {
+                out[key] = value
+            }
+        }
+        return out
+    }
+
+    private static func generate(
+        from raw: String, resolvingImportsRelativeTo baseURL: URL?, overrides: Data?
+    ) throws -> ModelGenerationResult {
         let expanded = try inlineImportedModelObjects(in: raw, baseURL: baseURL)
         let json = try convert(expanded)
 
@@ -27,8 +64,11 @@ public enum GenerateModelsCore {
             let snippet = String(json.prefix(500))
             throw GenerateModelsCoreError.conversion("JSON parse failed: \(error)\nsnippet:\n\(snippet)")
         }
-        guard let parsedRoot = parsed as? [String: Any],
-              let root = normalizeJSONNumbers(parsedRoot) as? [String: Any] else {
+        guard let parsedRoot = parsed as? [String: Any] else {
+            throw GenerateModelsCoreError.conversion("top-level catalog is not an object")
+        }
+        let overlaid = try overrides.map { try applying(overrides: $0, to: parsedRoot) } ?? parsedRoot
+        guard let root = normalizeJSONNumbers(overlaid) as? [String: Any] else {
             throw GenerateModelsCoreError.conversion("top-level catalog is not an object")
         }
 
