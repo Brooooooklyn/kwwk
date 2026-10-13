@@ -45,6 +45,31 @@ let loginProviders: [LoginEntry] = [
         flow: .oauth
     ),
     LoginEntry(
+        id: "kiro",
+        display: "Kiro (AWS Builder ID / Identity Center, Google or GitHub)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "qoder",
+        display: "Qoder (qoder.com subscription)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "qoder-cn",
+        display: "Qoder CN (qoder.cn subscription)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "workbuddy",
+        display: "WorkBuddy (Tencent CodeBuddy plan, China build)",
+        flow: .oauth
+    ),
+    LoginEntry(
+        id: "workbuddy-ai",
+        display: "WorkBuddy AI (CodeBuddy plan, international build)",
+        flow: .oauth
+    ),
+    LoginEntry(
         id: "kimi-coding",
         display: "Kimi For Coding (Moonshot coding plan)",
         flow: .oauth
@@ -241,8 +266,37 @@ func terminalLoginCallbacks() -> OAuthLogin.Callbacks {
         },
         onProgress: { msg in
             FileHandle.standardError.write(Data("\(msg)\n".utf8))
+        },
+        onUserCode: { code, _ in
+            if Clipboard.copy(code) {
+                FileHandle.standardError.write(Data("code copied to the clipboard\n".utf8))
+            }
         }
     )
+}
+
+/// Best-effort copy for a device flow's code, so a page that does not take
+/// it from the link needs a paste rather than typing.
+enum Clipboard {
+    static func copy(_ text: String) -> Bool {
+        #if os(macOS)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
+        let pipe = Pipe()
+        process.standardInput = pipe
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        pipe.fileHandleForWriting.write(Data(text.utf8))
+        pipe.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+        #else
+        return false
+        #endif
+    }
 }
 
 /// Best-effort URL opener. macOS uses `/usr/bin/open`; Linux tries
@@ -292,6 +346,14 @@ func runOAuthFlow(providerId: String) async throws {
             return try await OAuthLogin.loginCursor(callbacks: callbacks)
         case "devin":
             return try await OAuthLogin.loginDevin(callbacks: callbacks)
+        case "kiro":
+            return try await OAuthLogin.loginKiro(callbacks: callbacks)
+        case "qoder", "qoder-cn":
+            return try await OAuthLogin.loginQoder(site: .of(providerId), callbacks: callbacks)
+        case WorkBuddySite.china.id:
+            return try await OAuthLogin.loginWorkBuddy(site: .china, callbacks: callbacks)
+        case WorkBuddySite.international.id:
+            return try await OAuthLogin.loginWorkBuddy(site: .international, callbacks: callbacks)
         case "kimi-coding":
             return try await OAuthLogin.loginKimiCoding(callbacks: callbacks)
         case "xai":

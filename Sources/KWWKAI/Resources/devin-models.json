@@ -144,6 +144,38 @@
     "compat" : {
       "supportsParallelToolCalls" : true
     },
+    "contextWindow" : 1000000,
+    "cost" : {
+      "cacheRead" : 0.01,
+      "cacheWrite" : 0,
+      "input" : 0.1,
+      "output" : 0.5
+    },
+    "id" : "claude-haiku-5-5",
+    "input" : [
+      "text",
+      "image"
+    ],
+    "maxTokens" : 128000,
+    "name" : "Claude Haiku 5.5",
+    "provider" : "devin",
+    "reasoning" : true,
+    "thinkingLevelMap" : {
+      "high" : "claude-haiku-5-5-high",
+      "low" : "claude-haiku-5-5-low",
+      "max" : "claude-haiku-5-5-max",
+      "medium" : "claude-haiku-5-5-medium",
+      "minimal" : null,
+      "off" : null,
+      "xhigh" : "claude-haiku-5-5-xhigh"
+    }
+  },
+  {
+    "api" : "devin-agent",
+    "baseUrl" : "https:\/\/server.codeium.com",
+    "compat" : {
+      "supportsParallelToolCalls" : true
+    },
     "contextWindow" : 200000,
     "cost" : {
       "cacheRead" : 0.5,
@@ -562,7 +594,7 @@
     },
     "contextWindow" : 1000000,
     "cost" : {
-      "cacheRead" : 0.2,
+      "cacheRead" : 0.1,
       "cacheWrite" : 0,
       "input" : 2,
       "output" : 10
@@ -1797,34 +1829,6 @@
       "minimal" : null,
       "off" : null,
       "xhigh" : "grok-4-7-xhigh"
-    }
-  },
-  {
-    "api" : "devin-agent",
-    "baseUrl" : "https:\/\/server.codeium.com",
-    "contextWindow" : 1048576,
-    "cost" : {
-      "cacheRead" : 0.26,
-      "cacheWrite" : 0,
-      "input" : 1.4,
-      "output" : 4.4
-    },
-    "id" : "inkling",
-    "input" : [
-      "text"
-    ],
-    "maxTokens" : 131072,
-    "name" : "Inkling",
-    "provider" : "devin",
-    "reasoning" : true,
-    "thinkingLevelMap" : {
-      "high" : "inkling-high",
-      "low" : "inkling-low",
-      "max" : "inkling-max",
-      "medium" : "inkling-medium",
-      "minimal" : null,
-      "off" : "inkling-none",
-      "xhigh" : "inkling-xhigh"
     }
   },
   {

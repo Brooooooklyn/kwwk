@@ -121,6 +121,41 @@ public let providerDirectory: [ProviderDescriptor] = [
         formTitle: nil
     ),
     ProviderDescriptor(
+        storeId: "kiro",
+        scope: "kiro",
+        catalogKey: "kiro",
+        displayName: "Kiro",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
+        storeId: "qoder",
+        scope: "qoder",
+        catalogKey: "qoder",
+        displayName: "Qoder",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
+        storeId: "qoder-cn",
+        scope: "qoder-cn",
+        catalogKey: "qoder-cn",
+        displayName: "Qoder CN",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
+        storeId: "workbuddy",
+        scope: "workbuddy",
+        catalogKey: "workbuddy",
+        displayName: "WorkBuddy",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
+        storeId: "workbuddy-ai",
+        scope: "workbuddy-ai",
+        catalogKey: "workbuddy-ai",
+        displayName: "WorkBuddy AI",
+        formTitle: nil
+    ),
+    ProviderDescriptor(
         storeId: "kimi-coding",
         scope: "kimi-coding",
         catalogKey: "kimi-coding",

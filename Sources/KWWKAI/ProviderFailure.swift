@@ -155,6 +155,11 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         // Payment/account failures cannot be repaired by replay, even when a
         // proxy includes transient transport prose or an explicit retry hint.
         if status == 402 { return .quota }
+        // A provider that names spent credit by code means it under any
+        // refusal status: WorkBuddy's code 14018 comes with one nobody has
+        // recorded, and neither a new login nor a mended request brings
+        // credit back.
+        if let status, (400..<500).contains(status), providerCode?.lowercased() == "insufficient_quota" { return .quota }
         let text = [providerCode, rawStopReason, message, upstreamMessage].compactMap { $0 }.joined(separator: " ").lowercased()
         // The outer HTTP response governs nested transport prose. Overflow is
         // a distinct recovery only for an input rejection, never auth/limits.

@@ -1,0 +1,216 @@
+[
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "auto",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "Auto",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-haiku-4.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Haiku 4.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-opus-5.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 128000,
+    "name": "Claude Opus 5.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-sonnet-4.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Sonnet 4.5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 1000000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-sonnet-5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Sonnet 5",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "claude-sonnet-4",
+    "input": [
+      "text",
+      "image"
+    ],
+    "maxTokens": 64000,
+    "name": "Claude Sonnet 4",
+    "provider": "kiro",
+    "reasoning": true
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 164000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "deepseek-3.2",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "DeepSeek 3.2",
+    "provider": "kiro",
+    "reasoning": false
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 200000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "glm-5",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "GLM-5",
+    "provider": "kiro",
+    "reasoning": false
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 196000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "minimax-m2.1",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "MiniMax M2.1",
+    "provider": "kiro",
+    "reasoning": false
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 196000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "minimax-m2.5",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "MiniMax M2.5",
+    "provider": "kiro",
+    "reasoning": false
+  },
+  {
+    "api": "kiro-assistant",
+    "baseUrl": "https://runtime.us-east-1.kiro.dev",
+    "contextWindow": 256000,
+    "cost": {
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "input": 0,
+      "output": 0
+    },
+    "id": "qwen3-coder-next",
+    "input": [
+      "text"
+    ],
+    "maxTokens": 64000,
+    "name": "Qwen3 Coder Next",
+    "provider": "kiro",
+    "reasoning": false
+  }
+]

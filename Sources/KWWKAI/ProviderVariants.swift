@@ -341,10 +341,15 @@ public enum ProviderVariants {
     // auth + editor headers as the completions/anthropic variants. The
     // default Responses URL (`{base}/v1/responses`) matches what Copilot
     // accepts.
+    //
+    // HTTP only unless a caller hands in a WebSocket client: Copilot lists
+    // `ws:/responses`, but turns down the incremental follow-up a tool
+    // result rides on ("previous_response_id is not the most recent
+    // response in this session", GPT-5.4 and 5.4 mini, 2026-10-13).
     public static func githubCopilotResponses(
         sessionToken: String? = nil,
         client: HTTPClient = URLSessionHTTPClient(),
-        webSocketClient: WebSocketClient? = URLSessionWebSocketClient.platformDefault,
+        webSocketClient: WebSocketClient? = nil,
         integrationID: String = "vscode-chat",
         api: String = "openai-responses",
         baseURL: URL = URL(string: "https://api.individual.githubcopilot.com")!

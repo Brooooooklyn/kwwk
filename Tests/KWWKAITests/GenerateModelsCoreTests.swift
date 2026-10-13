@@ -40,6 +40,68 @@ struct GenerateModelsCoreTests {
         #expect(model["contextWindow"] as? Int == 400_000)
     }
 
+    @Test("kwwk's overrides lie over pi's catalog: merge, replace, remove")
+    func appliesOverrides() throws {
+        let raw = """
+        export const MODELS = {
+          "github-copilot": {
+            "claude-sonnet-5": {
+              id: "claude-sonnet-5",
+              contextWindow: 1000000,
+              maxTokens: 128000,
+              compat: {
+                forceAdaptiveThinking: true,
+              },
+            },
+            "gemini-3.5-flash": {
+              id: "gemini-3.5-flash",
+              contextWindow: 1000000,
+            },
+          },
+          "google": {
+            "gemini-3.1-pro": {
+              id: "gemini-3.1-pro",
+              contextWindow: 1000000,
+            },
+          },
+        } as const;
+        """
+        let overrides = Data(#"""
+        {"$note": "why",
+         "github-copilot": {
+           "$note": "where it was read",
+           "claude-sonnet-5": {"contextWindow": 264000, "compat": {"supportsTemperature": false}},
+           "gemini-3.5-flash": null}}
+        """#.utf8)
+        let root = try GenerateModelsCore.generate(from: raw, overrides: overrides).root
+        let copilot = try #require(root["github-copilot"] as? [String: Any])
+        let sonnet = try #require(copilot["claude-sonnet-5"] as? [String: Any])
+        #expect(sonnet["contextWindow"] as? Int == 264_000)
+        // What the override does not name stays pi's.
+        #expect(sonnet["maxTokens"] as? Int == 128_000)
+        let compat = try #require(sonnet["compat"] as? [String: Any])
+        #expect(compat["forceAdaptiveThinking"] as? Bool == true)
+        #expect(compat["supportsTemperature"] as? Bool == false)
+        #expect(copilot["gemini-3.5-flash"] == nil)
+        #expect(copilot["$note"] == nil)
+        #expect(root["$note"] == nil)
+        #expect((root["google"] as? [String: Any])?.count == 1)
+    }
+
+    @Test("The checked-in overrides are what the bundled catalog carries")
+    func bundledCatalogCarriesOverrides() throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let overrides = try Data(contentsOf: repo.appendingPathComponent(GenerateModelsCore.defaultOverridesPath))
+        let bundled = try #require(try JSONSerialization.jsonObject(with: Data(
+            contentsOf: repo.appendingPathComponent(GenerateModelsCore.defaultOutputPath)
+        )) as? [String: Any])
+        // Laying them over again changes nothing: a regeneration that
+        // skipped them, or a hand edit that never reached them, shows here.
+        let again = try GenerateModelsCore.applying(overrides: overrides, to: bundled)
+        #expect(NSDictionary(dictionary: again).isEqual(to: bundled))
+    }
+
     @Test("inlines split pi provider catalogs")
     func inlinesSplitProviderCatalogs() throws {
         let root = FileManager.default.temporaryDirectory

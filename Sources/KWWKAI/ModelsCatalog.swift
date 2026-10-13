@@ -76,6 +76,23 @@ public enum ModelsCatalog {
             let devin = loadBundledArray("devin-models")
             if !devin.isEmpty { out["devin"] = devin }
         }
+        // Kiro's list is each plan's own; the bundled one is a hand-kept seed
+        // (`KiroModels.fetch` asks an account for its real one).
+        if out["kiro"] == nil {
+            let kiro = loadBundledArray("kiro-models")
+            if !kiro.isEmpty { out["kiro"] = kiro }
+        }
+        // Qoder's roster is the account's own and every request is built
+        // from the live listing; the bundled rows seed the model picker, the
+        // same ones for both sites.
+        for site in QoderSite.all where out[site.id] == nil {
+            out[site.id] = loadBundledArray("qoder-models").mapValues { QoderModels.placed($0, on: site) }
+        }
+        // WorkBuddy's two plans ship magpie's written-in lists, one resource
+        // for each build (`WorkBuddyModels`).
+        for provider in ["workbuddy", "workbuddy-ai"] where out[provider] == nil {
+            out[provider] = loadBundledArray("\(provider)-models")
+        }
         return out
     }
 

@@ -72,6 +72,11 @@ public actor OAuthManager {
             GitHubCopilotOAuthProvider(),
             CursorOAuthProvider(),
             DevinOAuthProvider(),
+            KiroOAuthProvider(),
+            QoderOAuthProvider(site: .global),
+            QoderOAuthProvider(site: .cn),
+            WorkBuddyOAuthProvider(site: .china),
+            WorkBuddyOAuthProvider(site: .international),
             KimiCodingOAuthProvider(),
             XaiOAuthProvider(),
         ]

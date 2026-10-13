@@ -65,6 +65,39 @@ struct MultiProviderAuthTests {
         #expect(storedProviderOrder(all) == ["anthropic-api-key", "openrouter"])
     }
 
+    @Test("A Copilot login's model keeps what its catalog entry says, on the session's host")
+    func registerStoredCopilotKeepsCatalogEntry() async throws {
+        try await withSharedAPIRegistry {
+            await APIRegistry.shared.unregisterScope("github-copilot")
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("kwwk-copilot-\(UUID().uuidString.prefix(8))")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
+            try await store.set(OAuthCredentials(
+                access: "session", refresh: "ghu_test", expires: .max,
+                extras: ["endpoint": .string("https://api.business.githubcopilot.com")]
+            ), for: "github-copilot")
+
+            let resolved = try await registerStored(
+                storeId: "github-copilot", store: store, modelOverride: "claude-sonnet-5",
+                context1m: false, primeToken: false
+            )
+            let model = try #require(resolved?.model)
+            let entry = try #require(ModelsCatalog.model(provider: "github-copilot", id: "claude-sonnet-5"))
+            // Copilot answers "thinking.type.enabled is not supported" to a
+            // Sonnet 5 request that lost this.
+            #expect(model.compat?.forceAdaptiveThinking == true)
+            #expect(model.thinkingLevelMap == entry.thinkingLevelMap)
+            #expect(model.baseURL == "https://api.business.githubcopilot.com")
+            // A tool's reply over Copilot's WebSocket is turned down.
+            let responses = await APIRegistry.shared.provider(scope: "github-copilot", api: "openai-responses")
+            let unwrapped = (responses as? CopilotRequestHeadersProvider)?.base as? OpenAIResponsesProvider
+            #expect(unwrapped != nil)
+            #expect(unwrapped?.webSocketClient == nil)
+            await APIRegistry.shared.unregisterScope("github-copilot")
+        }
+    }
+
     @Test("registerStored wires an OpenRouter login with catalog metadata")
     func registerStoredOpenRouter() async throws {
         try await withSharedAPIRegistry {

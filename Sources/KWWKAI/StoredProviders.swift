@@ -281,6 +281,14 @@ public func registerStored(
         return await registerCursor(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "devin":
         return await registerDevin(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case "kiro":
+        return await registerKiro(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case "qoder", "qoder-cn":
+        return await registerQoder(site: .of(storeId), manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+    case WorkBuddySite.china.id, WorkBuddySite.international.id:
+        return await registerWorkBuddy(
+            site: WorkBuddySite.site(id: storeId)!, manager: manager, modelOverride: modelOverride, primeToken: primeToken
+        )
     case "kimi-coding":
         return await registerKimiCoding(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "xai":
@@ -500,21 +508,13 @@ private func registerGitHubCopilot(
     // baseURL across `/model` switches, so every Copilot model routes
     // through the right host.
     let model: Model = {
-        guard let catalog = ModelsCatalog.model(provider: "github-copilot", id: defaultId)
+        guard var catalog = ModelsCatalog.model(provider: "github-copilot", id: defaultId)
         else { return fallback }
-        return Model(
-            id: catalog.id,
-            name: catalog.name,
-            api: catalog.api,
-            provider: catalog.provider,
-            baseURL: baseURLString,
-            reasoning: catalog.reasoning,
-            input: catalog.input,
-            cost: catalog.cost,
-            contextWindow: catalog.contextWindow,
-            maxTokens: catalog.maxTokens,
-            headers: catalog.headers
-        )
+        // The whole entry, not a rebuilt one: its `compat` is what sends
+        // Claude Sonnet 5 adaptive thinking, the only kind Copilot takes
+        // for it.
+        catalog.baseURL = baseURLString
+        return catalog
     }()
 
     return ResolvedAuth(

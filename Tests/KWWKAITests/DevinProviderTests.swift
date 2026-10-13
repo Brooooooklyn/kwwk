@@ -590,6 +590,19 @@ struct DevinProviderStreamTests {
         #expect(try category("unavailable", "try later") == .server)
     }
 
+    /// As Devin answered every chat on 2026-10-13, kwwk and the devin CLI
+    /// alike (the CLI: errorKind internal, retryable true).
+    @Test("Devin's internal server error under permission_denied is a server fault, asked again")
+    func internalErrorUnderPermissionDenied() throws {
+        let trailer = Data(#"{"error":{"code":"permission_denied","message":"internal server error: error number 13 (trace ID: 4963840d69840187a7a6ee3998039c5b)"}}"#.utf8)
+        let failure = try #require(DevinAgentProvider.trailerFailure(trailer, historyBytes: { 0 }))
+        #expect(failure.category == .server)
+        #expect(failure.isRetryable)
+        #expect(failure.message.contains("error number 13"))
+        let denied = Data(#"{"error":{"code":"permission_denied","message":"your plan does not include this model"}}"#.utf8)
+        #expect(try #require(DevinAgentProvider.trailerFailure(denied, historyBytes: { 0 })).category == .authentication)
+    }
+
     @Test("a tool call that opens with a name and no id is kept, under an id of ours")
     func idlessToolCall() async throws {
         let (_, final) = await chatFinal([
