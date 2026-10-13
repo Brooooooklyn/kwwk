@@ -286,10 +286,8 @@ private func modelChoices(
     var groups: [String] = []
     var currentIndex: Int?
     for slot in slotList {
-        // The login's own list where it has been read: the models its plan
-        // offers, in the provider's order, at the limits it gives them.
-        let catalog = providers.accountModels.models(forStoreId: slot.storeId)
-            ?? ModelsCatalog.models(for: slot.catalogProvider).sorted { $0.id < $1.id }
+        let catalog = ModelsCatalog.models(for: slot.catalogProvider)
+            .sorted { $0.id < $1.id }
         let base = catalog.isEmpty ? [slot.template] : catalog
         for model in base {
             let routed = adoptFields(
@@ -491,7 +489,6 @@ func activateFreshLogin(
     }
     let wasLoggedOut = ctx.sessionProviders.slots.isEmpty
     ctx.sessionProviders.upsert(slot)
-    ctx.sessionProviders.refreshAccountModels(authResolvers: authResolvers, only: slot.storeId)
     if wasLoggedOut {
         // First login of a logged-out session: replace the sentinel model so
         // the user can prompt without an extra /model trip.
