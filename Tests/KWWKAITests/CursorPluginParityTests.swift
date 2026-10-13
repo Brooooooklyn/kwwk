@@ -143,3 +143,77 @@ struct CursorEmptyReplyParityTests {
         #expect(CursorConnectResponse.endFrameWords(long).count < 420)
     }
 }
+
+@Suite("Cursor plugin parity: region routing")
+struct CursorRegionRoutingParityTests {
+    /// The refusal a team served in one region only got from the global API
+    /// (magpie 0984edaa; the fixture of its TestServeCursorRegion).
+    static let regionRefusal = Data(#"{"error":{"code":"unauthenticated","message":"Error","details":[{"debug":{"details":{"title":"Unauthorized request.","detail":"This region is not yet available for your team"}}}]}}"#.utf8)
+
+    /// `agentUrlConfig` as GetServerConfig answered it for a Free account,
+    /// 2026-10-13, and as magpie's TestCursorAgentURL has a regional one.
+    @Test("the server config names the agent API: agentUrl, else agentnUrl")
+    func serverConfigNamesTheAgent() {
+        let global = Data(#"{"configVersion":"x","agentUrlConfig":{"agentUrl":"https://agentn.global.api5.cursor.sh","agentnUrl":"https://agentn.global.api5.cursor.sh"}}"#.utf8)
+        #expect(CursorAgentEndpoint.named(byServerConfig: global)
+            == CursorAgentEndpoint(host: "agentn.global.api5.cursor.sh"))
+
+        // Privacy mode, which every Run asks for: agentUrl, not agentnUrl.
+        let regional = Data(#"{"agentUrlConfig":{"agentUrl":"https://agent.us.example/","agentnUrl":"https://agent.us.example/n"}}"#.utf8)
+        #expect(CursorAgentEndpoint.named(byServerConfig: regional) == CursorAgentEndpoint(host: "agent.us.example"))
+
+        let second = Data(#"{"agentUrlConfig":{"agentUrl":"","agentnUrl":"https://agent.eu.example:8443/n/"}}"#.utf8)
+        let endpoint = CursorAgentEndpoint.named(byServerConfig: second)
+        #expect(endpoint == CursorAgentEndpoint(host: "agent.eu.example", port: 8443, pathPrefix: "/n"))
+        #expect(endpoint?.path("/agent.v1.AgentService/Run") == "/n/agent.v1.AgentService/Run")
+
+        // Nothing that can be dialled over TLS is no answer.
+        for body in [#"{}"#, #"{"agentUrlConfig":{}}"#, #"{"agentUrlConfig":{"agentUrl":"http://plain.example"}}"#, "down"] {
+            #expect(CursorAgentEndpoint.named(byServerConfig: Data(body.utf8)) == nil)
+        }
+    }
+
+    @Test("a region refusal with nothing written is tried on the agent API the config names")
+    func regionRefusalReroutes() throws {
+        let refusal = try #require(CursorConnectResponse.failureFromEndStream(Self.regionRefusal))
+        #expect(CursorAgentProvider.shouldReroute(refusal, written: []))
+        // Once something of a reply is out, running again would say it twice.
+        #expect(!CursorAgentProvider.shouldReroute(refusal, written: [.text(TextContent(text: "Hel"))]))
+        // A sign-in that lapsed is not a region's doing.
+        let login = Data(#"{"error":{"code":"unauthenticated","message":"Error","details":[{"debug":{"error":"ERROR_NOT_LOGGED_IN","details":{"title":"Authentication error","detail":"If you are logged in, try logging out and back in."}}}]}}"#.utf8)
+        #expect(!CursorAgentProvider.shouldReroute(try #require(CursorConnectResponse.failureFromEndStream(login)), written: []))
+    }
+
+    @Test("the config is asked of Cursor's API as the CLI asks it")
+    func resolveAsksTheServerConfig() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((status: 200, body: #"{"agentUrlConfig":{"agentUrl":"https://agent.us.example"}}"#))
+        let endpoint = await CursorAgentEndpoint.resolve(
+            apiKey: "tok", apiHost: "api2.cursor.sh", clientVersion: "cli-2026.09.23-86fc751", client: client
+        )
+        #expect(endpoint == CursorAgentEndpoint(host: "agent.us.example"))
+        let request = try #require(client.recorded.first)
+        #expect(request.url.absoluteString == "https://api2.cursor.sh/aiserver.v1.ServerConfigService/GetServerConfig")
+        #expect(request.method == "POST")
+        #expect(request.body == Data("{}".utf8))
+        #expect(request.headers["authorization"] == "Bearer tok")
+        #expect(request.headers["connect-protocol-version"] == "1")
+        #expect(request.headers["x-cursor-client-type"] == "cli")
+        #expect(request.headers["x-cursor-client-version"] == "cli-2026.09.23-86fc751")
+
+        // A config Cursor cannot give leaves the Run where it was.
+        client.queue.append((status: 503, body: "down"))
+        #expect(await CursorAgentEndpoint.resolve(
+            apiKey: "tok", apiHost: "api2.cursor.sh", clientVersion: "v", client: client
+        ) == nil)
+    }
+
+    @Test("an account moved to its region's agent API stays there; another account is not moved")
+    func learnedEndpointIsPerAccount() {
+        let endpoints = CursorAgentEndpoints()
+        #expect(endpoints.endpoint(for: "tok-a") == nil)
+        endpoints.remember(CursorAgentEndpoint(host: "agent.us.example"), for: "tok-a")
+        #expect(endpoints.endpoint(for: "tok-a") == CursorAgentEndpoint(host: "agent.us.example"))
+        #expect(endpoints.endpoint(for: "tok-b") == nil)
+    }
+}
