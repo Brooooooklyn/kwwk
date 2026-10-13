@@ -577,6 +577,15 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             // answers it (`failure`: 400).
             failure.httpStatus = 400
         }
+        // Devin's own outage wears the same code: `permission_denied`
+        // "internal server error: error number 13" answered every chat of a
+        // healthy Pro account on 2026-10-13, from the devin CLI too, which
+        // marks it `cognition.ai/errorKind: internal`, `retryable: true`.
+        // A server fault to ask again, not a sign-in to redo — only
+        // `unauthenticated` means that (magpie's Devin plugin, `failure`).
+        if code.lowercased() == "permission_denied", lower.contains("internal server error") {
+            failure.providerCode = "internal"
+        }
         // Opaque `invalid_argument: internal error` with a large history is far
         // more likely a size rejection; classify it as context overflow so the
         // agent compacts instead of failing the turn outright.
