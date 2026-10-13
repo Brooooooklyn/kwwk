@@ -312,3 +312,48 @@ struct CursorPickerParityTests {
         #expect(window("default") == 200_000)
     }
 }
+
+@Suite("Cursor plugin parity: a Run answered with an HTTP error")
+struct CursorHTTPFailureParityTests {
+    /// The fixtures of magpie's TestCursorFailure, which the plugin's
+    /// `failure(status, body)` reads as it reads an end frame.
+    @Test("a region refusal answered as a 401 reads as one, and is rerouted")
+    func regionRefusalOverHTTP() {
+        let failure = CursorConnectResponse.failureFromHTTP(status: 401, body: #"{"code":"unauthenticated","message":"Error","details":[{"debug":{"details":{"title":"Unauthorized request.","detail":"This region is not yet available for your team"}}}]}"#)
+        #expect(failure.message.hasSuffix("Unauthorized request.: This region is not yet available for your team"))
+        #expect(failure.providerCode == "unauthenticated")
+        #expect(failure.category == .invalidRequest)
+        #expect(CursorAgentProvider.shouldReroute(failure, written: []))
+    }
+
+    @Test("a Connect error answered over HTTP reads as it does in an end frame")
+    func connectErrorOverHTTP() throws {
+        let expired = CursorConnectResponse.failureFromHTTP(status: 401, body: #"{"code":"unauthenticated","message":"token expired"}"#)
+        #expect(expired.message.hasSuffix("token expired"))
+        #expect(expired.category == .authentication)
+
+        // The Free plan's refusal of a named model (measured 2026-10-11 as
+        // an end frame), were it answered before the stream.
+        let body = #"{"code":"resource_exhausted","message":"Error","details":[{"debug":{"error":"ERROR_RATE_LIMITED_CHANGEABLE","details":{"title":"Named models unavailable","detail":"Free plans can only use Auto. Switch to Auto or upgrade plans to continue.","isRetryable":false}}}]}"#
+        let refused = CursorConnectResponse.failureFromHTTP(status: 429, body: body)
+        let framed = try #require(CursorConnectResponse.failureFromEndStream(Data(#"{"error":\#(body)}"#.utf8)))
+        #expect(refused == framed)
+        #expect(refused.category == .quota)
+        #expect(!refused.isRetryable)
+
+        // A server error keeps its status: asked again whatever the code.
+        let broken = CursorConnectResponse.failureFromHTTP(status: 500, body: #"{"code":"unknown","message":"boom"}"#)
+        #expect(broken.httpStatus == 500)
+        #expect(broken.isRetryable)
+    }
+
+    @Test("a body that is no Connect error stays the HTTP error it is")
+    func plainHTTPError() {
+        for body in ["Unauthorized", "", "<html>blocked</html>", #"{"message":"no code"}"#] {
+            let failure = CursorConnectResponse.failureFromHTTP(status: 401, body: body)
+            #expect(failure.httpStatus == 401)
+            #expect(failure.category == .authentication)
+        }
+        #expect(CursorConnectResponse.failureFromHTTP(status: 502, body: "Bad Gateway").isRetryable)
+    }
+}
