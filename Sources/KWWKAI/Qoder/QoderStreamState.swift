@@ -205,11 +205,16 @@ final class QoderStreamState: @unchecked Sendable {
         if let index { emit(.toolCallDelta(contentIndex: index, delta: delta, partial: snapshot())) }
     }
 
-    func setUsage(input: Int, output: Int) {
+    /// Qoder counts the way OpenAI does: `prompt_tokens` holds the cached
+    /// ones and `completion_tokens` the reasoning ones.
+    func setUsage(prompt: Int, completion: Int, cached: Int, reasoning: Int) {
         lock.withLock {
-            usage.input = input
-            usage.output = output
-            usage.totalTokens = input + output
+            let cached = min(max(cached, 0), prompt)
+            usage.input = prompt - cached
+            usage.cacheRead = cached
+            usage.output = completion
+            usage.reasoning = reasoning
+            usage.totalTokens = prompt + completion
         }
     }
 

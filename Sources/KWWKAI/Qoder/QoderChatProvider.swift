@@ -65,9 +65,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 model.id, baseURL: baseURL, account: account, site: site, client: client, cancellation: cancellation
             )
             let messages = TransformMessages.normalize(context.messages, model: model)
-            let wire = QoderCodec.encodeRequestBody(
-                try Self.chatBody(model: listed, context: context, messages: messages, options: options)
-            )
+            let wire = QoderCodec.encodeRequestBody(try Self.chatBody(
+                model: listed, context: context, messages: messages, options: options,
+                windowCeiling: model.contextWindow
+            ))
             let url = baseURL + Self.chatPath
             var headers = try QoderCosy.headers(
                 url: url, account: account, body: wire, timestamp: Int64(Date().timeIntervalSince1970)
@@ -125,11 +126,14 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     }
 
     /// Reads the reply line by line. Qoder's chunks are single `data:` lines;
-    /// anything else (`[DONE]`, the closing timing line, blanks) is skipped.
-    /// The turn ends at the chunk that names a `finish_reason`. A stream that
-    /// ends without one is taken as it stands, as magpie's `decodeQoder`
-    /// takes it, unless it stopped inside a tool call's arguments — those
-    /// would run as `{}`.
+    /// anything else (blanks, the timing line that closes the stream) is
+    /// skipped. The turn ends at the envelope whose body is `[DONE]`, not at
+    /// the chunk that names a `finish_reason`: Qoder sends the token usage in
+    /// a chunk of its own after the finish, with no choices, so reading only
+    /// up to the finish counted every reply as 0 tokens (measured on a real
+    /// account, magpie-plugins qoder 0.2.4, `stream.test.mjs`). A stream that
+    /// ends without a finish is taken as it stands, unless it stopped inside
+    /// a tool call's arguments — those would run as `{}`.
     static func drive(
         body: AsyncThrowingStream<Data, Error>,
         state: QoderStreamState,
@@ -146,7 +150,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             if !held.isEmpty { state.appendText(held, emit: emit) }
         }
 
-        /// False once the turn has finished.
+        /// False once Qoder has said the reply is done.
         func handle(_ line: Data) throws -> Bool {
             let text = String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.hasPrefix("data:") else { return true }
@@ -164,6 +168,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             if let status = Self.int(envelope["statusCodeValue"]), status != 200 {
                 throw Self.failure(status: status, body: Data((inner.isEmpty ? payload : inner).utf8))
             }
+            if inner.trimmingCharacters(in: .whitespacesAndNewlines) == "[DONE]" { return false }
             guard let chunk = (try? JSONSerialization.jsonObject(with: Data(inner.utf8))) as? [String: Any] else {
                 return true
             }
@@ -203,18 +208,23 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 }
             }
             if let finish = choice?["finish_reason"] as? String, !finish.isEmpty {
-                if let usage = chunk["usage"] as? [String: Any] {
-                    state.setUsage(
-                        input: Self.int(usage["prompt_tokens"]) ?? 0, output: Self.int(usage["completion_tokens"]) ?? 0
-                    )
-                }
                 state.setFinishReason(finish)
-                return false
+            }
+            // Whichever chunk carries the usage: the finishing one, or the
+            // one of its own that follows it.
+            if let usage = chunk["usage"] as? [String: Any] {
+                state.setUsage(
+                    prompt: Self.int(usage["prompt_tokens"]) ?? 0,
+                    completion: Self.int(usage["completion_tokens"]) ?? 0,
+                    cached: Self.int((usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"]) ?? 0,
+                    reasoning: Self.int((usage["completion_tokens_details"] as? [String: Any])?["reasoning_tokens"]) ?? 0
+                )
             }
             return true
         }
 
         var received = false
+        var done = false
         do {
             reading: for try await chunk in body {
                 if cancellation?.isCancelled == true { return }
@@ -223,7 +233,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                 while let newline = buffer.firstIndex(of: 0x0A) {
                     let line = buffer[buffer.startIndex..<newline]
                     buffer = Data(buffer[buffer.index(after: newline)...])
-                    if try !handle(Data(line)) { break reading }
+                    if try !handle(Data(line)) {
+                        done = true
+                        break reading
+                    }
                 }
             }
         } catch let failure as ProviderFailure {
@@ -235,7 +248,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             throw failure
         }
         if cancellation?.isCancelled == true { return }
-        if !state.sawFinishReason {
+        if !done {
             if !buffer.isEmpty { _ = try handle(buffer) }
             // Nothing at all under a 200 is no API reply (magpie #1012).
             if !received {
@@ -278,9 +291,12 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     /// The plaintext JSON `agent_chat_generation` takes: the system prompt
     /// (twice — as `system` and as the first message), the turns as OpenAI
     /// turns, the caller's tools as native function tools, and the model's
-    /// own listing entry.
+    /// own listing entry. `windowCeiling` is the catalog row's context
+    /// window, the most the caller means the model to be asked for (see
+    /// `contextLength`); nil asks for whatever the request needs.
     static func chatBody(
-        model: QoderModelInfo, context: Context, messages: [Message], options: StreamOptions?
+        model: QoderModelInfo, context: Context, messages: [Message], options: StreamOptions?,
+        windowCeiling: Int? = nil
     ) throws -> Data {
         let tools = context.tools ?? []
         var systemText = systemPreamble
@@ -290,13 +306,23 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         }
         let system: [String: Any] = ["type": "text", "text": systemText]
 
+        var sendsTools = !tools.isEmpty
+        if case .none? = options?.toolChoice { sendsTools = false }
+        let chatTools = sendsTools ? try tools.map(chatTool) : []
+        let turns = [["role": "system", "content": [system]] as [String: Any]] + chatMessages(messages)
+
         let thinking = thinking(options?.reasoning, model: model)
-        var parameters: [String: Any] = [
-            "enable_thinking": thinking.enabled,
-            "max_tokens": options?.maxTokens.flatMap { $0 > 0 ? $0 : nil } ?? QoderModels.defaultMaxTokens,
-        ]
+        let maxTokens = options?.maxTokens.flatMap { $0 > 0 ? $0 : nil } ?? QoderModels.defaultMaxTokens
+        var parameters: [String: Any] = ["enable_thinking": thinking.enabled, "max_tokens": maxTokens]
         if let effort = thinking.effort { parameters["reasoning_effort"] = effort }
-        if model.maxInputTokens > 0 { parameters["context_length"] = model.maxInputTokens }
+        let window = contextLength(
+            model: model,
+            requestBytes: model.windows.isEmpty ? 0 : try JSONSerialization.data(
+                withJSONObject: ["m": turns, "t": chatTools], options: [.withoutEscapingSlashes]
+            ).count,
+            reply: maxTokens, ceiling: windowCeiling
+        )
+        if window > 0 { parameters["context_length"] = window }
 
         let configPlaceholder = "model_config:" + UUID().uuidString
         var body: [String: Any] = [
@@ -311,11 +337,9 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             "session_type": "app",
             "model_config": configPlaceholder,
             "system": [system],
-            "messages": [["role": "system", "content": [system]] as [String: Any]] + chatMessages(messages),
+            "messages": turns,
         ]
-        var sendsTools = !tools.isEmpty
-        if case .none? = options?.toolChoice { sendsTools = false }
-        if sendsTools { body["tools"] = try tools.map(chatTool) }
+        if sendsTools { body["tools"] = chatTools }
 
         // The listing entry goes back exactly as Qoder listed it, so it is
         // spliced in as text rather than rebuilt.
@@ -325,6 +349,33 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             throw ProviderFailure(message: "Qoder: missing model configuration")
         }
         return Data(text.replacingCharacters(in: slot, with: model.config).utf8)
+    }
+
+    /// The context window a request asks for (`context_length`) on a model
+    /// that offers several: the one Qoder's client picks by default
+    /// (`max_input_tokens` when it flags none) while the request fits it,
+    /// else the smallest that holds it, else the largest. A larger window
+    /// may cost more — Qoder says changing the Context "may change the
+    /// rate" — so it is asked for only when the conversation needs it, and
+    /// never past `ceiling`, the catalog row's context window: a caller that
+    /// lowers the row keeps its requests in the smaller windows.
+    ///
+    /// The request is counted generously, a token for every 3 bytes of its
+    /// turns and tools as JSON, so a window is raised a little early rather
+    /// than late; and the reply's `max_tokens` is counted in it, since a
+    /// window holds the prompt and the reply: a 180K conversation asking 32K
+    /// for the reply is sent 400K, not the 200K it would overflow
+    /// (magpie-plugins qoder 0.2.5 and 0.2.6, yetone/magpie#722 and #700,
+    /// `context.test.mjs`). A model that lists no windows is sent its
+    /// `max_input_tokens`, as before.
+    static func contextLength(model: QoderModelInfo, requestBytes: Int, reply: Int, ceiling: Int? = nil) -> Int {
+        guard !model.windows.isEmpty else { return model.maxInputTokens }
+        let base = model.defaultWindow > 0 ? model.defaultWindow
+            : model.maxInputTokens > 0 ? model.maxInputTokens : model.contextWindow
+        let need = (requestBytes + 2) / 3 + max(0, reply)
+        if need <= base { return base }
+        let offered = model.windows.filter { $0 <= ceiling ?? .max }
+        return offered.first { $0 >= need } ?? max(offered.last ?? base, base)
     }
 
     /// The turns as OpenAI turns, the format Qoder's chat endpoint takes: an
@@ -384,9 +435,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                     }
                 }
                 if !calls.isEmpty {
-                    // A turn that calls tools carries its first text as a
-                    // plain string beside them, as magpie sends it.
-                    let text = blocks.lazy.compactMap { $0["text"] as? String }.first { !$0.isEmpty } ?? ""
+                    // A turn that calls tools carries its text as a plain
+                    // string beside them — all of it, joined, as the plugin's
+                    // `textOf` sends it, not only the first block.
+                    let text = blocks.compactMap { $0["text"] as? String }.joined()
                     out.append(["role": "assistant", "content": text, "tool_calls": calls])
                 } else if !blocks.isEmpty {
                     out.append(["role": "assistant", "content": blocks])
@@ -463,27 +515,87 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
 
     // MARK: - Errors
 
+    /// Qoder's code for a request its queue holds back: the model is busy
+    /// for this plan, with when to ask again.
+    static let queuedCode = "10605"
+    /// The codes Qoder's client counts as a plan's usage or credits used up
+    /// (`QoderErrorCode` in the app's qoder-agent-sdk worker).
+    static let quotaCodes: Set<String> = ["110", "112", "113", "114", "115", "116", "117", "118", "119", "122"]
+    /// Refusals of this request, not of the account: sensitive content, not
+    /// supported, input too long, too many media, a custom model's service.
+    static let requestCodes: Set<String> = ["406", "416", "430", "80411", "80412", "100400", "100401", "100403"]
+    /// How long to wait on a busy queue that names no wait, in seconds.
+    static let busyWait = 30
+
     /// A refused request as kwwk's failure. Qoder says why in `message`, and
     /// the model vendor's own reason (an effort the model refuses, say) rides
     /// as JSON text in `details`. A refused sign-in and a spent plan get
     /// magpie's wording, which the failure classifier reads as authentication
-    /// and quota.
+    /// and quota; a refused sign-in keeps what Qoder said of it.
+    ///
+    /// Qoder's own `code` says what a refusal is before its status does, read
+    /// as Qoder's client reads it: there only 105 is a lapsed sign-in, so a
+    /// 401/403 carrying another code is not one here either. A real trial
+    /// account's queued request came back 403 with code 10605 and read as
+    /// "sign in again" (magpie-plugins qoder 0.2.14, #98, `busy.test.mjs`).
     static func failure(status: Int, body: Data) -> ProviderFailure {
         let status = (400...599).contains(status) ? status : 502
         var message = String(decoding: body.prefix(4096), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        var code = ""
+        var queue: [String: Any]?
         if let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
-            if let said = object["message"] as? String, !said.isEmpty { message = said }
+            switch object["code"] {
+            case let text as String: code = text
+            case let number as NSNumber: code = number.stringValue
+            default: break
+            }
+            let said = object["message"] as? String ?? ""
+            if !said.isEmpty { message = said }
             let details = (object["details"] as? String).flatMap {
                 (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
             } ?? object["details"] as? [String: Any]
             if let reason = (details?["error"] as? [String: Any])?["message"] as? String, !reason.isEmpty {
                 message += ": " + reason
             }
+            // The queue's state is a field, or the message itself as JSON
+            // text.
+            queue = object["queue"] as? [String: Any]
+            if queue == nil, said.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{"),
+               let state = (try? JSONSerialization.jsonObject(with: Data(said.utf8))) as? [String: Any],
+               ["isQueued", "serviceAvailable", "retryAfterSeconds"].contains(where: { state[$0] != nil }) {
+                queue = state
+            }
+        }
+        // Qoder's queue for the model: busy for now. The sign-in is fine, so
+        // it is a 503 to ask again after the wait Qoder names.
+        let isQueued = queue?["isQueued"] as? Bool == true
+        if code == queuedCode || isQueued || queue?["serviceAvailable"] as? Bool == false {
+            var wait = busyWait
+            if let seconds = (queue?["retryAfterSeconds"] as? NSNumber)?.doubleValue, seconds > 0, seconds < 1e9 {
+                wait = Int(seconds.rounded(.up))
+            }
+            let model = (queue?["modelKey"] as? String).flatMap { $0.isEmpty ? nil : " for \($0)" } ?? ""
+            let tier = (queue?["queueType"] as? String).flatMap { $0.isEmpty ? nil : " (this plan's queue: \($0))" } ?? ""
+            return ProviderFailure(
+                message: "Qoder \(isQueued ? "queued the request" : "is busy")\(model)\(tier); try again in \(wait)s",
+                httpStatus: 503, retryAfterMs: Double(wait) * 1000
+            )
+        }
+        if quotaCodes.contains(code) {
+            return ProviderFailure(message: "usage limit reached: " + message, httpStatus: 429)
+        }
+        if requestCodes.contains(code) {
+            return ProviderFailure(message: "Qoder refused the request (\(code)): \(message)", httpStatus: 400)
+        }
+        // A refused chat reads as a lapsed sign-in, but Qoder's own words go
+        // with it: a 401 right after signing in is not a lapsed sign-in, and
+        // only its reason says what it is (magpie-plugins qoder 0.2.12,
+        // `usage.test.mjs` "a refused chat").
+        if status == 401 || status == 403 {
+            let said = message.isEmpty ? "" : " (Qoder said \(status): \(message.prefix(300)))"
+            return ProviderFailure(message: "Qoder: the sign-in lapsed — sign in again" + said, httpStatus: 401)
         }
         if message.isEmpty { message = HTTPURLResponse.localizedString(forStatusCode: status) }
-        if status == 401 || status == 403 {
-            return ProviderFailure(message: "Qoder: the sign-in lapsed — sign in again", httpStatus: 401)
-        }
         if status == 429 || message.lowercased().contains("quota") {
             return ProviderFailure(message: "usage limit reached: " + message, httpStatus: 429)
         }
@@ -502,7 +614,8 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             }
         } catch {}
         var failure = failure(status: response.statusCode, body: bytes)
-        failure.retryAfterMs = ProviderFailure.retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
+        // The wait Qoder's queue names in the body stands; else the header's.
+        failure.retryAfterMs = failure.retryAfterMs ?? ProviderFailure.retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
             if let key = entry.key as? String { result[key.lowercased()] = String(describing: entry.value) }
         })
         return failure

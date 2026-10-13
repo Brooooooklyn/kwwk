@@ -358,6 +358,16 @@ public struct QoderOAuthProvider: OAuthProvider {
     }
 
     private func rotate(_ path: String, _ refreshToken: String, client: HTTPClient) async throws -> Pair {
+        // A login kept with no refresh token (a job token answer may carry
+        // none) has nothing to renew with: that is a sign-in to make again,
+        // not a request to send with an empty token (magpie-plugins qoder
+        // `refreshJob` / `refreshDevice`, `refresh.test.mjs` "nothing to
+        // renew with").
+        guard !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OAuthRefreshError(
+                providerId: id, kind: .rejected, status: nil, detail: "the stored login carries no refresh token"
+            )
+        }
         let data: Data
         do {
             (_, data) = try await OAuthRefreshError.post(
@@ -366,11 +376,18 @@ public struct QoderOAuthProvider: OAuthProvider {
                 body: try JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken]),
                 client: client
             )
-        } catch let refused as OAuthRefreshError where refused.status == 403 {
+        } catch let refused as OAuthRefreshError where refused.status == 403 || refused.status == 400 {
             // Qoder's account API refuses a dead refresh token with 401 or
-            // 403, and magpie takes either as the sign-in gone
-            // (`qoderRefreshFailed`); the shared rule reads 403 as an outage.
-            throw OAuthRefreshError(providerId: id, kind: .rejected, status: 403, detail: refused.detail)
+            // 403, and only those are the sign-in gone (magpie
+            // `qoderRefreshFailed`; magpie-plugins qoder `refreshJob` /
+            // `refreshDevice`, `refresh.test.mjs`). The shared rule reads
+            // 403 as an outage and 400 as a refusal; nobody has seen Qoder
+            // answer a dead token 400, so here a 400 is a refresh to try
+            // again, not a login to park.
+            throw OAuthRefreshError(
+                providerId: id, kind: refused.status == 403 ? .rejected : .unavailable,
+                status: refused.status, detail: refused.detail
+            )
         }
         let answer = QoderTokens.object(data) ?? [:]
         // A device refresh may name its token `device_token` instead of

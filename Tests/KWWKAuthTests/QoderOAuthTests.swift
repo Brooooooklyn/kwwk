@@ -288,17 +288,40 @@ struct QoderRefreshTests {
         let refused = await refreshError(.response(status: 401, body: ""))
         #expect(refused?.kind == .rejected)
         #expect(refused?.providerId == "qoder")
-        #expect(await refreshError(.response(status: 400, body: "{}"))?.kind == .rejected)
-        // magpie takes Qoder's 403 as the sign-in gone too (qoderRefreshFailed;
-        // its own test stubs only 401), where the shared rule reads an outage.
+        // Qoder's 403 is the sign-in gone too, where the shared rule reads an
+        // outage (magpie-plugins qoder `refresh.test.mjs`: "a refresh Qoder
+        // refuses (401/403) is signIn expired; another failure throws
+        // plainly").
         let forbidden = await refreshError(.response(status: 403, body: "no"))
         #expect(forbidden?.kind == .rejected)
         #expect(forbidden?.status == 403)
+        // Only those two: any other answer leaves the login to try again,
+        // a 400 among them, which the shared rule would park.
+        let bad = await refreshError(.response(status: 400, body: "{}"))
+        #expect(bad?.kind == .unavailable)
+        #expect(bad?.status == 400)
+        #expect(await refreshError(.response(status: 500, body: ""))?.kind == .unavailable)
         #expect(await refreshError(.response(status: 503, body: "busy"))?.kind == .unavailable)
         #expect(await refreshError(.failure(URLError(.timedOut)))?.kind == .unavailable)
         // A pair with a half missing is not kept: the old one may still work.
         #expect(await refreshError(.response(status: 200, body: #"{"token":"jt-new"}"#))?.kind == .unavailable)
         #expect(await refreshError(.response(status: 200, body: "<html>"))?.kind == .unavailable)
+    }
+
+    // magpie-plugins qoder `refresh.test.mjs` "nothing to renew with".
+    @Test("A login with no refresh token is a sign-in to make again, and nothing is sent", arguments: [false, true])
+    func noRefreshToken(deviceChat: Bool) async throws {
+        let client = QueuedHTTPClient([.response(status: 200, body: #"{"token":"jt-new","refresh_token":"rt-new"}"#)])
+        var login = OAuthCredentials(access: "jt-old", refresh: " ", expires: 0, extras: ["uid": "one"])
+        if deviceChat { login.extras["deviceChat"] = true }
+        do {
+            _ = try await QoderOAuthProvider(site: deviceChat ? .cn : .global).refresh(login, using: client)
+            Issue.record("a login with no refresh token refreshed")
+        } catch let error as OAuthRefreshError {
+            #expect(error.kind == .rejected)
+            #expect(error.status == nil)
+        }
+        #expect(client.requests.isEmpty)
     }
 
     @Test("A Qoder CN login that chats with its device token refreshes on the device refresh, not the job one")

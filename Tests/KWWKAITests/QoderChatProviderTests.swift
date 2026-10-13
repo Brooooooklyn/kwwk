@@ -268,6 +268,42 @@ struct QoderChatRequestTests {
         #expect(parameters["reasoning_effort"] == nil)
     }
 
+    // magpie-plugins qoder `context.test.mjs`.
+    @Test("A request is sent the default window while it fits, a larger one only when it needs it")
+    func contextLength() throws {
+        func sent(_ characters: Int, maxTokens: Int? = nil, ceiling: Int? = nil) throws -> Int? {
+            let context = Context(messages: [.user(UserMessage(text: String(repeating: "a", count: characters)))])
+            let data = try QoderChatProvider.chatBody(
+                model: try qoderListed(qoderWindowedFlashListing), context: context, messages: context.messages,
+                options: StreamOptions(maxTokens: maxTokens), windowCeiling: ceiling
+            )
+            let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return (body["parameters"] as? [String: Any])?["context_length"] as? Int
+        }
+        #expect(try sent(10) == 200_000)
+        #expect(try sent(300_000 * 3) == 400_000)
+        #expect(try sent(700_000 * 3) == 1_000_000)
+        #expect(try sent(1_200_000 * 3) == 1_000_000)
+
+        // A window holds the reply too: a prompt that fits 200K alone but
+        // not with the max_tokens asked for the reply is sent the next one
+        // (yetone/magpie#700). None asked: the 32000 Qoder is sent counts.
+        #expect(try sent(180_000 * 3, maxTokens: 1000) == 200_000)
+        #expect(try sent(180_000 * 3, maxTokens: 32_000) == 400_000)
+        #expect(try sent(180_000 * 3) == 400_000)
+
+        // The catalog row's context window is the most that is asked for: a
+        // caller that lowers it stays in the smaller windows.
+        #expect(try sent(700_000 * 3, ceiling: 400_000) == 400_000)
+        #expect(try sent(700_000 * 3, ceiling: 200_000) == 200_000)
+        #expect(try sent(700_000 * 3, ceiling: 100_000) == 200_000)
+
+        // A model with no windows is sent its max_input_tokens, and one
+        // with neither is sent none.
+        #expect(try parameters(nil)["context_length"] as? Int == 200_000)
+        #expect(try parameters(nil, #"{"chat":[{"key":"y","enable":true}]}"#)["context_length"] == nil)
+    }
+
     @Test("Tools are withheld for tool choice none; a required call is asked for in the system prompt")
     func toolChoice() throws {
         let context = Context(messages: [], tools: [Tool(name: "read", description: "", parameters: .null)])
@@ -318,6 +354,17 @@ struct QoderChatRequestTests {
         #expect(messages[2]["content"] as? String == "second result")
         #expect(messages[3]["tool_call_id"] as? String == "call_A")
         #expect(messages[3]["content"] as? String == "Error: first result")
+
+        // Every text block of a turn that calls tools goes beside the calls.
+        let spoken = QoderChatProvider.chatMessages([.assistant(AssistantMessage(
+            content: [
+                .text(TextContent(text: "First. ")),
+                .toolCall(ToolCall(id: "call_C", name: "read", arguments: [:])),
+                .text(TextContent(text: "Then this.")),
+            ],
+            api: "qoder-chat", provider: "qoder", model: "qfmodel"
+        ))])
+        #expect(spoken[0]["content"] as? String == "First. Then this.")
     }
 
     @Test("A turn of plain text keeps its blocks; one with nothing to say is not sent")
@@ -597,22 +644,47 @@ struct QoderChatStreamTests {
         #expect(final.usage.output == 2)
     }
 
-    @Test("Nothing after the finishing chunk is read")
-    func stopsAtFinish() async throws {
+    // magpie-plugins qoder `stream.test.mjs`, a reply shaped as a real
+    // qmodel one: the usage comes after the finish, in a chunk with no
+    // choices, then `[DONE]` and the timing line.
+    @Test("The usage Qoder sends after the finish is read, cached and reasoning tokens with it")
+    func usageAfterFinish() async throws {
+        let (_, final, _) = await turn(reply: .init(body: [
+            envelope(#"{"choices":[{"delta":{"content":"Hi","reasoning_content":""},"index":0}],"object":"chat.completion.chunk"}"#),
+            envelope(#"{"choices":[{"delta":{"content":""},"finish_reason":"stop","index":0}],"object":"chat.completion.chunk"}"#),
+            envelope(#"{"choices":[],"object":"chat.completion.chunk","usage":{"completion_tokens":106,"completion_tokens_details":{"reasoning_tokens":94},"prompt_tokens":40,"prompt_tokens_details":{"cached_tokens":32},"total_tokens":146}}"#),
+            envelope("[DONE]"),
+            #"{"firstTokenDuration":821,"totalDuration":1982}"#,
+        ].map { "data:\($0)\n\n" }.joined()))
+        #expect(texts(final) == "Hi")
+        #expect(final.stopReason == .stop)
+        #expect(final.content.count == 1)
+        // The prompt's 40 are 32 read from the cache and 8 that were not.
+        #expect(final.usage.input == 8)
+        #expect(final.usage.cacheRead == 32)
+        #expect(final.usage.output == 106)
+        #expect(final.usage.reasoning == 94)
+        #expect(final.usage.totalTokens == 146)
+    }
+
+    @Test("The reply is read to Qoder's [DONE], and nothing after it")
+    func stopsAtDone() async throws {
         let (_, final, _) = await turn(reply: .init(body: sse([
             content("done"),
-            envelope(#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#),
+            envelope(#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#),
             content(" and more"),
+            envelope("[DONE]"),
+            content(" and never this"),
             failedEnvelope(500, #"{"message":"late"}"#),
         ])))
-        #expect(texts(final) == "done")
-        #expect(final.stopReason == .stop)
+        #expect(texts(final) == "done and more")
+        #expect(final.stopReason == .length)
         #expect(final.usage.totalTokens == 0)
     }
 
     @Test("A refusal inside the stream fails the turn with its status", arguments: [
-        (401, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again", 401, ProviderFailure.Category.authentication),
-        (403, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again", 401, .authentication),
+        (401, #"{"message":"device not trusted"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 401: device not trusted)", 401, ProviderFailure.Category.authentication),
+        (403, #"{"message":"upstream failure"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 403: upstream failure)", 401, .authentication),
         (429, #"{"message":"额度已耗尽"}"#, "usage limit reached: 额度已耗尽", 429, .quota),
         (500, #"{"message":"upstream failure"}"#, "Qoder: upstream failure", 500, .server),
         (400, #"{"message":"Your quota is used up"}"#, "usage limit reached: Your quota is used up", 429, .quota),
@@ -637,7 +709,9 @@ struct QoderChatStreamTests {
     }
 
     @Test("A refused request fails with Qoder's reason, its status and a retry hint", arguments: [
-        (401, #"{"message":"token expired"}"#, "Qoder: the sign-in lapsed — sign in again", ProviderFailure.Category.authentication),
+        (401, #"{"message":"token expired"}"#, "Qoder: the sign-in lapsed — sign in again (Qoder said 401: token expired)", ProviderFailure.Category.authentication),
+        // Qoder gave no reason: none is made up.
+        (403, "", "Qoder: the sign-in lapsed — sign in again", .authentication),
         (429, "slow down", "usage limit reached: slow down", .quota),
         (503, "", "Qoder: service unavailable", .server),
         (400, #"{"message":"prompt is too long: 250000 tokens > 200000 maximum"}"#,
@@ -650,6 +724,73 @@ struct QoderChatStreamTests {
         #expect(final.failure?.category == category)
         #expect(events.map(\.type) == ["error"])
         #expect(client.requests(to: chatPath).count == 1)
+    }
+
+    // magpie-plugins qoder `busy.test.mjs` (#98). The body is the one Qoder
+    // gave a real trial account on 2026-10-12, byte for byte
+    // (`testdata/queued-10605.json`).
+    private static let queued = #"{"code":"10605","message":"{\"isQueued\":false,\"modelKey\":\"efficient\",\"queueCount\":0,\"queueType\":\"p3\",\"retryAfterSeconds\":30,\"serviceAvailable\":false,\"waitTime\":0}"}"#
+
+    @Test("A 403 with Qoder's queue code 10605 is a busy model to ask again after its 30s, not a lapsed sign-in", arguments: [false, true])
+    func queueIsBusy(inStream: Bool) async throws {
+        let reply: QoderStubClient.Reply = inStream
+            ? .init(body: sse([failedEnvelope(403, Self.queued)]))
+            : .init(status: 403, contentType: "application/json", body: Self.queued)
+        let (_, final, _) = await turn(reply: reply)
+        #expect(final.errorMessage == "Qoder is busy for efficient (this plan's queue: p3); try again in 30s")
+        #expect(final.failure?.httpStatus == 503)
+        #expect(final.failure?.retryAfterMs == 30_000)
+        #expect(final.failure?.category == .server)
+        #expect(final.failure?.isRetryable == true)
+    }
+
+    @Test("The queue's own wait is used, a queued request says so, and with no wait it is 30s")
+    func queueWait() throws {
+        func queue(_ state: [String: Any], code: String = "10605", status: Int = 403) -> ProviderFailure {
+            QoderChatProvider.failure(status: status, body: Data(jsonText(["code": code, "message": jsonText(state)]).utf8))
+        }
+        let queued = queue(["isQueued": true, "modelKey": "ultimate", "retryAfterSeconds": 12.2])
+        #expect(queued.httpStatus == 503)
+        #expect(queued.retryAfterMs == 13_000)
+        #expect(queued.message == "Qoder queued the request for ultimate; try again in 13s")
+        let unavailable = queue(["serviceAvailable": false])
+        #expect(unavailable.httpStatus == 503)
+        #expect(unavailable.retryAfterMs == 30_000)
+        // The code alone, as a number or text, the message plain text.
+        for body in [#"{"code":"10605","message":"busy"}"#, #"{"code":10605,"message":"busy"}"#] {
+            let plain = QoderChatProvider.failure(status: 403, body: Data(body.utf8))
+            #expect(plain.httpStatus == 503)
+            #expect(plain.retryAfterMs == 30_000)
+        }
+        // A queue state under another status (429) is the same wait.
+        let limited = queue(["serviceAvailable": false, "retryAfterSeconds": 5], code: "", status: 429)
+        #expect(limited.httpStatus == 503)
+        #expect(limited.retryAfterMs == 5000)
+        #expect(limited.category == .server)
+    }
+
+    @Test("Qoder's other codes on a 403 aren't a lapsed sign-in either; 105 and no code are")
+    func codes() throws {
+        func failure(_ code: String, _ message: String) -> ProviderFailure {
+            QoderChatProvider.failure(status: 403, body: Data(jsonText(["code": code, "message": message]).utf8))
+        }
+        for code in ["110", "112", "113", "114", "115", "116", "117", "118", "119", "122"] {
+            let spent = failure(code, "credits used up")
+            #expect(spent.message == "usage limit reached: credits used up")
+            #expect(spent.httpStatus == 429)
+            #expect(spent.category == .quota)
+        }
+        for code in ["406", "416", "430", "80411", "80412", "100400", "100401", "100403"] {
+            let refused = failure(code, "no")
+            #expect(refused.message == "Qoder refused the request (\(code)): no")
+            #expect(refused.httpStatus == 400)
+            #expect(refused.category == .invalidRequest)
+        }
+        let expired = failure("105", "login expired")
+        #expect(expired.message == "Qoder: the sign-in lapsed — sign in again (Qoder said 403: login expired)")
+        #expect(expired.httpStatus == 401)
+        #expect(expired.category == .authentication)
+        #expect(QoderChatProvider.failure(status: 403, body: Data()).message == "Qoder: the sign-in lapsed — sign in again")
     }
 
     @Test("A refused listing fails the turn before any chat")
