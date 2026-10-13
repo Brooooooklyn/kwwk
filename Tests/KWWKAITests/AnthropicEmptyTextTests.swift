@@ -73,7 +73,9 @@ struct AnthropicEmptyTextTests {
         #expect(result["type"] as? String == "tool_result")
         #expect(result["tool_use_id"] as? String == call["id"] as? String)
         let content = try #require(result["content"] as? [[String: Any]])
-        #expect(content.isEmpty)
+        // Anthropic takes `content: []` only from a result that did not fail:
+        // with `is_error` it is a 400, so a silent failure says "(no output)".
+        #expect(content.compactMap { $0["text"] as? String } == (isError ? ["(no output)"] : []))
         #expect((result["is_error"] as? Bool ?? false) == isError)
         #expect(result["cache_control"] != nil)
     }

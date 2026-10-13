@@ -249,15 +249,28 @@ struct DevinProviderStreamTests {
         let meta = fields(try #require(req[1]?.first?.asData))
         #expect(meta[21]?.first?.asString == "user-jwt")
         #expect(req[21]?.first?.asString == "claude-opus-5-high")
-        #expect(req[2]?.first?.asString == "be terse")
+        // The system field stays empty: the system prompt and the tool's
+        // description open the first user prompt.
+        #expect(req[2] == nil)
         #expect(req[16]?.first?.asString == "cascade-1")
         #expect(req[7]?.first?.asUInt64 == 5)
         #expect(req[11]?.first?.asBool == true) // no parallel-tool compat ⇒ disabled
         let prompt = fields(try #require(req[3]?.first?.asData))
         #expect(prompt[2]?.first?.asUInt64 == 1)
-        #expect(prompt[3]?.first?.asString == "read a.txt")
+        #expect(prompt[3]?.first?.asString == """
+            be terse
+
+            <tool_descriptions>
+            <tool name="read">
+            Read a file
+            </tool>
+            </tool_descriptions>
+
+            read a.txt
+            """)
         let tool = fields(try #require(req[10]?.first?.asData))
         #expect(tool[1]?.first?.asString == "read")
+        #expect(tool[2]?.first?.asString == "Described under <tool name=\"read\"> in <tool_descriptions>, in the instructions.")
         #expect(tool[3]?.first?.asString == "{\"type\":\"object\"}")
     }
 
@@ -287,6 +300,26 @@ struct DevinProviderStreamTests {
         // Deterministic ids are stable across rebuilds.
         let again = DevinAgentProvider.chatMessagePrompts(messages, cascadeId: "c", model: model)
         #expect(again[0].messageId == prompts[0].messageId)
+    }
+
+    /// magpie's Devin plugin joins a message's text parts with a blank line
+    /// (`build`: `texts.join("\n\n")`); run together, the last word of one
+    /// block and the first of the next reach the model as one.
+    @Test("a message's text blocks reach Devin set apart by a blank line")
+    func textBlocksJoined() {
+        let messages: [Message] = [
+            .user(UserMessage(content: [
+                .text(TextContent(text: "look at this file.")),
+                .text(TextContent(text: "")),
+                .text(TextContent(text: "contents of a.txt")),
+            ])),
+            .assistant(AssistantMessage(
+                content: [.text(TextContent(text: "one")), .text(TextContent(text: "two"))],
+                api: "devin-agent", provider: "devin", model: "swe-1-6"
+            )),
+        ]
+        let prompts = DevinAgentProvider.chatMessagePrompts(messages, cascadeId: "c", model: devinTestModel())
+        #expect(prompts.map(\.prompt) == ["look at this file.\n\ncontents of a.txt", "one\n\ntwo"])
     }
 
     @Test("401 on the prefixed session token retries GetUserJwt with the raw key")
@@ -373,6 +406,228 @@ struct DevinProviderStreamTests {
         let small = try #require(DevinAgentProvider.trailerFailure(trailer, historyBytes: { 1024 }))
         #expect(small.category == .invalidRequest)
         #expect(DevinAgentProvider.trailerFailure(Data("{}".utf8), historyBytes: { 0 }) == nil)
+    }
+
+    private func chatFinal(_ chunks: [Data]) async -> (events: [AssistantMessageEvent], final: AssistantMessage?) {
+        let client = DevinRouteStubClient([
+            DevinWire.getUserJwtPath: [.init(status: 200, chunks: [jwtResponse("jwt")])],
+            DevinWire.getChatMessagePath: [.init(status: 200, chunks: chunks)],
+        ])
+        return await collect(DevinAgentProvider(client: client).stream(
+            model: devinTestModel(), context: Context(messages: [.user(UserMessage(text: "x"))]),
+            options: StreamOptions(apiKey: "tok")
+        ))
+    }
+
+    @Test("a reply cut off before its end-of-stream frame fails as a transport error, not a tool call with {} arguments")
+    func truncatedStream() async throws {
+        let call = frame(chatDelta { $0.bytesField(6, toolCall(id: "call-1", name: "bash", args: "{\"command\":")) })
+        let rest = frame(chatDelta { $0.bytesField(6, toolCall(args: "\"ls\"}")) })
+        // Cut inside a frame, and cut cleanly between two frames.
+        for chunks in [[call, Data(rest.dropLast(3))], [call]] {
+            let (events, final) = await chatFinal(chunks)
+            let message = try #require(final)
+            #expect(message.stopReason == .error)
+            #expect(message.failure?.category == .transport)
+            #expect(!events.contains { if case .toolCallEnd = $0 { return true }; return false })
+        }
+        // The same frames with their end-of-stream frame are a tool call.
+        let (_, whole) = await chatFinal([call, rest, frame(Data("{}".utf8), flags: 0x02, gzip: true)])
+        #expect(whole?.stopReason == .toolUse)
+    }
+
+    @Test("an end-of-stream frame with nothing before it and no error is an empty reply, retried as transport")
+    func emptyReply() async throws {
+        let (_, final) = await chatFinal([frame(Data("{}".utf8), flags: 0x02, gzip: true)])
+        let message = try #require(final)
+        #expect(message.stopReason == .error)
+        #expect(message.failure?.category == .transport)
+        #expect(message.errorMessage?.contains("empty reply") == true)
+    }
+
+    @Test("a signature in a frame of its own signs the thinking before it, and is replayed with it")
+    func signatureOnlyFrame() async throws {
+        // Frame order as Opus 5 sent it: thinking deltas, the signature
+        // alone, then the text.
+        let (_, final) = await chatFinal([
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(9, "Red disc on white") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(9, " is Japan.") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(10, "CAIShAQKlw") }),
+            frame(chatDelta { w in w.stringField(1, "bot-1"); w.stringField(3, "Tokyo.") }),
+            frame(Data("{}".utf8), flags: 0x02, gzip: true),
+        ])
+        let message = try #require(final)
+        #expect(message.stopReason == .stop)
+        guard case .thinking(let thinking)? = message.content.first else {
+            Issue.record("expected thinking first")
+            return
+        }
+        #expect(thinking.thinking == "Red disc on white is Japan.")
+        #expect(thinking.thinkingSignature == "CAIShAQKlw")
+
+        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(message)], cascadeId: "c", model: devinTestModel())
+        #expect(prompts.first?.thinking == "Red disc on white is Japan.")
+        #expect(prompts.first?.signature == "CAIShAQKlw")
+    }
+
+    @Test("several thinking blocks joined into one Cascade message go unsigned")
+    func joinedThinkingIsUnsigned() {
+        let assistant = AssistantMessage(
+            content: [.thinking(ThinkingContent(thinking: "a", thinkingSignature: "sig-a")),
+                      .text(TextContent(text: "ok")),
+                      .thinking(ThinkingContent(thinking: "b", thinkingSignature: "sig-b"))],
+            api: "devin-agent", provider: "devin", model: "swe-1-6", responseId: "resp-1"
+        )
+        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(assistant)], cascadeId: "c", model: devinTestModel())
+        #expect(prompts.first?.thinking == "ab")
+        #expect(prompts.first?.signature == "")
+    }
+
+    @Test("tool choice goes as required only where Devin takes it")
+    func toolChoice() throws {
+        let read = Tool(name: "read", description: "Read a file", parameters: .object(["type": .string("object")]))
+        let list = Tool(name: "ls", description: "List files", parameters: .object(["type": .string("object")]))
+        func sent(_ choice: ToolChoice?, tools: [Tool]) throws -> String? {
+            let request = DevinAgentProvider.buildChatRequest(
+                model: devinTestModel(), context: Context(messages: [.user(UserMessage(text: "x"))], tools: tools),
+                messages: [.user(UserMessage(text: "x"))], options: StreamOptions(apiKey: "tok", toolChoice: choice),
+                apiKey: "k", userJwt: "jwt", cascadeId: "c", assignment: nil
+            )
+            return fields(try #require(fields(request.encode())[12]?.first?.asData))[1]?.first?.asString
+        }
+        #expect(try sent(nil, tools: [read]) == "auto")
+        #expect(try sent(.auto, tools: [read]) == "auto")
+        #expect(try sent(.required, tools: [read, list]) == "required")
+        #expect(try sent(.required, tools: []) == "auto")
+        // A tool's name is refused there; forcing the only tool is "required".
+        #expect(try sent(.tool(name: "read"), tools: [read]) == "required")
+        #expect(try sent(.tool(name: "read"), tools: [read, list]) == "auto")
+        // "none" comes back with no content at all.
+        #expect(try sent(ToolChoice.none, tools: [read]) == "auto")
+    }
+
+    /// Devin screens the system field and each tool's own description and
+    /// refuses the turn over words it takes in a message (measured
+    /// 2026-10-12 with the two texts below: `permission_denied` "blocked by
+    /// our content policy" and "an MCP configuration issue"; at the head of
+    /// the user message both are answered). Ported from magpie's Devin
+    /// plugin (`build`; magpie 85fa42c1's TestBuildDevin).
+    @Test("the system prompt and the tools' descriptions open the first user prompt; each tool points at its own")
+    func instructionsInFirstUserPrompt() throws {
+        let system = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+        let read = Tool(
+            name: "Read",
+            description: "Reads a file from the local filesystem. You can access any file directly by using this tool.\n",
+            parameters: .object(["type": .string("object")])
+        )
+        let bare = Tool(name: "noop", description: "", parameters: .object(["type": .string("object")]))
+        func build(_ context: Context) -> DevinProto.GetChatMessageRequest {
+            DevinAgentProvider.buildChatRequest(
+                model: devinTestModel(), context: context, messages: context.messages,
+                options: StreamOptions(apiKey: "tok"), apiKey: "k", userJwt: "jwt", cascadeId: "c", assignment: nil
+            )
+        }
+        let block = """
+            <tool_descriptions>
+            <tool name="Read">
+            Reads a file from the local filesystem. You can access any file directly by using this tool.
+            </tool>
+            </tool_descriptions>
+            """
+        let history: [Message] = [
+            .assistant(AssistantMessage(content: [.text(TextContent(text: "earlier"))], api: "x", provider: "x", model: "x")),
+            .user(UserMessage(text: "first")),
+            .user(UserMessage(text: "second")),
+        ]
+        let request = build(Context(systemPrompt: system, messages: history, tools: [read, bare]))
+        #expect(request.prompt.isEmpty)
+        #expect(fields(request.encode())[2] == nil)
+        // Only the first user prompt carries them, wherever it stands.
+        #expect(request.chatMessagePrompts.map(\.prompt) == ["earlier", "\(system)\n\n\(block)\n\nfirst", "second"])
+        #expect(request.tools.map(\.description) == [
+            "Described under <tool name=\"Read\"> in <tool_descriptions>, in the instructions.",
+            // A tool that says nothing of itself has nothing to point at.
+            "noop",
+        ])
+
+        // No tool description, no block; no system prompt either, nothing added.
+        #expect(build(Context(systemPrompt: system, messages: history, tools: [bare])).chatMessagePrompts[1].prompt == "\(system)\n\nfirst")
+        #expect(build(Context(messages: history, tools: [bare])).chatMessagePrompts.map(\.prompt) == ["earlier", "first", "second"])
+        #expect(build(Context(messages: history, tools: [read])).chatMessagePrompts[1].prompt == "\(block)\n\nfirst")
+
+        // A conversation with no user prompt gets one for them, ahead of the rest.
+        let headless = build(Context(systemPrompt: system, messages: [history[0]]))
+        #expect(headless.chatMessagePrompts.map(\.source) == [.user, .system])
+        #expect(headless.chatMessagePrompts[0].prompt == system)
+        #expect(!headless.chatMessagePrompts[0].messageId.isEmpty)
+
+        // History sizing leaves the instructions out: compaction keeps them.
+        let plain = build(Context(messages: history))
+        let sized = Context(systemPrompt: system, messages: history, tools: [read])
+        #expect(DevinAgentProvider.shrinkableHistoryBytes(request: build(sized), context: sized)
+            <= DevinAgentProvider.shrinkableHistoryBytes(request: plain, context: Context(messages: history)) + 8)
+    }
+
+    /// Measured 2026-10-12: Devin ends the stream of a prompt it screens out
+    /// with this trailer. magpie's Devin plugin answers it 400 (`failure`,
+    /// "content policy"): not a sign-in failure, and not worth sending again.
+    @Test("a content-policy refusal is a bad request, not a sign-in failure or a retry")
+    func contentPolicyRefusal() throws {
+        let trailer = Data(#"{"error":{"code":"permission_denied","message":"Your request was blocked by our content policy. Please remove sensitive or unsafe content from your prompt, memories, and other settings and try again. (trace ID: 2e07af55ec9c31ef63b9c277a4a05008)"}}"#.utf8)
+        let failure = try #require(DevinAgentProvider.trailerFailure(trailer, historyBytes: { 0 }))
+        #expect(failure.httpStatus == 400)
+        #expect(failure.category == .invalidRequest)
+        #expect(!failure.isRetryable)
+        // The plugin's other statuses already hold (errors.test.mjs).
+        func category(_ code: String, _ message: String) throws -> ProviderFailure.Category {
+            let body = try JSONSerialization.data(withJSONObject: ["error": ["code": code, "message": message]])
+            return try #require(DevinAgentProvider.trailerFailure(body, historyBytes: { 0 })).category
+        }
+        #expect(try category("unauthenticated", "key revoked") == .authentication)
+        #expect(try category("invalid_argument", "prompt is too long") == .contextOverflow)
+        #expect(try category("resource_exhausted", "daily quota used up") == .quota)
+        #expect(try category("resource_exhausted", "rate limit") == .rateLimit)
+        #expect(try category("unavailable", "try later") == .server)
+    }
+
+    @Test("a tool call that opens with a name and no id is kept, under an id of ours")
+    func idlessToolCall() async throws {
+        let (_, final) = await chatFinal([
+            frame(chatDelta { $0.bytesField(6, toolCall(name: "bash", args: "{\"command\":")) }),
+            frame(chatDelta { $0.bytesField(6, toolCall(args: "\"ls\"}")) }),
+            frame(Data("{}".utf8), flags: 0x02),
+        ])
+        let message = try #require(final)
+        #expect(message.stopReason == .toolUse)
+        guard case .toolCall(let call)? = message.content.first else {
+            Issue.record("expected a tool call")
+            return
+        }
+        #expect(call.name == "bash")
+        #expect(call.id.hasPrefix("call_"))
+        #expect(call.id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") })
+        #expect(call.arguments == .object(["command": .string("ls")]))
+    }
+
+    /// magpie's Devin plugin opens a call at each name (`events`: `tools++`),
+    /// so two calls Devin sends without ids stay two.
+    @Test("two tool calls that open with a name and no id stay two calls, each with its own arguments")
+    func idlessToolCallsStayApart() async throws {
+        let (_, final) = await chatFinal([
+            frame(chatDelta { $0.bytesField(6, toolCall(name: "read", args: "{\"path\":")) }),
+            frame(chatDelta { $0.bytesField(6, toolCall(args: "\"a.txt\"}")) }),
+            frame(chatDelta { $0.bytesField(6, toolCall(name: "read", args: "{\"path\":\"b.txt\"}")) }),
+            frame(Data("{}".utf8), flags: 0x02),
+        ])
+        let calls = try #require(final).content.compactMap { block -> ToolCall? in
+            if case .toolCall(let call) = block { return call }
+            return nil
+        }
+        #expect(calls.map(\.arguments) == [
+            .object(["path": .string("a.txt")]),
+            .object(["path": .string("b.txt")]),
+        ])
+        #expect(Set(calls.map(\.id)).count == 2)
     }
 
     @Test("Gemini schema normalization folds type arrays into nullable")

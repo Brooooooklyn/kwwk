@@ -195,6 +195,9 @@ Then depend on the libraries you need:
   This includes Claude Pro/Max: `OAuthLogin.loginAnthropic`,
   `AnthropicOAuthProvider` and `AnthropicUsageReader` share the same lightweight
   module. Usage keeps shared windows and model-scoped weekly limits separate.
+  `OAuthUsage.readers` covers Claude, Codex, Kimi For Coding and xAI Grok
+  (the period's credits and capped on-demand spending, as Grok Build's
+  `/usage` reads them).
   The host owns credential storage and refresh locking; usage only reads the
   access token.
 
@@ -720,9 +723,10 @@ them — don't update one without the others:
 1. `Sources/KWWKAI/Resources/models.json` — every regular provider,
    generated from pi-mono's `packages/ai/src/models.generated.ts`.
 2. `Sources/KWWKAI/Resources/cursor-models.json` — the Cursor
-   subscription models, pulled live from Cursor's `GetUsableModels` RPC
-   (there is no runtime model sync; this file is the authoritative
-   Cursor catalog).
+   subscription models, pulled live from Cursor's `GetUsableModels` RPC,
+   each with the context window and image input Cursor's model picker
+   (`AvailableModels`) gives its id (there is no runtime model sync; this
+   file is the authoritative Cursor catalog).
 3. `Sources/KWWKAI/Resources/devin-models.json` — the Devin subscription
    models, pulled live from Codeium Cascade's `GetCliModelConfigs` RPC,
    with per-effort model uids collapsed into one model per family. The

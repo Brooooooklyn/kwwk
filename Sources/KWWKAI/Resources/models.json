@@ -18676,14 +18676,15 @@
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.kimi.com\/coding",
       "compat" : {
+        "allowEmptySignature" : true,
         "forceAdaptiveThinking" : true
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0,
+        "cacheRead" : 0.3,
         "cacheWrite" : 0,
-        "input" : 0,
-        "output" : 0
+        "input" : 3,
+        "output" : 15
       },
       "id" : "k3-256k",
       "input" : [
@@ -18761,6 +18762,7 @@
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.kimi.com\/coding",
       "compat" : {
+        "allowEmptySignature" : true,
         "forceAdaptiveThinking" : true
       },
       "contextWindow" : 262144,

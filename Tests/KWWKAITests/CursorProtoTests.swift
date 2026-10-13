@@ -145,6 +145,13 @@ struct CursorProtoTests {
         return (runField!.value.asData!, blobStore)
     }
 
+    /// The decoded `rootPromptMessagesJson` messages of a run, in order.
+    private func rootMessages(_ run: Data, _ blobStore: CursorBlobStore) -> [[String: Any]] {
+        repeatedField(field(run, 1)!, 1).map { id in
+            try! JSONSerialization.jsonObject(with: blobStore.get(id)!) as! [String: Any]
+        }
+    }
+
     private func field(_ data: Data, _ number: Int) -> Data? {
         var reader = ProtoReader(data)
         while let f = reader.next() {
@@ -231,19 +238,136 @@ struct CursorProtoTests {
             .assistant(assistant),
             .user(UserMessage(text: "new question")),
         ])
-        let state = field(run, 1)!
-        let ids = repeatedField(state, 1)
-        // system + prior user + prior assistant; the active message rides in the action.
-        #expect(ids.count == 3)
-        let decoded = ids.map { id -> [String: Any] in
-            let bytes = blobStore.get(id)!
-            return try! JSONSerialization.jsonObject(with: bytes) as! [String: Any]
-        }
+        // system + rules + prior user + prior assistant; the active message
+        // rides in the action.
+        let decoded = rootMessages(run, blobStore)
+        #expect(decoded.count == 4)
         #expect(decoded[0]["role"] as? String == "system")
-        #expect(decoded[1]["role"] as? String == "user")
-        #expect(decoded[2]["role"] as? String == "assistant")
-        let userContent = decoded[1]["content"] as! [[String: Any]]
+        #expect(decoded[2]["role"] as? String == "user")
+        #expect(decoded[3]["role"] as? String == "assistant")
+        let userContent = decoded[2]["content"] as! [[String: Any]]
         #expect(userContent[0]["text"] as? String == "old question")
+    }
+
+    /// The server replaces the first entry with its own system prompt and
+    /// writes the client's rules into the conversation only while it is
+    /// empty, so from the second turn on the system prompt has to be in the
+    /// history itself (measured 2026-10-11: without it the model did not
+    /// know a word its system prompt gave it).
+    @Test("history carries the system prompt as a rules message; a first turn does not")
+    func rulesMessageRidesWithHistory() throws {
+        let assistant = AssistantMessage(
+            content: [.text(TextContent(text: "Hello."))],
+            api: "cursor-agent", provider: "cursor", model: "auto"
+        )
+        let (run, blobStore) = buildRequest(
+            messages: [.user(UserMessage(text: "hi")), .assistant(assistant), .user(UserMessage(text: "again"))],
+            systemPrompt: "The codeword is PLOVER-88."
+        )
+        let decoded = rootMessages(run, blobStore)
+        #expect(decoded[1]["role"] as? String == "user")
+        let rules = try #require(decoded[1]["content"] as? String)
+        #expect(rules.contains("<user_rule>The codeword is PLOVER-88.</user_rule>"))
+        // Unchanged history re-encodes to the same blob, so it stays cached.
+        let (again, _) = buildRequest(
+            messages: [.user(UserMessage(text: "hi")), .assistant(assistant), .user(UserMessage(text: "again"))],
+            systemPrompt: "The codeword is PLOVER-88.", blobStore: blobStore
+        )
+        #expect(repeatedField(field(again, 1)!, 1) == repeatedField(field(run, 1)!, 1))
+
+        // On a first turn the server writes that message from the rules of
+        // the request context; one more here would be the prompt twice.
+        let (first, firstStore) = buildRequest(
+            messages: [.user(UserMessage(text: "hi"))], systemPrompt: "The codeword is PLOVER-88."
+        )
+        #expect(rootMessages(first, firstStore).count == 1)
+    }
+
+    /// Cursor's server writes a step into this field as an assistant message
+    /// ending in `tool-call` parts and one `role: "tool"` message per call.
+    /// Sent as text, the calls were invisible to the model on the next turn.
+    @Test("tool calls and their results ride in history as tool-call and tool-result parts")
+    func toolCallsInHistory() throws {
+        let assistant = AssistantMessage(
+            content: [
+                .thinking(ThinkingContent(thinking: "hm")),
+                .text(TextContent(text: "I'll look.")),
+                .toolCall(ToolCall(id: "c1", name: "bash", arguments: ["command": "ls /tmp"], cursorExecResolved: true)),
+                .toolCall(ToolCall(id: "c2", name: "lookup", arguments: ["id": 9007199254740993])),
+                .text(TextContent(text: "Found it.")),
+            ],
+            api: "cursor-agent", provider: "cursor", model: "auto"
+        )
+        let (run, blobStore) = buildRequest(messages: [
+            .user(UserMessage(text: "look")),
+            .assistant(assistant),
+            .toolResult(ToolResultMessage(toolCallId: "c1", toolName: "bash", content: [.text(TextContent(text: "note.txt"))])),
+            .toolResult(ToolResultMessage(
+                toolCallId: "c2", toolName: "lookup", content: [.text(TextContent(text: "no such id"))], isError: true
+            )),
+            .user(UserMessage(text: "and now?")),
+        ], systemPrompt: "")
+        let decoded = rootMessages(run, blobStore)
+        // system, user, assistant step, its two results, the text after them.
+        #expect(decoded.map { $0["role"] as? String } == ["system", "user", "assistant", "tool", "tool", "assistant"])
+
+        let step = decoded[2]["content"] as! [[String: Any]]
+        #expect(step.map { $0["type"] as? String } == ["text", "tool-call", "tool-call"])
+        #expect(step[1]["toolCallId"] as? String == "c1")
+        #expect(step[1]["toolName"] as? String == "bash")
+        #expect((step[1]["args"] as? [String: Any])?["command"] as? String == "ls /tmp")
+        // An integer past 2^53 keeps every digit (magpie #434).
+        let stepJSON = String(decoding: blobStore.get(repeatedField(field(run, 1)!, 1)[2])!, as: UTF8.self)
+        #expect(stepJSON.contains("9007199254740993"))
+
+        let first = (decoded[3]["content"] as! [[String: Any]])[0]
+        #expect(first["type"] as? String == "tool-result")
+        #expect(first["toolCallId"] as? String == "c1")
+        #expect(first["toolName"] as? String == "bash")
+        #expect(first["result"] as? String == "note.txt")
+        #expect(first["isError"] == nil)
+        let second = (decoded[4]["content"] as! [[String: Any]])[0]
+        #expect(second["toolCallId"] as? String == "c2")
+        #expect(second["isError"] as? Bool == true)
+        #expect(((decoded[5]["content"] as! [[String: Any]])[0])["text"] as? String == "Found it.")
+    }
+
+    @Test("every call in history has exactly one result")
+    func toolCallsStayPaired() throws {
+        func call(_ id: String, _ arguments: JSONValue = [:]) -> Message {
+            .assistant(AssistantMessage(
+                content: [.toolCall(ToolCall(id: id, name: "read", arguments: arguments))],
+                api: "cursor-agent", provider: "cursor", model: "auto"
+            ))
+        }
+        func result(_ id: String, _ text: String) -> Message {
+            .toolResult(ToolResultMessage(toolCallId: id, toolName: "read", content: [.text(TextContent(text: text))]))
+        }
+        let (run, blobStore) = buildRequest(messages: [
+            .user(UserMessage(text: "go")),
+            // One turn's parallel calls split over two assistant messages,
+            // their results after both (magpie #1275).
+            call("a"), call("b"), result("a", "A"), result("b", "B"),
+            // A call whose turn was cut off, and arguments that were never
+            // whole JSON.
+            call("lost", .string("{\"path\": \"/tm")),
+            // A result whose call is not in this history.
+            result("gone", "orphan"),
+            .user(UserMessage(text: "next")),
+        ], systemPrompt: "")
+        let decoded = rootMessages(run, blobStore)
+        #expect(decoded.map { $0["role"] as? String } == [
+            "system", "user", "assistant", "tool", "assistant", "tool", "assistant", "tool", "user",
+        ])
+        func part(_ index: Int) -> [String: Any] { (decoded[index]["content"] as! [[String: Any]])[0] }
+        #expect(part(3)["toolCallId"] as? String == "a")
+        #expect(part(3)["result"] as? String == "A")
+        #expect(part(5)["toolCallId"] as? String == "b")
+        #expect(part(5)["result"] as? String == "B")
+        #expect((part(6)["args"] as? [String: Any])?.isEmpty == true)
+        #expect(part(7)["toolCallId"] as? String == "lost")
+        #expect(part(7)["isError"] as? Bool == true)
+        #expect((part(8)["text"] as? String)?.contains("orphan") == true)
     }
 
     @Test("a prompt followed by a tool declaration is still the user action")

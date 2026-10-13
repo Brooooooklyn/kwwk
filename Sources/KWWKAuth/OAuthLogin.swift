@@ -284,7 +284,12 @@ public enum OAuthLogin {
     public static func loginGitHubCopilot(
         clientID: String = "Iv1.b507a08c87ecfe98",
         callbacks: Callbacks,
-        client: HTTPClient = URLSessionHTTPClient()
+        client: HTTPClient = URLSessionHTTPClient(),
+        // Waits the given seconds before a poll; tests pass their own to read
+        // the waits without sitting through them.
+        pollSleep: @escaping @Sendable (Int) async throws -> Void = { seconds in
+            try await Task.sleep(nanoseconds: UInt64(max(seconds, 0)) * 1_000_000_000)
+        }
     ) async throws -> OAuthCredentials {
         callbacks.onProgress("requesting GitHub device code…")
         let (deviceResponse, deviceBody) = try await client.request(
@@ -315,7 +320,8 @@ public enum OAuthLogin {
         callbacks.onProgress("enter code in your browser: \(userCode)")
         return try await present(verifyURL, callbacks: callbacks) {
             try await pollGitHubCopilot(
-                clientID: clientID, deviceCode: deviceCode, interval: interval, client: client
+                clientID: clientID, deviceCode: deviceCode, interval: interval, client: client,
+                pollSleep: pollSleep
             )
         }
     }
@@ -323,14 +329,17 @@ public enum OAuthLogin {
     private static func pollGitHubCopilot(
         clientID: String,
         deviceCode: String,
-        interval: Int,
-        client: HTTPClient
+        interval initialInterval: Int,
+        client: HTTPClient,
+        pollSleep: @Sendable (Int) async throws -> Void
     ) async throws -> OAuthCredentials {
         // Poll for the access token.
         let pollURL = URL(string: "https://github.com/login/oauth/access_token")!
         let deadline = Date().addingTimeInterval(15 * 60)
+        var interval = initialInterval
+        var misses = 0
         while Date() < deadline {
-            try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
+            try await pollSleep(interval)
             let (pollResponse, pollBody) = try await client.request(
                 url: pollURL,
                 method: "POST",
@@ -344,16 +353,36 @@ public enum OAuthLogin {
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 ]).utf8)
             )
-            if pollResponse.statusCode >= 400 {
+            // A body that isn't JSON (a proxy's page), or an error status
+            // that names no OAuth error, is a hiccup, asked again — but five
+            // in a row end the sign-in with the last one, rather than wait
+            // out the 15 minutes saying nothing after GitHub's page said the
+            // device was connected (magpie #723, commit 63c382bb). An OAuth
+            // error is an answer whatever its status: RFC 8628 sends
+            // `authorization_pending` as a 400, and github.com's 200 is its
+            // own habit.
+            guard let polled = (try? JSONSerialization.jsonObject(with: pollBody)) as? [String: Any],
+                  pollResponse.statusCode < 400 || polled["error"] is String
+            else {
+                misses += 1
+                if misses >= 5 {
+                    let text = String(data: pollBody.prefix(200), encoding: .utf8) ?? ""
+                    throw OAuthError.refreshFailed("copilot device flow \(pollResponse.statusCode): \(text)")
+                }
                 continue
             }
-            guard let polled = try JSONSerialization.jsonObject(with: pollBody) as? [String: Any] else {
-                continue
-            }
+            misses = 0
             if let err = polled["error"] as? String {
                 if err == "authorization_pending" { continue }
                 if err == "slow_down" {
-                    try await Task.sleep(nanoseconds: UInt64(interval) * 2 * 1_000_000_000)
+                    // GitHub raises the interval it holds this device code
+                    // to by 5 s on every `slow_down` and names the new one;
+                    // the raise lasts (RFC 8628 §3.5). Waiting longer once
+                    // and then polling at the old pace again was answered
+                    // `slow_down` again and again, each one raising the
+                    // interval further.
+                    // magpie keeps the raise the same way (copilot_signin.go).
+                    interval = max(polled["interval"] as? Int ?? 0, interval + 5)
                     continue
                 }
                 throw OAuthError.refreshFailed("copilot device flow: \(err)")
@@ -801,11 +830,7 @@ public enum OAuthLogin {
             operation: "customer lookup"
         )
         let orgs = (customer as? [String: Any])?["organizations"] as? [[String: Any]] ?? []
-        let org = orgs.first { ($0["isDefault"] as? Bool) == true } ?? orgs.first
-        let projects = org?["projects"] as? [[String: Any]] ?? []
-        let project = projects.first { ($0["isDefault"] as? Bool) == true } ?? projects.first
-        guard let organizationId = zaiString(org?["organizationId"]),
-              let projectId = zaiString(project?["projectId"]) else {
+        guard let (organizationId, projectId) = zaiDefaultProject(orgs) else {
             throw OAuthError.invalidResponse("zai key provisioning: no organization/project on account")
         }
 
@@ -816,7 +841,12 @@ public enum OAuthLogin {
             operation: "api key list"
         )
         let record: [String: Any]?
-        if let existing = zaiKeyArray(listed).first(where: { ($0["name"] as? String) == ZaiOAuth.keyName }) {
+        // A listed entry counts only when it names its key id: one without
+        // an `apiKey` cannot be copied, so the key is made instead (the
+        // magpie zcode plugin's projectKey skips such entries the same way).
+        if let existing = zaiKeyArray(listed).first(where: {
+            ($0["name"] as? String) == ZaiOAuth.keyName && zaiString($0["apiKey"]) != nil
+        }) {
             record = existing
         } else {
             record = try zaiUnwrap(
@@ -845,10 +875,80 @@ public enum OAuthLogin {
             throw OAuthError.invalidResponse("zai key provisioning returned no secretKey")
         }
 
-        return OAuthCredentials(access: "\(apiKey).\(secretKey)", refresh: "", expires: .max)
+        let key = "\(apiKey).\(secretKey)"
+
+        // A key is minted for any Z.ai account, plan or not, and without a
+        // GLM Coding Plan the coding endpoint answers every request with
+        // code 1113. ZCode asks the account's subscriptions with the key
+        // itself (bare, no `Bearer`) and so does magpie's zcode plugin
+        // (`plan()`, which signs a planless account out with these words);
+        // measured 2026-10-12: 200 `{"code":200,"data":[{"productName":
+        // "GLM Coding Lite","status":"VALID",…}]}`. Only a list that was
+        // read and holds no valid subscription refuses the sign-in: a read
+        // that fails leaves the key, which is good either way.
+        if let plan = await zaiCodingPlan(key: key, client: client) {
+            guard !plan.isEmpty else {
+                throw OAuthError.invalidResponse(
+                    "this Z.ai account has no GLM Coding Plan of its own (a seat on a team's plan can't be used here) — subscribe at z.ai/subscribe, then sign in again"
+                )
+            }
+            callbacks.onProgress("signed in to \(plan)")
+        }
+
+        return OAuthCredentials(access: key, refresh: "", expires: .max)
     }
 
     // MARK: - Z.AI helpers
+
+    /// The account's own default organization and project, as ZCode picks
+    /// them: a project of `projectType` 2 is a team's coding plan and never
+    /// holds a personal key, the organization named "默认机构" and the
+    /// project named "默认项目" win, else the first of each. Ported from the
+    /// magpie zcode plugin's `mintKey`; the account shape is the one in
+    /// magpie's zcode_test.go (an "other" organization listed ahead of
+    /// 默认机构, whose first project is a team's). `isDefault`, which
+    /// oh-my-pi reads, still wins when the account carries it.
+    package static func zaiDefaultProject(_ orgs: [[String: Any]]) -> (organization: String, project: String)? {
+        func flagged(_ record: [String: Any]) -> Bool { (record["isDefault"] as? Bool) == true }
+        func named(_ record: [String: Any], _ field: String, _ name: String) -> Bool {
+            (record[field] as? String)?.contains(name) == true
+        }
+        var candidates: [(org: [String: Any], id: String, project: String)] = []
+        for org in orgs {
+            guard let id = zaiString(org["organizationId"]) else { continue }
+            let own = (org["projects"] as? [[String: Any]] ?? []).filter { project in
+                guard zaiString(project["projectId"]) != nil else { return false }
+                // The type arrives as "2" or 2.
+                if let type = project["projectType"] as? String { return type != "2" }
+                if let type = project["projectType"] as? NSNumber { return type.intValue != 2 }
+                return true
+            }
+            let project = own.first(where: flagged)
+                ?? own.first { named($0, "projectName", "默认项目") }
+                ?? own.first
+            guard let projectId = zaiString(project?["projectId"]) else { continue }
+            candidates.append((org, id, projectId))
+        }
+        let chosen = candidates.first { flagged($0.org) }
+            ?? candidates.first { named($0.org, "organizationName", "默认机构") }
+            ?? candidates.first
+        return chosen.map { ($0.id, $0.project) }
+    }
+
+    /// The name of the account's valid GLM Coding Plan, "" when the list was
+    /// read and holds none, nil when it could not be read.
+    private static func zaiCodingPlan(key: String, client: HTTPClient) async -> String? {
+        guard let listed = try? zaiUnwrap(
+            try await zaiJSON(
+                url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/subscription/list"),
+                method: "GET", body: nil, bearer: nil, authorization: key, client: client
+            ),
+            operation: "subscription list"
+        ), let subscriptions = listed as? [[String: Any]] else { return nil }
+        let valid = subscriptions.first { ($0["status"] as? String)?.uppercased() == "VALID" }
+        guard let valid else { return "" }
+        return zaiString(valid["productName"]) ?? "GLM Coding Plan"
+    }
 
     /// One JSON round-trip: optional JSON body, optional bearer, ≥400 throws
     /// with the response text, empty bodies come back nil.
@@ -857,11 +957,13 @@ public enum OAuthLogin {
         method: String,
         body: [String: Any]?,
         bearer: String?,
+        authorization: String? = nil,
         client: HTTPClient
     ) async throws -> Any? {
         var headers = ["accept": "application/json"]
         if body != nil { headers["content-type"] = "application/json" }
         if let bearer { headers["authorization"] = "Bearer \(bearer)" }
+        if let authorization { headers["authorization"] = authorization }
         let data = try body.map { try JSONSerialization.data(withJSONObject: $0) }
         let (response, responseBody) = try await client.request(
             url: url, method: method, headers: headers, body: data

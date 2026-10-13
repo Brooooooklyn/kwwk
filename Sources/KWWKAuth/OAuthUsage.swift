@@ -82,6 +82,8 @@ public enum OAuthUsage {
             AnthropicUsageReader(),
             OpenAICodexUsageReader(),
             KimiCodingUsageReader(),
+            CursorUsageReader(),
+            XaiUsageReader(),
         ] as [any OAuthUsageReader]).map { ($0.providerId, $0) }
     )
 

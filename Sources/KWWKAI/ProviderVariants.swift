@@ -307,8 +307,9 @@ public enum ProviderVariants {
     //
     // Claude-on-Copilot. Copilot proxies Claude's Messages API at the same
     // host (`/v1/messages`) with Bearer session-token auth and the standard
-    // editor headers. No `anthropic-beta` opt-in; no per-request dynamic
-    // headers (pi doesn't stamp `X-Initiator` on this route).
+    // editor headers. No `anthropic-beta` opt-in. The per-request headers
+    // (`X-Initiator`, `Copilot-Vision-Request`) are added by
+    // `githubCopilotProviders`, which is what a login registers.
     public static func githubCopilotAnthropic(
         sessionToken: String? = nil,
         client: HTTPClient = URLSessionHTTPClient(),
@@ -368,6 +369,42 @@ public enum ProviderVariants {
         )
     }
 
+    // MARK: - GitHub Copilot (the set a login registers)
+
+    /// The three Copilot routes as a login registers them, one per wire
+    /// format the Copilot catalog uses. Two things hold for the set that the
+    /// single variants above don't promise on their own:
+    ///
+    ///  - the chat route answers to `openai-completions`, the api the
+    ///    catalog's Copilot chat models (Gemini, Kimi, and the GPT-4.x models
+    ///    Copilot lists with no `supported_endpoints`) carry — registered as
+    ///    `github-copilot-chat` no catalog model ever reached it;
+    ///  - every route stamps the per-request headers, not chat alone.
+    ///    `X-Initiator` is how Copilot tells a turn the user typed, which it
+    ///    bills as one, from a tool's reply, which it does not; a Claude
+    ///    (`/v1/messages`) or GPT-5 (`/responses`) request used to carry
+    ///    neither it nor `Copilot-Vision-Request` for an image. magpie sends
+    ///    them on all three wires (internal/provider/account.go,
+    ///    copilotProvider's `sign`; commit 6f19f60b).
+    public static func githubCopilotProviders(
+        client: HTTPClient = URLSessionHTTPClient(),
+        integrationID: String = "vscode-chat",
+        baseURL: URL = URL(string: "https://api.individual.githubcopilot.com")!
+    ) -> [any APIProvider] {
+        [
+            githubCopilot(
+                client: client, integrationID: integrationID,
+                api: "openai-completions", baseURL: baseURL
+            ),
+            CopilotRequestHeadersProvider(base: githubCopilotAnthropic(
+                client: client, integrationID: integrationID, baseURL: baseURL
+            )),
+            CopilotRequestHeadersProvider(base: githubCopilotResponses(
+                client: client, integrationID: integrationID, baseURL: baseURL
+            )),
+        ]
+    }
+
     // MARK: - Shared helpers
 
     private static func copilotEditorHeaders(integrationID: String) -> [String: String] {
@@ -383,24 +420,67 @@ public enum ProviderVariants {
         @Sendable (inout [String: String], Model, Context, StreamOptions?) -> Void
     ) {
         return { headers, _, context, _ in
-            let hasImages = context.messages.contains { msg in
-                if case .user(let u) = msg {
-                    return u.content.contains { if case .image = $0 { return true } else { return false } }
-                }
-                if case .toolResult(let t) = msg {
-                    return t.content.contains { if case .image = $0 { return true } else { return false } }
-                }
-                return false
-            }
-            // Tool declarations (`.system`) are bookkeeping, not turns.
-            let lastIsUser: Bool = {
-                guard let last = context.messages.last(where: { $0.role != .system }) else { return true }
-                if case .user = last { return true } else { return false }
-            }()
-            headers["x-initiator"] = lastIsUser ? "user" : "agent"
-            headers["openai-intent"] = "conversation-edits"
-            if hasImages { headers["copilot-vision-request"] = "true" }
+            for (k, v) in copilotDynamicHeaders(for: context) { headers[k] = v }
         }
+    }
+
+    /// Headers Copilot reads off each request, whichever wire it rides.
+    static func copilotDynamicHeaders(for context: Context) -> [String: String] {
+        let hasImages = context.messages.contains { msg in
+            if case .user(let u) = msg {
+                return u.content.contains { if case .image = $0 { return true } else { return false } }
+            }
+            if case .toolResult(let t) = msg {
+                return t.content.contains { if case .image = $0 { return true } else { return false } }
+            }
+            return false
+        }
+        // Tool declarations (`.system`) are bookkeeping, not turns.
+        let lastIsUser: Bool = {
+            guard let last = context.messages.last(where: { $0.role != .system }) else { return true }
+            if case .user = last { return true } else { return false }
+        }()
+        var headers = [
+            "x-initiator": lastIsUser ? "user" : "agent",
+            "openai-intent": "conversation-edits",
+        ]
+        if hasImages { headers["copilot-vision-request"] = "true" }
+        return headers
+    }
+}
+
+/// Stamps Copilot's per-request headers on a route whose provider has no
+/// header hook of its own (Anthropic Messages, OpenAI Responses), by way of
+/// `StreamOptions.headers`, which both merge last. A header the caller set
+/// itself is kept. Session cleanup and native compaction pass straight
+/// through, so the wrapped route keeps what the registry finds by cast.
+struct CopilotRequestHeadersProvider: APIProvider, APIProviderSessionLifecycle, NativeCompactionProvider {
+    let base: any APIProvider
+
+    var api: String { base.api }
+
+    func stream(model: Model, context: Context, options: StreamOptions?) -> AssistantMessageStream {
+        var stamped = options ?? StreamOptions()
+        var headers = stamped.headers ?? [:]
+        let set = Set(headers.keys.map { $0.lowercased() })
+        for (k, v) in ProviderVariants.copilotDynamicHeaders(for: context) where !set.contains(k) {
+            headers[k] = v
+        }
+        stamped.headers = headers
+        return base.stream(model: model, context: context, options: stamped)
+    }
+
+    func closeSession(sessionId: String) async {
+        await (base as? any APIProviderSessionLifecycle)?.closeSession(sessionId: sessionId)
+    }
+
+    func compact(
+        model: Model, context: Context, instructions: String, options: StreamOptions?
+    ) async throws -> NativeCompactionResult? {
+        guard let native = base as? any NativeCompactionProvider else { return nil }
+        return try await native.compact(
+            model: model, context: context, instructions: instructions, options: options
+        )
     }
 }
 

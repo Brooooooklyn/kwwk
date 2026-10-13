@@ -359,8 +359,8 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                             state.appendSignature(index: index, signature: sig)
                         }
                     case "input_json_delta":
-                        if case .string(let partial) = delta["partial_json"] ?? .null {
-                            state.appendToolJSON(index: index, chunk: partial)
+                        if case .string(let partial) = delta["partial_json"] ?? .null,
+                           state.appendToolJSON(index: index, chunk: partial) {
                             out.push(.toolCallDelta(
                                 contentIndex: state.contentIndex(for: index),
                                 delta: partial,
@@ -535,8 +535,10 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             }
         }
         // Temperature is dropped when thinking is on (Messages API rejects any
-        // value != 1) and whenever the model declares it unsupported (Opus 4.7+).
+        // value != 1) and whenever the model declares it unsupported (Opus 4.7+)
+        // or is a Claude known to refuse it under any catalog row.
         let temperatureAllowed = model.compat?.supportsTemperature != false
+            && !refusesTemperature(model.id)
         if !thinkingEnabled, temperatureAllowed, let temp = options?.temperature { root["temperature"] = temp }
         root["max_tokens"] = maxTokens
 
@@ -783,6 +785,37 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
         return (major, minor) >= (5, 1)
     }
 
+    /// Claude Sonnet 5, Fable 5 and Fable 5.1 answer 400 "`temperature` is
+    /// deprecated for this model." to any value (measured 2026-10-11, with
+    /// catalog rows that do not say so); Opus from 4.7 does too, and Haiku 5.5
+    /// takes only its default (magpie #1454, through a relay). Read off the id
+    /// so a relay's or Bedrock's spelling of the same model is covered. Older
+    /// Claudes and other vendors' models keep the caller's temperature.
+    static func refusesTemperature(_ modelId: String) -> Bool {
+        let pattern = #/claude-(opus|sonnet|haiku|fable|mythos)-(\d)(?!\d)(?:[-.](\d{1,2})(?!\d))?/#
+        guard let match = modelId.lowercased().firstMatch(of: pattern), let major = Int(match.2) else { return false }
+        let version = (major, match.3.flatMap { Int($0) } ?? 0)
+        switch match.1 {
+        case "opus": return version >= (4, 7)
+        case "sonnet": return version >= (5, 0)
+        case "haiku": return version >= (5, 5)
+        default: return true
+        }
+    }
+
+    /// The Messages API takes an image's `media_type` only as exactly
+    /// `image/jpeg`, `image/png`, `image/gif` or `image/webp`: `image/jpg`,
+    /// `IMAGE/JPEG` and `image/jpeg; charset=binary` are each a 400 "Input
+    /// should be 'image/jpeg', …" (measured 2026-10-11), and once such an
+    /// image is in the transcript every later turn fails. MCP servers report
+    /// whatever type they like, so it is put in Anthropic's spelling here.
+    static func imageMediaType(_ mimeType: String) -> String {
+        let type = mimeType.split(separator: ";").first.map {
+            $0.trimmingCharacters(in: .whitespaces).lowercased()
+        } ?? mimeType
+        return type == "image/jpg" ? "image/jpeg" : type
+    }
+
     private static func encodeMessage(_ message: Message, allowEmptySignature: Bool, fallbackEnabled: Bool) -> [String: Any]? {
         switch message {
         case .system:
@@ -809,7 +842,7 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                         "type": "image",
                         "source": [
                             "type": "base64",
-                            "media_type": i.mimeType,
+                            "media_type": imageMediaType(i.mimeType),
                             "data": i.data,
                         ],
                     ]
@@ -874,7 +907,7 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             return ["role": "assistant", "content": blocks]
 
         case .toolResult(let tr):
-            let inner = tr.content.compactMap { block -> [String: Any]? in
+            var inner = tr.content.compactMap { block -> [String: Any]? in
                 switch block {
                 case .text(let t):
                     guard !t.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -884,20 +917,27 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                         "type": "image",
                         "source": [
                             "type": "base64",
-                            "media_type": i.mimeType,
+                            "media_type": imageMediaType(i.mimeType),
                             "data": i.data,
                         ],
                     ]
                 }
+            }
+            // An empty tool result is valid and must still answer its tool
+            // call. Kimi rejects omitted content with "Invalid request Error"
+            // but accepts an explicit empty array. Do not send empty text.
+            // A failed one is the exception: Anthropic answers 400 "content
+            // cannot be empty if `is_error` is true" (measured 2026-10-11),
+            // and the block is replayed on every later turn, so a failure
+            // with nothing to say goes with a line that says so.
+            if tr.isError, inner.isEmpty {
+                inner = [["type": "text", "text": "(no output)"]]
             }
             var entry: [String: Any] = [
                 "type": "tool_result",
                 "tool_use_id": tr.toolCallId,
                 "content": inner,
             ]
-            // An empty tool result is valid and must still answer its tool
-            // call. Kimi rejects omitted content with "Invalid request Error"
-            // but accepts an explicit empty array. Do not send empty text.
             if tr.isError { entry["is_error"] = true }
             return ["role": "user", "content": [entry]]
         }
@@ -979,6 +1019,8 @@ final class AnthropicStreamState: @unchecked Sendable {
     }
     private var blocks: [Int: Block] = [:]
     private var orderedIndices: [Int] = []
+    /// tool_use blocks whose `content_block_start` carried the whole input.
+    private var wholeInputIndices: Set<Int> = []
 
     init(api: String, provider: String, modelId: String) {
         self.api = api
@@ -1084,7 +1126,17 @@ final class AnthropicStreamState: @unchecked Sendable {
                 let name: String = {
                     if case .string(let v) = raw["name"] ?? .null { return v } else { return "" }
                 }()
-                blocks[index] = .toolUse(id: id, name: name, json: "")
+                // Anthropic starts a tool_use with `"input": {}` and streams the
+                // arguments as input_json_delta. Some Anthropic-shaped relays
+                // send the whole input here and no delta after (magpie
+                // c5b57b90); without this the call ran with `{}`.
+                var json = ""
+                if case .object(let input) = raw["input"] ?? .null, !input.isEmpty,
+                   let data = try? JSONEncoder().encode(JSONValue.object(input)) {
+                    json = String(decoding: data, as: UTF8.self)
+                    wholeInputIndices.insert(index)
+                }
+                blocks[index] = .toolUse(id: id, name: name, json: json)
             default: break
             }
         }
@@ -1124,11 +1176,16 @@ final class AnthropicStreamState: @unchecked Sendable {
         }
     }
 
-    func appendToolJSON(index: Int, chunk: String) {
+    /// False when the block's start already carried its whole input: a
+    /// delta after that would be appended to complete JSON and break it.
+    @discardableResult
+    func appendToolJSON(index: Int, chunk: String) -> Bool {
         lock.withLock {
+            guard !wholeInputIndices.contains(index) else { return false }
             if case .toolUse(let id, let name, let json) = blocks[index] {
                 blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
             }
+            return true
         }
     }
 
@@ -1215,6 +1272,13 @@ func mapStopReason(_ raw: String) -> StopReason {
     case "end_turn", "stop_sequence": return .stop
     case "max_tokens": return .length
     case "tool_use": return .toolUse
+    // An Anthropic-shaped relay in front of another vendor's model can pass
+    // that vendor's finish reason through as it came (magpie c5b57b90, a
+    // relay in front of Grok ending tool calls with `tool_calls`). Anthropic
+    // itself never sends these, so its own replies read as before.
+    case "stop": return .stop
+    case "length": return .length
+    case "tool_calls", "function_call": return .toolUse
     // pi maps a refused / safety-filtered turn to an error rather than a clean
     // stop; unknown reasons are surfaced the same way (rather than silently
     // masquerading as a successful completion) so new API values are caught.

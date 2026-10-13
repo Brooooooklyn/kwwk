@@ -190,11 +190,19 @@ enum DevinProto {
     /// `exa.api_server_pb.GetChatMessageRequest`.
     struct GetChatMessageRequest: Sendable, Equatable {
         var metadata: Metadata
+        /// The system field. Left empty: Devin screens it, so the system
+        /// prompt rides in the first user prompt (`instructions`).
         var prompt: String
         var chatMessagePrompts: [ChatMessagePrompt]
+        /// Not on the wire: the text the first user prompt opens with (the
+        /// system prompt and the tools' descriptions), kept so history
+        /// sizing can leave it out.
+        var instructions = ""
         var chatModelUid: String
         var configuration: CompletionConfiguration
         var tools: [ChatToolDefinition]
+        /// `ChatToolChoice.option_name`: "auto" or "required".
+        var toolChoice = "auto"
         var disableParallelToolCalls: Bool
         var cascadeId: String
         var executionId: String
@@ -209,8 +217,8 @@ enum DevinProto {
             w.bytesField(8, configuration.encode())
             for t in tools { w.bytesField(10, t.encode()) }
             if disableParallelToolCalls { w.boolField(11, true) }
-            // ChatToolChoice { option_name = 1 } = "auto"
-            w.messageField(12) { $0.stringField(1, "auto") }
+            // ChatToolChoice { option_name = 1 }
+            w.messageField(12) { $0.stringField(1, toolChoice) }
             // PromptCacheOptions { type = 1 } = EPHEMERAL
             w.messageField(13) { $0.varintField(1, cacheControlEphemeral) }
             if !cascadeId.isEmpty { w.stringField(16, cascadeId) }
