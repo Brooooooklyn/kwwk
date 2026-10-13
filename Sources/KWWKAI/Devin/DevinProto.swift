@@ -190,8 +190,14 @@ enum DevinProto {
     /// `exa.api_server_pb.GetChatMessageRequest`.
     struct GetChatMessageRequest: Sendable, Equatable {
         var metadata: Metadata
+        /// The system field. Left empty: Devin screens it, so the system
+        /// prompt rides in the first user prompt (`instructions`).
         var prompt: String
         var chatMessagePrompts: [ChatMessagePrompt]
+        /// Not on the wire: the text the first user prompt opens with (the
+        /// system prompt and the tools' descriptions), kept so history
+        /// sizing can leave it out.
+        var instructions = ""
         var chatModelUid: String
         var configuration: CompletionConfiguration
         var tools: [ChatToolDefinition]
