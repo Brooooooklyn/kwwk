@@ -36,19 +36,27 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
     /// archives) and server-written blobs survive into the next turn.
     private static let conversations = ConversationRegistry()
 
+    /// The agent API each account's Runs were moved to after a region
+    /// refusal (see ``CursorAgentEndpoint``).
+    static let endpoints = CursorAgentEndpoints()
+
     public let api = "cursor-agent"
     public let defaultBaseHost: String
     public let clientVersion: String
     public let defaultAPIKey: String?
+    /// Carries the one unary call a Run can need, `GetServerConfig`.
+    let httpClient: HTTPClient
 
     public init(
         defaultBaseHost: String = CursorAgentProvider.defaultBaseHost,
         clientVersion: String = CursorAgentProvider.defaultClientVersion,
-        defaultAPIKey: String? = nil
+        defaultAPIKey: String? = nil,
+        httpClient: HTTPClient = URLSessionHTTPClient()
     ) {
         self.defaultBaseHost = defaultBaseHost
         self.clientVersion = clientVersion
         self.defaultAPIKey = defaultAPIKey
+        self.httpClient = httpClient
     }
 
     public func stream(model: Model, context: Context, options: StreamOptions?) -> AssistantMessageStream {
@@ -89,7 +97,6 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             return
         }
 
-        let host = hostFromModel(model)
         let conversationId = options?.sessionId?.isEmpty == false
             ? options!.sessionId!
             : UUID().uuidString
@@ -105,6 +112,74 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
         )
         let toolDefs = Self.mcpToolDefinitions(context.tools)
 
+        var endpoint = Self.endpoints.endpoint(for: apiKey) ?? CursorAgentEndpoint(host: hostFromModel(model))
+        var rerouted = false
+        var started = false
+        while true {
+            let state = CursorStreamState(api: api, model: model)
+            do {
+                try await runOnce(
+                    endpoint: endpoint, apiKey: apiKey, requestBody: requestBody, toolDefs: toolDefs,
+                    conversation: conversation, conversationId: conversationId,
+                    state: state, started: &started, out: out, context: context, options: options
+                )
+                return
+            } catch {
+                if options?.cancellation?.isCancelled == true {
+                    let aborted = state.aborted()
+                    out.push(.error(reason: .aborted, error: aborted))
+                    out.end(aborted)
+                    return
+                }
+                // The failure's own sentence: "\(error)" of a Connect error
+                // is the enum's dump, `grpc(status: …, message: …)`.
+                let failure = ProviderFailure.capture(error)
+                // A region refusal comes before anything of the reply. Once
+                // more on the agent API the server config names now — the
+                // team may have moved since it was last asked — when that
+                // is another one than the one that refused.
+                if !rerouted, Self.shouldReroute(failure, written: state.snapshot().content),
+                   let named = await CursorAgentEndpoint.resolve(
+                       apiKey: apiKey, apiHost: defaultBaseHost, clientVersion: clientVersion, client: httpClient,
+                       cancellation: options?.cancellation
+                   ), named != endpoint, options?.cancellation?.isCancelled != true {
+                    rerouted = true
+                    endpoint = named
+                    Self.endpoints.remember(named, for: apiKey)
+                    continue
+                }
+                // Cancelled while the config was asked.
+                if options?.cancellation?.isCancelled == true {
+                    let aborted = state.aborted()
+                    out.push(.error(reason: .aborted, error: aborted))
+                    out.end(aborted)
+                    return
+                }
+                var msg = errorMessage(model: model, text: failure.message)
+                msg.failure = failure
+                out.push(.error(reason: .error, error: msg))
+                out.end(msg)
+                return
+            }
+        }
+    }
+
+    /// Whether a failed Run is to be tried on the agent API the server
+    /// config names: a region refusal, with nothing of a reply written yet.
+    static func shouldReroute(_ failure: ProviderFailure, written: [AssistantBlock]) -> Bool {
+        written.isEmpty && CursorAgentEndpoint.isRegionRefusal(failure)
+    }
+
+    /// One Run at `endpoint`, start to end. Returns once it has ended the
+    /// output stream (done, aborted, or cut short); throws the failure of a
+    /// Run that did not get that far, for the caller to end the stream on or
+    /// to try elsewhere.
+    private func runOnce(
+        endpoint: CursorAgentEndpoint, apiKey: String, requestBody: Data, toolDefs: [Data],
+        conversation: ConversationRegistry.Entry, conversationId: String,
+        state: CursorStreamState, started: inout Bool,
+        out: AssistantMessageStream, context: Context, options: StreamOptions?
+    ) async throws {
         let headers: [(String, String)] = [
             ("content-type", "application/connect+proto"),
             ("connect-protocol-version", "1"),
@@ -115,87 +190,83 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             ("x-cursor-client-type", "cli"),
             ("x-request-id", UUID().uuidString),
         ]
-
-        let state = CursorStreamState(api: api, model: model)
         let heartbeat = HeartbeatBox()
 
-        do {
-            let stream = try await CursorConnect.open(
-                host: host,
-                path: "/agent.v1.AgentService/Run",
-                headers: headers,
-                initialBody: requestBody
-            )
-            heartbeat.start(stream: stream)
-            defer {
-                heartbeat.stop()
-                stream.close()
-            }
+        let stream = try await CursorConnect.open(
+            host: endpoint.host,
+            port: endpoint.port,
+            path: endpoint.path("/agent.v1.AgentService/Run"),
+            headers: headers,
+            initialBody: requestBody
+        )
+        heartbeat.start(stream: stream)
+        defer {
+            heartbeat.stop()
+            stream.close()
+        }
 
-            let cancelReg = options?.cancellation?.onCancel { _ in stream.close() }
-            defer { cancelReg?.cancel() }
+        let cancelReg = options?.cancellation?.onCancel { _ in stream.close() }
+        defer { cancelReg?.cancel() }
 
+        if !started {
+            started = true
             out.push(.start(partial: state.snapshot()))
+        }
 
-            let session = ExecSession(
-                stream: stream,
-                state: state,
-                out: out,
-                blobStore: conversation.blobStore,
-                toolDefs: toolDefs,
-                systemPrompt: context.systemPrompt,
-                bridge: options?.cursorExecBridge
-            )
+        let session = ExecSession(
+            stream: stream,
+            state: state,
+            out: out,
+            blobStore: conversation.blobStore,
+            toolDefs: toolDefs,
+            systemPrompt: context.systemPrompt,
+            bridge: options?.cursorExecBridge
+        )
 
-            for try await frame in stream.frames {
-                if options?.cancellation?.isCancelled == true {
-                    let aborted = state.aborted()
-                    out.push(.error(reason: .aborted, error: aborted))
-                    out.end(aborted)
-                    return
-                }
-                switch frame {
-                case .message(let data):
-                    let ended = handleServerMessage(
-                        data, session: session, conversationId: conversationId
-                    )
-                    if ended {
-                        finish(out: out, state: state)
-                        return
-                    }
-                case .endStream(let data):
-                    if let failure = CursorConnectResponse.failureFromEndStream(data) { throw failure }
-                }
-            }
-            // Stream ended without an explicit turnEnded. A user cancel closes
-            // the stream channel, which surfaces here as a clean end — report
-            // it as aborted, not as a completed turn.
+        for try await frame in stream.frames {
             if options?.cancellation?.isCancelled == true {
                 let aborted = state.aborted()
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
                 return
             }
-            var incomplete = state.snapshot()
-            incomplete.stopReason = .error
-            incomplete.errorMessage = "Cursor stream ended without turnEnded"
-            out.push(.error(reason: .error, error: incomplete))
-            out.end(incomplete)
-        } catch {
-            if options?.cancellation?.isCancelled == true {
-                let aborted = state.aborted()
-                out.push(.error(reason: .aborted, error: aborted))
-                out.end(aborted)
-            } else {
-                // The failure's own sentence: "\(error)" of a Connect error
-                // is the enum's dump, `grpc(status: …, message: …)`.
-                let failure = ProviderFailure.capture(error)
-                var msg = errorMessage(model: model, text: failure.message)
-                msg.failure = failure
-                out.push(.error(reason: .error, error: msg))
-                out.end(msg)
+            switch frame {
+            case .message(let data):
+                let ended = handleServerMessage(
+                    data, session: session, conversationId: conversationId
+                )
+                if ended {
+                    if let empty = state.emptyReplyFailure(how: "Cursor ended the turn") { throw empty }
+                    finish(out: out, state: state)
+                    return
+                }
+            case .endStream(let data):
+                if let failure = CursorConnectResponse.failureFromEndStream(data) { throw failure }
+                // An end frame that names no error is Cursor closing the
+                // Run itself: what was written is the reply, as magpie's
+                // cursor plugin takes it (index.mjs decode()), and
+                // nothing written is an empty reply.
+                if let empty = state.emptyReplyFailure(how: CursorConnectResponse.endFrameWords(data)) {
+                    throw empty
+                }
+                finish(out: out, state: state)
+                return
             }
         }
+        // Stream ended without an explicit turnEnded. A user cancel closes
+        // the stream channel, which surfaces here as a clean end — report
+        // it as aborted, not as a completed turn.
+        if options?.cancellation?.isCancelled == true {
+            let aborted = state.aborted()
+            out.push(.error(reason: .aborted, error: aborted))
+            out.end(aborted)
+            return
+        }
+        var incomplete = state.snapshot()
+        incomplete.stopReason = .error
+        incomplete.errorMessage = "Cursor stream ended without turnEnded"
+        out.push(.error(reason: .error, error: incomplete))
+        out.end(incomplete)
     }
 
     private func finish(out: AssistantMessageStream, state: CursorStreamState) {
@@ -273,7 +344,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             case 4: // kv_server_message
                 handleKv(payload, stream: session.stream, blobStore: session.blobStore)
             default:
-                break
+                session.state.noteUnread(message: field.number)
             }
         }
         return false
@@ -346,7 +417,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             }
             return true
         default:
-            break
+            state.noteUnread(update: field.number)
         }
         return false
     }
@@ -793,7 +864,7 @@ private func firstDataField(_ data: Data?, number: Int) -> Data? {
 
 /// Blob store and last server checkpoint per conversation, shared across the
 /// requests of a session so server-side conversation state survives turns.
-private final class ConversationRegistry: @unchecked Sendable {
+final class ConversationRegistry: @unchecked Sendable {
     struct Entry {
         let blobStore: CursorBlobStore
         var checkpoint: Data?

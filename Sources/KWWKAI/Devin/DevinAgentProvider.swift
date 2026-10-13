@@ -289,15 +289,30 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         // Devin's Gemini backend applies Google's tool-schema constraints and
         // rejects JSON-Schema type arrays with an opaque `invalid_argument`.
         let googleSchema = isGeminiUid(model.id) || isGeminiUid(chatModelUid)
-        let tools = (context.tools ?? []).map { tool -> DevinProto.ChatToolDefinition in
+        let offered = context.tools ?? []
+        let tools = offered.map { tool -> DevinProto.ChatToolDefinition in
             // Devin's Claude models answer 502 to a union at a schema's root.
             let parameters = ToolSchemaRoot.objectRoot(tool.parameters)
             let schema = googleSchema ? normalizeSchemaForGoogle(parameters) : parameters
+            // The tool's own words go in the instructions (see
+            // `instructions`); the definition only points at them.
+            let described = !tool.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             return DevinProto.ChatToolDefinition(
                 name: tool.name,
-                description: tool.description,
+                description: described ? toolDescriptionPointer(tool.name) : tool.name,
                 jsonSchemaString: jsonString(schema)
             )
+        }
+        let instructions = instructions(systemPrompt: context.systemPrompt, tools: offered)
+        var prompts = chatMessagePrompts(messages, cascadeId: cascadeId, model: model)
+        if !instructions.isEmpty {
+            if let first = prompts.firstIndex(where: { $0.source == .user }) {
+                prompts[first].prompt = joinNonEmpty(instructions, prompts[first].prompt)
+            } else {
+                prompts.insert(DevinProto.ChatMessagePrompt(
+                    messageId: deterministicUUID("\(cascadeId)\0instructions"), source: .user, prompt: instructions
+                ), at: 0)
+            }
         }
         // Devin answers 400 "an internal error occurred" to a temperature
         // of exactly 0 on every model; 1e-6 is as near greedy as it takes.
@@ -320,8 +335,9 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         }
         return DevinProto.GetChatMessageRequest(
             metadata: DevinWire.cliMetadata(apiKey: apiKey, userJwt: userJwt),
-            prompt: context.systemPrompt ?? "",
-            chatMessagePrompts: chatMessagePrompts(messages, cascadeId: cascadeId, model: model),
+            prompt: "",
+            chatMessagePrompts: prompts,
+            instructions: instructions,
             chatModelUid: chatModelUid,
             configuration: DevinProto.CompletionConfiguration(
                 maxTokens: UInt64(max(1, maxTokens)),
@@ -340,20 +356,66 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         )
     }
 
+    /// What goes at the head of the first user message: the system prompt,
+    /// then each tool's description in a `<tool_descriptions>` block, as
+    /// magpie's Devin plugin sends them (`build`, `toolDescriptions`).
+    ///
+    /// Devin screens the request's system field and each tool's own
+    /// description, and refuses the whole turn over words it takes in a
+    /// message. Measured 2026-10-12 on SWE-1.6 through this builder: the
+    /// system prompt "You are a Claude agent, built on Anthropic's Claude
+    /// Agent SDK." ends the stream with `permission_denied` "Your request was
+    /// blocked by our content policy", and a tool described as "Reads a file
+    /// from the local filesystem. You can access any file directly by using
+    /// this tool." (WorkBuddy's Read, magpie 85fa42c1) with
+    /// `permission_denied` "Unable to process request due to an MCP
+    /// configuration issue"; the same words at the head of the user message
+    /// are both answered.
+    static func instructions(systemPrompt: String?, tools: [Tool]) -> String {
+        joinNonEmpty(systemPrompt ?? "", toolDescriptions(tools))
+    }
+
+    static func toolDescriptions(_ tools: [Tool]) -> String {
+        var out = ""
+        for tool in tools {
+            let description = tool.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !description.isEmpty else { continue }
+            out += "<tool name=\"\(tool.name)\">\n\(description)\n</tool>\n"
+        }
+        return out.isEmpty ? "" : "<tool_descriptions>\n\(out)</tool_descriptions>"
+    }
+
+    static func toolDescriptionPointer(_ name: String) -> String {
+        "Described under <tool name=\"\(name)\"> in <tool_descriptions>, in the instructions."
+    }
+
+    static func joinNonEmpty(_ parts: String...) -> String {
+        joinNonEmpty(parts)
+    }
+
+    static func joinNonEmpty(_ parts: [String]) -> String {
+        parts.filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
     static func isGeminiUid(_ uid: String) -> Bool {
         let lower = uid.lowercased()
         return lower.contains("gemini") || uid.hasPrefix("MODEL_GOOGLE_GEMINI_")
     }
 
     /// Flatten one user turn into a Cascade USER prompt with inline images.
+    /// A Cascade message holds one text: several text blocks are set apart
+    /// by a blank line, as magpie's Devin plugin joins them (`build`), so
+    /// the end of one never runs into the start of the next.
     static func userPrompt(_ msg: UserMessage, messageId: String) -> DevinProto.ChatMessagePrompt {
         var prompt = DevinProto.ChatMessagePrompt(messageId: messageId, source: .user)
+        var texts: [String] = []
         for block in msg.content {
             switch block {
-            case .text(let t): prompt.prompt += t.text
+            case .text(let t): texts.append(t.text)
             case .image(let i): prompt.images.append(.init(base64Data: i.data, mimeType: i.mimeType))
             }
         }
+        prompt.prompt = joinNonEmpty(texts)
         return prompt
     }
 
@@ -386,10 +448,11 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
                     if case .thinking = block { return count + 1 }
                     return count
                 }
+                var texts: [String] = []
                 for block in assistant.content {
                     switch block {
                     case .text(let t):
-                        prompt.prompt += t.text
+                        texts.append(t.text)
                     case .thinking(let th):
                         prompt.thinking += th.thinking
                         if native, thinkingBlocks == 1, let sig = th.thinkingSignature { prompt.signature = sig }
@@ -399,6 +462,7 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
                         break
                     }
                 }
+                prompt.prompt = joinNonEmpty(texts)
                 if prompt.prompt.isEmpty && prompt.thinking.isEmpty && prompt.signature.isEmpty && prompt.toolCalls.isEmpty {
                     continue
                 }
@@ -428,13 +492,18 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
     }
 
     /// History bytes context maintenance could shrink: every prompt except the
-    /// trailing user turn(s) being answered.
+    /// trailing user turn(s) being answered, less the instructions the first
+    /// user prompt carries (compaction keeps those).
     static func shrinkableHistoryBytes(request: DevinProto.GetChatMessageRequest, context: Context) -> Int {
         var tail = 0
         if case .user? = context.messages.last { tail = 1 }
         let prompts = request.chatMessagePrompts
         let shrinkable = tail > 0 ? Array(prompts.dropLast(tail)) : prompts
-        return DevinProto.GetChatMessageRequest.historyByteCount(shrinkable)
+        var bytes = DevinProto.GetChatMessageRequest.historyByteCount(shrinkable)
+        if !request.instructions.isEmpty, shrinkable.contains(where: { $0.source == .user }) {
+            bytes -= request.instructions.utf8.count
+        }
+        return max(0, bytes)
     }
 
     /// RFC-4122-shaped UUID derived from SHA-256 of `seed`.
@@ -498,6 +567,16 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             text += " [details: \(detailText.prefix(2000))]"
         }
         var failure = ProviderFailure(message: text, providerCode: code.isEmpty ? nil : code.lowercased())
+        let lower = message.lowercased()
+        let isLimit = code.lowercased() == "resource_exhausted" || lower.contains("quota") || lower.contains("rate limit")
+        if !isLimit, lower.contains("content policy") {
+            // Devin refuses a prompt it screens out as `permission_denied`
+            // "Your request was blocked by our content policy" (measured
+            // 2026-10-12). Sent again it is refused again, and signing in
+            // again changes nothing: a bad request, as magpie's Devin plugin
+            // answers it (`failure`: 400).
+            failure.httpStatus = 400
+        }
         // Opaque `invalid_argument: internal error` with a large history is far
         // more likely a size rejection; classify it as context overflow so the
         // agent compacts instead of failing the turn outright.
@@ -633,6 +712,8 @@ final class DevinStreamState: @unchecked Sendable {
     private var toolArgs: [String: String] = [:]
     private var toolOrder: [String] = []
     private var activeToolCallId: String?
+    /// Ids given here to calls Devin opened without one.
+    private var mintedToolCallIds: Set<String> = []
     private var responseId: String?
     private var responseModel: String?
     private var lastStopReason: UInt64 = DevinProto.StopReason.unspecified
@@ -743,7 +824,20 @@ final class DevinStreamState: @unchecked Sendable {
     private func applyToolDelta(_ call: DevinProto.ChatToolCall, emit: (AssistantMessageEvent) -> Void) {
         enum Step { case skip, started(Int), existing(Int) }
         let step: Step = lock.withLock {
-            guard let id = call.id.isEmpty ? activeToolCallId : call.id else { return .skip }
+            var named = call.id.isEmpty ? activeToolCallId : call.id
+            // A call that opens with a name and no id still runs: it gets an
+            // id of ours, as magpie's Devin plugin gives one (`events`). A
+            // name is what opens a call there, so a second name with no id
+            // after such a call is the next call, not more of the first:
+            // taken as one, their arguments would run together and decode
+            // to `{}`.
+            if call.id.isEmpty, !call.name.isEmpty,
+               activeToolCallId.map(mintedToolCallIds.contains) ?? true {
+                let minted = "call_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                mintedToolCallIds.insert(minted)
+                named = minted
+            }
+            guard let id = named else { return .skip }
             activeToolCallId = id
             if let idx = toolIndexById[id] {
                 if !call.name.isEmpty, case .toolCall(var tc) = blocks[idx] { tc.name = call.name; blocks[idx] = .toolCall(tc) }

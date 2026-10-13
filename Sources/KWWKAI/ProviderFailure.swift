@@ -180,7 +180,8 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         // Cursor answers a team it does not serve in this region as
         // `unauthenticated` "This region is not yet available for your
         // team"; signing in again changes nothing.
-        case "permission_denied", "unauthenticated" where text.contains("region is not yet available"): return .invalidRequest
+        case "permission_denied" where text.contains("region is not yet available"),
+             "unauthenticated" where text.contains("region is not yet available"): return .invalidRequest
         case "permission_denied", "unauthenticated": return .authentication
         case "invalid_argument", "not_found", "already_exists", "failed_precondition", "aborted", "out_of_range", "unimplemented", "data_loss": return .invalidRequest
         default: break

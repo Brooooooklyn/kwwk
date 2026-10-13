@@ -568,6 +568,8 @@ struct OAuthLoginShapeTests {
         client.queue.append((status: 200, body: #"{"code":200,"data":{"apiKey":"ak-123"}}"#))
         // 6. copy → full secret
         client.queue.append((status: 200, body: #"{"code":200,"data":{"secretKey":"sk-456"}}"#))
+        // 7. the key's subscriptions → a valid GLM Coding Plan
+        client.queue.append((status: 200, body: Self.zaiLitePlan))
 
         let port: UInt16 = 54549
         let authURL = CapturedURL()
@@ -600,8 +602,9 @@ struct OAuthLoginShapeTests {
         #expect(query["code_challenge"] == nil)
 
         // Request sequence: exchange → business login → customer → list →
-        // create → copy, with the biz bearer on the provisioning calls.
-        #expect(client.recorded.count == 6)
+        // create → copy → subscriptions, with the biz bearer on the
+        // provisioning calls.
+        #expect(client.recorded.count == 7)
         let exchange = client.recorded[0]
         #expect(exchange.url.absoluteString == "https://zcode.z.ai/api/v1/oauth/token")
         let exchangeBody = try JSONSerialization.jsonObject(with: exchange.body ?? Data()) as? [String: Any]
@@ -630,6 +633,13 @@ struct OAuthLoginShapeTests {
 
         let copy = client.recorded[5]
         #expect(copy.url.absoluteString.hasSuffix("api_keys/copy/ak-123"))
+
+        // The plan is asked with the minted key itself, bare (no `Bearer`),
+        // as ZCode and magpie's zcode plugin ask it.
+        let plan = client.recorded[6]
+        #expect(plan.method == "GET")
+        #expect(plan.url.absoluteString == "https://api.z.ai/api/biz/subscription/list")
+        #expect(plan.headers["authorization"] == "ak-123.sk-456")
     }
 
     @Test("zai login reuses an existing kwwk-named key instead of creating one")
@@ -653,6 +663,7 @@ struct OAuthLoginShapeTests {
             body: #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak-9"},{"name":"zcode-api-key","apiKey":"ak-other"}]}"#
         ))
         client.queue.append((status: 200, body: #"{"code":200,"data":{"secretKey":"sk-full"}}"#))
+        client.queue.append((status: 200, body: Self.zaiLitePlan))
 
         let port: UInt16 = 54550
         let creds = try await OAuthLogin.loginZai(
@@ -666,7 +677,7 @@ struct OAuthLoginShapeTests {
             client: client
         )
         #expect(creds.access == "ak-9.sk-full")
-        #expect(client.recorded.count == 5)
+        #expect(client.recorded.count == 6)
         #expect(client.recorded[4].url.absoluteString.hasSuffix("api_keys/copy/ak-9"))
     }
 
@@ -708,6 +719,138 @@ struct OAuthLoginShapeTests {
         }
         #expect(client.recorded.isEmpty)
     }
+
+    /// `/api/biz/subscription/list` as api.z.ai answered a Coding Plan key
+    /// on 2026-10-12, cut to the fields that are read.
+    private static let zaiLitePlan =
+        #"{"code":200,"msg":"Operation successful","data":[{"productName":"GLM Coding Lite","status":"VALID","valid":"2027-06-17 10:55:21-2028-06-17 10:55:21","autoRenew":1,"nextRenewTime":"2027-06-17"}],"success":true}"#
+
+    /// Runs the sign-in over `customer` and a key list, up to the plan read.
+    private func zaiLogin(
+        port: UInt16,
+        customer: String,
+        keys: String = #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak-9"}]}"#,
+        tail: [(status: Int, body: String)],
+        progress: @escaping @Sendable (String) -> Void = { _ in }
+    ) async throws -> (OAuthCredentials, SequentialStubClient) {
+        let client = SequentialStubClient()
+        client.queue.append((status: 200, body: #"{"code":0,"data":{"zai":{"access_token":"oauth-tok"}}}"#))
+        client.queue.append((status: 200, body: #"{"code":200,"data":{"access_token":"biz-tok"}}"#))
+        client.queue.append((status: 200, body: customer))
+        client.queue.append((status: 200, body: keys))
+        client.queue.append(contentsOf: tail)
+        let creds = try await OAuthLogin.loginZai(
+            clientID: "test-client",
+            port: port,
+            callbacks: OAuthLogin.Callbacks(
+                onAuthURL: { url in self.fireZaiCallback(port: port, authURL: url, code: "C") },
+                onProgress: progress,
+                loopback: OAuthLogin.nioLoopback
+            ),
+            client: client
+        )
+        return (creds, client)
+    }
+
+    private static let zaiOneProject =
+        #"{"code":200,"data":{"organizations":[{"organizationId":"org-1","projects":[{"projectId":"proj-1"}]}]}}"#
+
+    // The account of magpie's zcode_test.go: another organization listed
+    // ahead of 默认机构, whose first project is a team's coding plan
+    // (projectType 2). The key belongs in 默认机构 / 默认项目.
+    @Test("zai login mints the key in the default organization's own project, past a team's")
+    func zaiLoginDefaultProject() async throws {
+        let customer = #"""
+        {"code":200,"data":{"organizations":[
+          {"organizationId":"o0","organizationName":"other","projects":[{"projectId":"p0","projectName":"x","projectType":"1"}]},
+          {"organizationId":"o1","organizationName":"默认机构","projects":[
+            {"projectId":"p9","projectName":"api","projectType":"2"},
+            {"projectId":"p1","projectName":"默认项目","projectType":"1"}]}]}}
+        """#
+        let (creds, client) = try await zaiLogin(
+            port: 54553, customer: customer,
+            tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, Self.zaiLitePlan)]
+        )
+        #expect(creds.access == "ak-9.sk")
+        #expect(client.recorded[3].url.absoluteString.hasSuffix("organization/o1/projects/p1/api_keys"))
+    }
+
+    @Test("zai default project skips team projects and organizations that hold only them")
+    func zaiDefaultProjectRules() {
+        // A team project typed as a number, as magpie's zcode_team_test.go has it.
+        let teamOnly: [String: Any] = [
+            "organizationId": "team", "organizationName": "默认机构",
+            "projects": [["projectId": "tp0", "projectType": 2], ["projectId": "tp1", "projectType": "2"]],
+        ]
+        let own: [String: Any] = [
+            "organizationId": "o1", "organizationName": "mine",
+            "projects": [["projectId": "tp", "projectType": "2"], ["projectId": "p1", "projectType": "1"]],
+        ]
+        let picked = OAuthLogin.zaiDefaultProject([teamOnly, own])
+        #expect(picked?.organization == "o1")
+        #expect(picked?.project == "p1")
+        #expect(OAuthLogin.zaiDefaultProject([teamOnly]) == nil)
+    }
+
+    @Test("zai login makes the key when the listed one names no key id")
+    func zaiLoginSkipsKeyWithoutId() async throws {
+        let (creds, client) = try await zaiLogin(
+            port: 54554, customer: Self.zaiOneProject,
+            keys: #"{"code":200,"data":[{"name":"kwwk","apiKey":""}]}"#,
+            tail: [
+                (200, #"{"code":200,"data":{"apiKey":"ak-new"}}"#),
+                (200, #"{"code":200,"data":{"secretKey":"sk"}}"#),
+                (200, Self.zaiLitePlan),
+            ]
+        )
+        #expect(creds.access == "ak-new.sk")
+        #expect(client.recorded[4].method == "POST")
+    }
+
+    // Without a plan the coding endpoint answers every request 1113, so the
+    // sign-in says so instead of keeping a key that cannot be used (magpie's
+    // zcode plugin, signedIn: "this Z.ai account has no GLM Coding Plan…").
+    @Test("zai login refuses an account whose subscriptions hold no valid Coding Plan")
+    func zaiLoginNoPlan() async throws {
+        for list in [#"{"code":200,"data":[]}"#, #"{"code":200,"data":[{"productName":"GLM Coding Lite","status":"EXPIRED"}]}"#] {
+            do {
+                _ = try await zaiLogin(
+                    port: 54555, customer: Self.zaiOneProject,
+                    tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, list)]
+                )
+                Issue.record("a planless account signed in")
+            } catch let error as OAuthError {
+                #expect(error.localizedDescription.contains("no GLM Coding Plan"))
+                #expect(error.localizedDescription.contains("z.ai/subscribe"))
+            }
+        }
+    }
+
+    @Test("zai login keeps the key when the subscriptions cannot be read, and names the plan when they can")
+    func zaiLoginPlanRead() async throws {
+        for unread in [(status: 500, body: ""), (status: 200, body: "<html>"), (status: 200, body: #"{"code":500,"msg":"boom"}"#)] {
+            let (creds, _) = try await zaiLogin(
+                port: 54556, customer: Self.zaiOneProject,
+                tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), unread]
+            )
+            #expect(creds.access == "ak-9.sk")
+        }
+        let said = CapturedLines()
+        _ = try await zaiLogin(
+            port: 54556, customer: Self.zaiOneProject,
+            tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, Self.zaiLitePlan)],
+            progress: { said.add($0) }
+        )
+        #expect(said.all().contains("signed in to GLM Coding Lite"))
+    }
+}
+
+/// Thread-safe line capture for @Sendable progress assertions.
+private final class CapturedLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func add(_ line: String) { lock.withLock { lines.append(line) } }
+    func all() -> [String] { lock.withLock { lines } }
 }
 
 /// Thread-safe URL capture for @Sendable callback assertions.

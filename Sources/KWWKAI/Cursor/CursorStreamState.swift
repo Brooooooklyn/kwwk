@@ -28,6 +28,11 @@ final class CursorStreamState: @unchecked Sendable {
     /// call gets none, so the estimate stays the fallback.
     private var turnUsage: Usage?
     private var stopReason: StopReason = .stop
+    /// Field numbers of the interaction updates and server messages this
+    /// provider does not read, with how often each came: an empty reply
+    /// names them, so a report says what was not understood.
+    private var unreadUpdates: [Int: Int] = [:]
+    private var unreadMessages: [Int: Int] = [:]
 
     init(api: String, model: Model) {
         self.api = api
@@ -261,6 +266,56 @@ final class CursorStreamState: @unchecked Sendable {
                 cacheRead: cacheRead,
                 cacheWrite: cacheWrite,
                 reasoning: reasoning
+            )
+        }
+    }
+
+    // MARK: - Empty replies
+
+    func noteUnread(update number: Int) {
+        lock.withLock { unreadUpdates[number, default: 0] += 1 }
+    }
+
+    func noteUnread(message number: Int) {
+        lock.withLock { unreadMessages[number, default: 0] += 1 }
+    }
+
+    /// A turn that ends having written no text and made no tool call is an
+    /// empty reply, not a finished turn: the failure to ask again on, nil
+    /// when there is a reply. Cursor ends some turns on thinking alone
+    /// (magpie's cursor plugin #11; #60 counted 14 on grok-4.7-fast in a
+    /// week), and finished as a turn that is a silent, blank answer. The
+    /// words name what did come, as the plugin's do (`emptyWhy`,
+    /// conversation.test.mjs), so the causes can be told apart: `how` the
+    /// Run ended, the thinking, Cursor's own count of output when it gave
+    /// one, and what Cursor sent that is not read (agent.v1 field numbers).
+    func emptyReplyFailure(how: String) -> ProviderFailure? {
+        lock.withLock {
+            var thinking = 0
+            for block in blocks {
+                switch block {
+                case .text(let t):
+                    if !t.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+                case .thinking(let t):
+                    thinking += t.thinking.count
+                default:
+                    return nil
+                }
+            }
+            func list(_ counts: [Int: Int]) -> String {
+                counts.sorted { $0.key < $1.key }
+                    .map { $0.value > 1 ? "#\($0.key) ×\($0.value)" : "#\($0.key)" }
+                    .joined(separator: ", ")
+            }
+            var parts = [how]
+            parts.append(thinking > 0
+                ? "after \(thinking) chars of thinking, no text and no tool call"
+                : "with no thinking, no text and no tool call")
+            if let turnUsage { parts.append("Cursor counted \(turnUsage.output) output tokens") }
+            if !unreadUpdates.isEmpty { parts.append("updates not read: \(list(unreadUpdates))") }
+            if !unreadMessages.isEmpty { parts.append("messages not read: \(list(unreadMessages))") }
+            return ProviderFailure(
+                message: "Cursor sent an empty reply (\(parts.joined(separator: "; ")))", shouldRetry: true
             )
         }
     }

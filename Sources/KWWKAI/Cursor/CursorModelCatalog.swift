@@ -4,7 +4,8 @@ import FoundationNetworking
 #endif
 
 /// Development-time fetch of Cursor's usable-model list via the
-/// `GetUsableModels` unary RPC. This is NOT called at runtime — kwwk ships a
+/// `GetUsableModels` unary RPC, with each id's window and image input from
+/// the model picker (`AvailableModels`). This is NOT called at runtime — kwwk ships a
 /// static Cursor catalog (`Resources/cursor-models.json`); this helper only
 /// backs the `kwwk-generate-cursor-models` script that regenerates it.
 public enum CursorModelCatalog {
@@ -48,12 +49,125 @@ public enum CursorModelCatalog {
         guard response.statusCode < 400 else {
             throw FetchError.http(response.statusCode, String(data: body, encoding: .utf8) ?? "")
         }
+        // A picker Cursor cannot give leaves the list as the usable ids and
+        // the curated table make it.
+        let picker = (try? await fetchPickerFacts(
+            apiKey: apiKey, host: host, clientVersion: clientVersion, client: client
+        )) ?? [:]
         let models = normalize(
             CursorProto.decodeUsableModels(stripConnectUnaryFrame(body)),
-            host: host
+            host: host,
+            picker: picker
         )
         guard !models.isEmpty else { throw FetchError.emptyResponse }
         return models
+    }
+
+    // MARK: - The model picker
+
+    /// What Cursor's model picker says of one wire id.
+    public struct PickerFacts: Sendable, Equatable {
+        /// The window the id runs at outside Max Mode, in tokens.
+        public var contextWindow: Int?
+        /// Whether the model takes images (`supportsImages`).
+        public var image: Bool?
+    }
+
+    /// Fetch what Cursor's model picker says of each wire id:
+    /// `AiService/AvailableModels`, asked as the CLI asks it.
+    public static func fetchPickerFacts(
+        apiKey: String,
+        host: String = CursorAgentProvider.defaultBaseHost,
+        clientVersion: String = CursorAgentProvider.defaultClientVersion,
+        client: HTTPClient = URLSessionHTTPClient()
+    ) async throws -> [String: PickerFacts] {
+        guard let url = URL(string: "https://\(host)/aiserver.v1.AiService/AvailableModels") else {
+            throw FetchError.http(0, "invalid host \(host)")
+        }
+        let (response, body) = try await client.request(
+            url: url,
+            method: "POST",
+            headers: [
+                "content-type": "application/json",
+                "connect-protocol-version": "1",
+                "authorization": "Bearer \(apiKey)",
+                "x-ghost-mode": "true",
+                "x-cursor-client-version": clientVersion,
+                "x-cursor-client-type": "cli",
+            ],
+            body: Data(#"{"useModelParameters":true,"doNotUseMarkdown":true}"#.utf8)
+        )
+        guard response.statusCode < 400 else {
+            throw FetchError.http(response.statusCode, String(data: body, encoding: .utf8) ?? "")
+        }
+        return pickerFacts(fromAvailableModels: body)
+    }
+
+    /// Read the picker's reply into facts by wire id.
+    ///
+    /// The usable list names a model once for each effort and speed and
+    /// says nothing of its window, and the names mislead: "Claude Opus 5.5
+    /// 1M" is served at 300K outside Max Mode, and nothing in a name says
+    /// Grok has 256K (magpie's cursor plugin 0.2.0, #51: 110 of 153 windows
+    /// read off the names were wrong, and agents compacted at the wrong
+    /// point). The picker has it: each of a model's `variants` carries the
+    /// wire id it runs as (`legacySlug`) and its parameters, among them the
+    /// `context` size ("300k", "1m"); a model without sizes has
+    /// `contextTokenLimit`. One wire id can stand for two sizes, the larger
+    /// in Max Mode only (`isMaxMode`). kwwk never asks for Max Mode, so an
+    /// id's window is the smallest it has outside Max Mode — or, for an id
+    /// Cursor serves in Max Mode only, the smallest it has at all. Models
+    /// the CLI's picker hides (hidden, chat-only, Tab-only, not for the
+    /// agent) are left out, as the plugin's `modelsOf` leaves them out.
+    static func pickerFacts(fromAvailableModels body: Data) -> [String: PickerFacts] {
+        guard let root = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              let models = root["models"] as? [[String: Any]] else { return [:] }
+        func flag(_ object: [String: Any], _ key: String) -> Bool? { object[key] as? Bool }
+        func tokens(_ value: Any?) -> Int {
+            (value as? NSNumber)?.intValue ?? (value as? String).flatMap(Int.init) ?? 0
+        }
+
+        var windows: [String: (outsideMax: [Int], maxMode: [Int])] = [:]
+        var facts: [String: PickerFacts] = [:]
+        for model in models {
+            if flag(model, "isHidden") == true || flag(model, "isChatOnly") == true
+                || flag(model, "onlySupportsCmdK") == true || flag(model, "supportsAgent") == false { continue }
+            let maxOnly = flag(model, "supportsNonMaxMode") == false
+            for variant in model["variants"] as? [[String: Any]] ?? [] {
+                guard let slug = variant["legacySlug"] as? String, !slug.isEmpty else { continue }
+                let inMax = maxOnly || flag(variant, "isMaxMode") == true
+                var window = 0
+                for parameter in variant["parameterValues"] as? [[String: Any]] ?? []
+                where parameter["id"] as? String == "context" {
+                    window = contextTokens(parameter["value"] as? String ?? "")
+                }
+                if window == 0 {
+                    window = inMax
+                        ? max(tokens(model["contextTokenLimitForMaxMode"]), tokens(model["contextTokenLimit"]))
+                        : tokens(model["contextTokenLimit"])
+                }
+                facts[slug, default: PickerFacts()].image = flag(model, "supportsImages")
+                guard window > 0 else { continue }
+                if inMax {
+                    windows[slug, default: ([], [])].maxMode.append(window)
+                } else {
+                    windows[slug, default: ([], [])].outsideMax.append(window)
+                }
+            }
+        }
+        for (slug, sizes) in windows {
+            facts[slug]?.contextWindow = sizes.outsideMax.min() ?? sizes.maxMode.min()
+        }
+        return facts
+    }
+
+    /// A picker context size in tokens: "300k" is 300000, "1m" 1000000; 0
+    /// for anything else (the plugin's `tokensOf`).
+    static func contextTokens(_ value: String) -> Int {
+        let text = value.trimmingCharacters(in: .whitespaces).lowercased()
+        guard let unit = text.last, unit == "k" || unit == "m",
+              let number = Double(text.dropLast()), number > 0 else { return 0 }
+        return Int((number * (unit == "m" ? 1_000_000 : 1_000)).rounded())
     }
 
     /// Curated per-model reference data, ported from oh-my-pi's bundled Cursor
@@ -132,7 +246,13 @@ public enum CursorModelCatalog {
     /// with a `thinkingLevelMap` routing every level to that variant. Wire ids
     /// that only exist as a thinking-routing target are folded into their base
     /// model and hidden from the visible list, matching oh-my-pi's collapse.
-    static func normalize(_ models: [CursorProto.UsableModel], host: String) -> [Model] {
+    ///
+    /// Where the picker speaks of an id (`picker`), its window and whether
+    /// it takes images are the picker's, over the table and the family rule:
+    /// those are Cursor's own word on what it serves.
+    static func normalize(
+        _ models: [CursorProto.UsableModel], host: String, picker: [String: PickerFacts] = [:]
+    ) -> [Model] {
         var byId: [String: Model] = [:]
         let fetchedIds = Set(models.map { $0.modelId.trimmingCharacters(in: .whitespaces) })
 
@@ -187,6 +307,12 @@ public enum CursorModelCatalog {
                     ]
                 }
             )
+        }
+        for (id, facts) in picker {
+            guard var model = byId[id] else { continue }
+            if let window = facts.contextWindow { model.contextWindow = window }
+            if let image = facts.image { model.input = image ? [.text, .image] : [.text] }
+            byId[id] = model
         }
         return byId.values.sorted { $0.id < $1.id }
     }

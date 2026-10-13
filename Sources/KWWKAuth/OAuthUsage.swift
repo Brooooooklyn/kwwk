@@ -87,6 +87,8 @@ public enum OAuthUsage {
             QoderUsageReader(site: .cn),
             WorkBuddyUsageReader(site: .china),
             WorkBuddyUsageReader(site: .international),
+            CursorUsageReader(),
+            XaiUsageReader(),
         ] as [any OAuthUsageReader]).map { ($0.providerId, $0) }
     )
 
