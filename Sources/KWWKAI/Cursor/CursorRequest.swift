@@ -186,7 +186,17 @@ enum CursorRequestBuilder {
                 let text = userText(u)
                 if !text.isEmpty { parts.append(["type": "text", "text": text]) }
                 for image in userImages(u) {
-                    parts.append(["type": "image", "image": image.data, "mediaType": image.mimeType])
+                    // An image as Cursor's own server writes one into this
+                    // field (read back from its `set_blob`, 2026-10-13, and
+                    // what magpie's cursor plugin sends): the bytes in hex
+                    // under `__type: "Uint8Array"`, with `mimeType`. Sent as
+                    // base64 with `mediaType`, a model asked on the next
+                    // turn about the picture answered that it saw none.
+                    guard let bytes = Data(base64Encoded: image.data) else { continue }
+                    parts.append([
+                        "type": "image", "mimeType": image.mimeType,
+                        "image": ["__type": "Uint8Array", "hex": bytes.map { String(format: "%02x", $0) }.joined()],
+                    ])
                 }
                 if parts.isEmpty { continue }
                 ids.append(storeJSONBlob(["role": "user", "content": parts], in: blobStore))
