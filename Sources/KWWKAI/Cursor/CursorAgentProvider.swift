@@ -160,11 +160,21 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                         data, session: session, conversationId: conversationId
                     )
                     if ended {
+                        if let empty = state.emptyReplyFailure(how: "Cursor ended the turn") { throw empty }
                         finish(out: out, state: state)
                         return
                     }
                 case .endStream(let data):
                     if let failure = CursorConnectResponse.failureFromEndStream(data) { throw failure }
+                    // An end frame that names no error is Cursor closing the
+                    // Run itself: what was written is the reply, as magpie's
+                    // cursor plugin takes it (index.mjs decode()), and
+                    // nothing written is an empty reply.
+                    if let empty = state.emptyReplyFailure(how: CursorConnectResponse.endFrameWords(data)) {
+                        throw empty
+                    }
+                    finish(out: out, state: state)
+                    return
                 }
             }
             // Stream ended without an explicit turnEnded. A user cancel closes
@@ -273,7 +283,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             case 4: // kv_server_message
                 handleKv(payload, stream: session.stream, blobStore: session.blobStore)
             default:
-                break
+                session.state.noteUnread(message: field.number)
             }
         }
         return false
@@ -346,7 +356,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             }
             return true
         default:
-            break
+            state.noteUnread(update: field.number)
         }
         return false
     }

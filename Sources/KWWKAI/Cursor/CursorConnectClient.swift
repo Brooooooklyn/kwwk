@@ -68,6 +68,15 @@ enum CursorConnectResponse {
         return failure
     }
 
+    /// How a Run's end frame that named no error reads in an empty reply's
+    /// words: its JSON, cut short, or that it was empty (the plugin's
+    /// `endFrame`).
+    static func endFrameWords(_ data: Data) -> String {
+        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty || text == "{}" { return "the Run's stream ended (an empty end frame)" }
+        return "the Run's stream ended (end frame: \(text.count > 300 ? String(text.prefix(300)) + "…" : text))"
+    }
+
     /// Cursor's top-level `message` is often the bare word "Error"; what it
     /// means — "Model not available", a region refusal — sits in
     /// `details[].debug.details.{title,detail}`. The last such detail wins
