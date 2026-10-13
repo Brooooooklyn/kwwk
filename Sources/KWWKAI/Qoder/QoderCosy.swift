@@ -248,12 +248,14 @@ enum QoderRSA {
 
     /// `block ^ 65537 mod n`, for a block as long as the modulus.
     static func raw(_ block: [UInt8]) -> [UInt8] {
-        let n = Limbs(modulus)
-        let base = Limbs(block)
+        let n = montgomery
+        let base = n.multiply(Limbs(block), n.rSquared)
         var result = base
-        for _ in 0..<16 { result = result.multiplied(by: result, modulo: n) }
-        return result.multiplied(by: base, modulo: n).bytes
+        for _ in 0..<16 { result = n.multiply(result, result) }
+        return n.multiply(n.multiply(result, base), .one).bytes
     }
+
+    private static let montgomery = Montgomery(Limbs(modulus))
 
     private static func bytes(_ hex: String) -> [UInt8] {
         let digits = Array(hex.utf8)
@@ -264,68 +266,44 @@ enum QoderRSA {
 
     /// A 1024-bit unsigned integer, least significant limb first.
     private struct Limbs {
-        var limbs: [UInt32]
+        static let count = 16
+        var limbs: [UInt64]
+
+        static let one = Limbs(limbs: [1] + [UInt64](repeating: 0, count: count - 1))
+
+        init(limbs: [UInt64]) { self.limbs = limbs }
 
         init(_ bigEndian: [UInt8]) {
             precondition(bigEndian.count == 128, "a 1024-bit value is 128 bytes")
-            limbs = stride(from: 124, through: 0, by: -4).map { offset in
-                bigEndian[offset..<(offset + 4)].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            limbs = stride(from: 120, through: 0, by: -8).map { offset in
+                bigEndian[offset..<(offset + 8)].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
             }
         }
 
         var bytes: [UInt8] {
-            limbs.reversed().flatMap { limb in
-                [UInt8(limb >> 24), UInt8(limb >> 16 & 0xff), UInt8(limb >> 8 & 0xff), UInt8(limb & 0xff)]
-            }
-        }
-
-        /// `self * other mod n` by shift-and-add, for operands below `n`.
-        /// Seventeen of these make one encryption, so the plain method does.
-        func multiplied(by other: Limbs, modulo n: Limbs) -> Limbs {
-            var result = Limbs(zeroLike: self)
-            for index in stride(from: limbs.count * 32 - 1, through: 0, by: -1) {
-                if result.shiftLeft() || result >= n { result.subtract(n) }
-                if other.limbs[index / 32] >> UInt32(index % 32) & 1 == 1 {
-                    if result.add(self) || result >= n { result.subtract(n) }
-                }
-            }
-            return result
-        }
-
-        private init(zeroLike other: Limbs) {
-            limbs = [UInt32](repeating: 0, count: other.limbs.count)
+            limbs.reversed().flatMap { limb in (0..<8).reversed().map { UInt8(truncatingIfNeeded: limb >> UInt64($0 * 8)) } }
         }
 
         /// Doubles in place; true when a bit fell off the top.
-        private mutating func shiftLeft() -> Bool {
-            var carry: UInt32 = 0
+        mutating func shiftLeft() -> Bool {
+            var carry: UInt64 = 0
             for i in limbs.indices {
-                let next = limbs[i] >> 31
+                let next = limbs[i] >> 63
                 limbs[i] = limbs[i] << 1 | carry
                 carry = next
             }
             return carry == 1
         }
 
-        /// Adds in place; true on overflow.
-        private mutating func add(_ other: Limbs) -> Bool {
-            var carry: UInt64 = 0
-            for i in limbs.indices {
-                let sum = UInt64(limbs[i]) + UInt64(other.limbs[i]) + carry
-                limbs[i] = UInt32(truncatingIfNeeded: sum)
-                carry = sum >> 32
-            }
-            return carry == 1
-        }
-
         /// Subtracts in place, wrapping: the caller subtracts `n` only from
         /// a value in [n, 2n), whose lost top bit the wrap restores.
-        private mutating func subtract(_ other: Limbs) {
-            var borrow: Int64 = 0
+        mutating func subtract(_ other: Limbs) {
+            var borrow = false
             for i in limbs.indices {
-                let difference = Int64(limbs[i]) - Int64(other.limbs[i]) - borrow
-                limbs[i] = UInt32(truncatingIfNeeded: difference)
-                borrow = difference < 0 ? 1 : 0
+                let (first, under) = limbs[i].subtractingReportingOverflow(other.limbs[i])
+                let (second, underAgain) = first.subtractingReportingOverflow(borrow ? 1 : 0)
+                limbs[i] = second
+                borrow = under || underAgain
             }
         }
 
@@ -334,6 +312,68 @@ enum QoderRSA {
                 return lhs.limbs[i] > rhs.limbs[i]
             }
             return true
+        }
+    }
+
+    /// Montgomery multiplication modulo the key's modulus. Shift-and-add
+    /// took a second for seventeen products in an unoptimised build, which
+    /// every signed request pays; this takes them in microseconds.
+    private struct Montgomery {
+        let n: Limbs
+        /// `-n⁻¹ mod 2⁶⁴`.
+        let nPrime: UInt64
+        /// `(2¹⁰²⁴)² mod n`, which carries a value into Montgomery form.
+        let rSquared: Limbs
+
+        init(_ n: Limbs) {
+            self.n = n
+            // Newton's iteration doubles the correct low bits of n⁻¹ each
+            // round, from the three an odd n gives for free.
+            var inverse = n.limbs[0]
+            for _ in 0..<6 { inverse = inverse &* (2 &- n.limbs[0] &* inverse) }
+            nPrime = 0 &- inverse
+            var power = Limbs.one
+            for _ in 0..<(2 * 64 * Limbs.count) {
+                if power.shiftLeft() || power >= n { power.subtract(n) }
+            }
+            rSquared = power
+        }
+
+        /// `a · b · 2⁻¹⁰²⁴ mod n`, for operands below `n` (coarsely
+        /// integrated operand scanning).
+        func multiply(_ a: Limbs, _ b: Limbs) -> Limbs {
+            let k = Limbs.count
+            var t = [UInt64](repeating: 0, count: k + 2)
+            for i in 0..<k {
+                var carry: UInt64 = 0
+                for j in 0..<k {
+                    let product = a.limbs[j].multipliedFullWidth(by: b.limbs[i])
+                    let (sum, over) = product.low.addingReportingOverflow(t[j])
+                    let (total, overAgain) = sum.addingReportingOverflow(carry)
+                    t[j] = total
+                    carry = product.high &+ (over ? 1 : 0) &+ (overAgain ? 1 : 0)
+                }
+                let (top, over) = t[k].addingReportingOverflow(carry)
+                t[k] = top
+                t[k + 1] = over ? 1 : 0
+
+                let m = t[0] &* nPrime
+                let first = m.multipliedFullWidth(by: n.limbs[0])
+                carry = first.high &+ (first.low.addingReportingOverflow(t[0]).overflow ? 1 : 0)
+                for j in 1..<k {
+                    let product = m.multipliedFullWidth(by: n.limbs[j])
+                    let (sum, over) = product.low.addingReportingOverflow(t[j])
+                    let (total, overAgain) = sum.addingReportingOverflow(carry)
+                    t[j - 1] = total
+                    carry = product.high &+ (over ? 1 : 0) &+ (overAgain ? 1 : 0)
+                }
+                let (last, overLast) = t[k].addingReportingOverflow(carry)
+                t[k - 1] = last
+                t[k] = t[k + 1] &+ (overLast ? 1 : 0)
+            }
+            var result = Limbs(limbs: Array(t[0..<k]))
+            if t[k] != 0 || result >= n { result.subtract(n) }
+            return result
         }
     }
 }
