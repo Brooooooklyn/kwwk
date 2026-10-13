@@ -217,3 +217,98 @@ struct CursorRegionRoutingParityTests {
         #expect(endpoints.endpoint(for: "tok-b") == nil)
     }
 }
+
+@Suite("Cursor plugin parity: the model picker")
+struct CursorPickerParityTests {
+    /// Cursor's picker as `AvailableModels` answers it in JSON, cut down
+    /// from the plugin's context.test.mjs PICKER (whose shapes the live
+    /// reply of 2026-10-13 has too).
+    static let picker = Data(#"""
+    {"models":[
+      {"name":"claude-opus-5-5","supportsImages":true,"contextTokenLimit":300000,"contextTokenLimitForMaxMode":1000000,"supportsNonMaxMode":true,
+       "variants":[
+        {"parameterValues":[{"id":"context","value":"300k"},{"id":"effort","value":"medium"},{"id":"fast","value":"false"}],"isDefaultNonMaxConfig":true,"legacySlug":"claude-opus-5-5-medium"},
+        {"parameterValues":[{"id":"context","value":"300k"},{"id":"effort","value":"medium"},{"id":"fast","value":"true"}],"isMaxMode":true,"legacySlug":"claude-opus-5-5-medium-fast"},
+        {"parameterValues":[{"id":"context","value":"1m"},{"id":"effort","value":"medium"},{"id":"fast","value":"false"}],"isMaxMode":true,"isDefaultMaxConfig":true,"legacySlug":"claude-opus-5-5-medium"},
+        {"parameterValues":[{"id":"context","value":"1m"},{"id":"effort","value":"medium"},{"id":"fast","value":"true"}],"isMaxMode":true,"legacySlug":"claude-opus-5-5-medium-fast"}]},
+      {"name":"grok-4.7","supportsImages":false,"contextTokenLimit":256000,"contextTokenLimitForMaxMode":500000,"supportsNonMaxMode":true,
+       "variants":[
+        {"parameterValues":[{"id":"context","value":"256k"},{"id":"reasoning_effort","value":"high"}],"isDefaultNonMaxConfig":true,"legacySlug":"grok-4.7-high"},
+        {"parameterValues":[{"id":"context","value":"500k"},{"id":"reasoning_effort","value":"high"}],"isMaxMode":true}]},
+      {"name":"grok-4.6","supportsImages":true,"contextTokenLimit":256000,"contextTokenLimitForMaxMode":256000,"supportsNonMaxMode":true,
+       "variants":[{"parameterValues":[{"id":"effort","value":"high"}],"isDefaultNonMaxConfig":true,"legacySlug":"cursor-grok-4.6-high"}]},
+      {"name":"max-only","contextTokenLimit":200000,"contextTokenLimitForMaxMode":400000,"supportsNonMaxMode":false,
+       "variants":[{"parameterValues":[],"legacySlug":"max-only"}]},
+      {"name":"default","supportsImages":true,"supportsNonMaxMode":true,
+       "variants":[{"isDefaultNonMaxConfig":true,"legacySlug":"default"}]},
+      {"name":"secret","isHidden":true,"contextTokenLimit":123000,"variants":[{"legacySlug":"secret"}]},
+      {"name":"tab-only","onlySupportsCmdK":true,"contextTokenLimit":123000,"variants":[{"legacySlug":"tab-only"}]}
+    ]}
+    """#.utf8)
+
+    @Test("a wire id's window is the one it runs at outside Max Mode")
+    func windowsByWireId() {
+        let facts = CursorModelCatalog.pickerFacts(fromAvailableModels: Self.picker)
+        // One id for two sizes: the 1M one is Max Mode's, never asked for.
+        #expect(facts["claude-opus-5-5-medium"]?.contextWindow == 300_000)
+        // An id Cursor serves in Max Mode only: the smallest size it has.
+        #expect(facts["claude-opus-5-5-medium-fast"]?.contextWindow == 300_000)
+        #expect(facts["grok-4.7-high"]?.contextWindow == 256_000)
+        // No sizes: Cursor's limit, Max Mode's for a model served only there.
+        #expect(facts["cursor-grok-4.6-high"]?.contextWindow == 256_000)
+        #expect(facts["max-only"]?.contextWindow == 400_000)
+        // Auto is given no limit.
+        #expect(facts["default"] == CursorModelCatalog.PickerFacts(contextWindow: nil, image: true))
+        #expect(facts["grok-4.7-high"]?.image == false)
+        // Hidden and Tab-only models are not the agent's.
+        #expect(facts["secret"] == nil)
+        #expect(facts["tab-only"] == nil)
+        #expect(CursorModelCatalog.pickerFacts(fromAvailableModels: Data("down".utf8)).isEmpty)
+    }
+
+    @Test("context sizes read as tokens")
+    func contextSizes() {
+        #expect(CursorModelCatalog.contextTokens("300k") == 300_000)
+        #expect(CursorModelCatalog.contextTokens("1m") == 1_000_000)
+        #expect(CursorModelCatalog.contextTokens("1.5M") == 1_500_000)
+        #expect(CursorModelCatalog.contextTokens("large") == 0)
+        #expect(CursorModelCatalog.contextTokens("") == 0)
+    }
+
+    @Test("the picker's window and image input win over the table and the family rule")
+    func normalizeTakesThePicker() throws {
+        func usable(_ id: String) -> CursorProto.UsableModel {
+            CursorProto.UsableModel(
+                modelId: id, displayName: id, displayNameShort: "", displayModelId: "", aliases: [], hasThinking: false
+            )
+        }
+        let ids = ["claude-opus-5-5-medium", "grok-4.7-high", "cursor-grok-4.6-high", "gpt-9-unlisted"]
+        let models = CursorModelCatalog.normalize(
+            ids.map(usable), host: "api2.cursor.sh",
+            picker: CursorModelCatalog.pickerFacts(fromAvailableModels: Self.picker)
+        )
+        let by = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+        #expect(by["claude-opus-5-5-medium"]?.contextWindow == 300_000)
+        #expect(by["grok-4.7-high"]?.contextWindow == 256_000)
+        #expect(by["grok-4.7-high"]?.input == [.text])
+        // The family rule reads grok-4.6 as text only; Cursor says images.
+        #expect(by["cursor-grok-4.6-high"]?.input == [.text, .image])
+        // An id the picker says nothing of keeps the defaults.
+        #expect(by["gpt-9-unlisted"]?.contextWindow == 200_000)
+        #expect(by["gpt-9-unlisted"]?.input == [.text, .image])
+    }
+
+    /// The bundled list carries the picker's windows as read 2026-10-13.
+    /// Read off the names they were 200K for nearly every model, and for
+    /// GPT-5.2 more than Cursor serves (400K against 272K).
+    @Test("the bundled catalog carries the picker's windows")
+    func bundledWindows() {
+        func window(_ id: String) -> Int? { ModelsCatalog.model(provider: "cursor", id: id)?.contextWindow }
+        #expect(window("claude-opus-5-5-medium") == 300_000)
+        #expect(window("grok-4.7-high") == 256_000)
+        #expect(window("gpt-5.2") == 272_000)
+        #expect(window("composer-2.5") == 200_000)
+        // Auto is given no limit by Cursor and keeps the default.
+        #expect(window("default") == 200_000)
+    }
+}
