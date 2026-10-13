@@ -285,11 +285,13 @@ struct QoderCatalogTests {
         #expect(qoderModel(id: QoderModels.defaultModelId, site: .cn) == cn)
     }
 
-    @Test("The bundled seed is the real listing of 2026-10-12, each model as that listing gives it")
+    @Test("The bundled seed is the real listing of 2026-10-12, each model as that listing gives it, and what only qoder.cn lists")
     func seedIsTheRealListing() throws {
         let listed = try QoderModels.parse(Data(qoderRealListing.utf8)).map { QoderModels.model($0, site: .global) }
         let seed = ModelsCatalog.models(for: "qoder")
-        #expect(Set(seed.map(\.id)) == Set(listed.map(\.id)))
+        // Qwen3.7-Flash and GLM-5.2 are in a qoder.cn account's listing
+        // (2026-10-13) and not in qoder.com's; the seed is one list for both.
+        #expect(Set(seed.map(\.id)) == Set(listed.map(\.id)).union(["q37fmodel", "gm51model"]))
         for model in listed {
             #expect(ModelsCatalog.model(provider: "qoder", id: model.id) == model)
         }

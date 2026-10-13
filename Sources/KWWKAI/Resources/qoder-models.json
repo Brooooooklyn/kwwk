@@ -163,6 +163,34 @@
       "input" : 0,
       "output" : 0
     },
+    "id" : "gm51model",
+    "input" : [
+      "text",
+      "image"
+    ],
+    "maxTokens" : 32000,
+    "name" : "GLM-5.2",
+    "provider" : "qoder",
+    "reasoning" : true,
+    "thinkingLevelMap" : {
+      "high" : "high",
+      "low" : null,
+      "max" : "max",
+      "medium" : null,
+      "minimal" : null,
+      "xhigh" : null
+    }
+  },
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 1000000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
     "id" : "gmodel",
     "input" : [
       "text",
@@ -287,6 +315,26 @@
       "minimal" : null,
       "xhigh" : "xhigh"
     }
+  },
+  {
+    "api" : "qoder-chat",
+    "baseUrl" : "https:\/\/api3.qoder.sh",
+    "contextWindow" : 1000000,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "q37fmodel",
+    "input" : [
+      "text",
+      "image"
+    ],
+    "maxTokens" : 32000,
+    "name" : "Qwen3.7-Flash",
+    "provider" : "qoder",
+    "reasoning" : true
   },
   {
     "api" : "qoder-chat",

@@ -108,5 +108,334 @@
     },
     "kimi-k2.7-code": null,
     "mai-code-1-flash-picker": null
+  },
+  "zai": {
+    "$note": "Models Z.ai's coding endpoint lists (GET /api/coding/paas/v4/models, 2026-10-13) and pi-mono leaves out. Each answered through a Coding Plan login the same day, except glm-5.3-flashx, which that plan does not include. Windows are the ones OpenRouter publishes for the same models.",
+    "glm-4.5": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 131072,
+      "cost": {
+        "input": 0.6,
+        "output": 2.2,
+        "cacheRead": 0.11,
+        "cacheWrite": 0
+      },
+      "id": "glm-4.5",
+      "input": [
+        "text"
+      ],
+      "maxTokens": 98304,
+      "name": "GLM-4.5",
+      "provider": "zai",
+      "reasoning": true
+    },
+    "glm-4.5-air": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 131072,
+      "cost": {
+        "input": 0.13,
+        "output": 0.85,
+        "cacheRead": 0.025,
+        "cacheWrite": 0
+      },
+      "id": "glm-4.5-air",
+      "input": [
+        "text"
+      ],
+      "maxTokens": 98304,
+      "name": "GLM-4.5 Air",
+      "provider": "zai",
+      "reasoning": true
+    },
+    "glm-4.6": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 202752,
+      "cost": {
+        "input": 0.5,
+        "output": 2,
+        "cacheRead": 0.1,
+        "cacheWrite": 0
+      },
+      "id": "glm-4.6",
+      "input": [
+        "text"
+      ],
+      "maxTokens": 131072,
+      "name": "GLM-4.6",
+      "provider": "zai",
+      "reasoning": true
+    },
+    "glm-5": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 204800,
+      "cost": {
+        "input": 0.6,
+        "output": 1.9,
+        "cacheRead": 0.119,
+        "cacheWrite": 0
+      },
+      "id": "glm-5",
+      "input": [
+        "text"
+      ],
+      "maxTokens": 131072,
+      "name": "GLM-5",
+      "provider": "zai",
+      "reasoning": true
+    },
+    "glm-5.1": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 204800,
+      "cost": {
+        "input": 0.966,
+        "output": 3.036,
+        "cacheRead": 0.1794,
+        "cacheWrite": 0
+      },
+      "id": "glm-5.1",
+      "input": [
+        "text"
+      ],
+      "maxTokens": 131072,
+      "name": "GLM-5.1",
+      "provider": "zai",
+      "reasoning": true
+    },
+    "glm-5.3-flashx": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "compat": {
+        "maxTokensField": "max_tokens",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsStore": false,
+        "supportsStrictMode": true,
+        "thinkingFormat": "zai",
+        "zaiToolStream": true
+      },
+      "contextWindow": 1000000,
+      "cost": {
+        "input": 0.37,
+        "output": 1.25,
+        "cacheRead": 0.09,
+        "cacheWrite": 0
+      },
+      "id": "glm-5.3-flashx",
+      "input": [
+        "text",
+        "image"
+      ],
+      "inputLimits": {
+        "images": {
+          "resize": {
+            "jpegQuality": 80,
+            "maxBytes": 4718592,
+            "maxHeight": 2000,
+            "maxWidth": 2000
+          }
+        }
+      },
+      "maxTokens": 131072,
+      "name": "GLM-5.3 FlashX",
+      "provider": "zai",
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    }
+  },
+  "xai": {
+    "$note": "Models xAI lists (GET /v1/models and /v1/language-models, 2026-10-13) and pi-mono leaves out; each answered through a subscription login the same day. Prices are xAI's own from that listing. grok-4.20-multi-agent-0309 is left out: it refuses the Responses and chat wires.",
+    "grok-4.20-0309-reasoning": {
+      "api": "openai-responses",
+      "baseUrl": "https://api.x.ai/v1",
+      "compat": {
+        "supportsLongCacheRetention": false
+      },
+      "contextWindow": 2000000,
+      "cost": {
+        "cacheRead": 0.2,
+        "cacheWrite": 0,
+        "input": 1.25,
+        "output": 2.5,
+        "tiers": [
+          {
+            "cacheRead": 0.4,
+            "cacheWrite": 0,
+            "input": 2.5,
+            "inputTokensAbove": 200000,
+            "output": 5
+          }
+        ]
+      },
+      "id": "grok-4.20-0309-reasoning",
+      "input": [
+        "text",
+        "image"
+      ],
+      "inputLimits": {
+        "images": {
+          "resize": {
+            "jpegQuality": 80,
+            "maxBytes": 4718592,
+            "maxHeight": 2000,
+            "maxWidth": 2000
+          }
+        }
+      },
+      "maxTokens": 30000,
+      "name": "Grok 4.20",
+      "provider": "xai",
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "high": "high",
+        "low": "low",
+        "max": null,
+        "medium": "medium",
+        "minimal": null,
+        "off": "none",
+        "xhigh": null
+      }
+    },
+    "grok-4.20-0309-non-reasoning": {
+      "api": "openai-responses",
+      "baseUrl": "https://api.x.ai/v1",
+      "compat": {
+        "supportsLongCacheRetention": false
+      },
+      "contextWindow": 2000000,
+      "cost": {
+        "cacheRead": 0.2,
+        "cacheWrite": 0,
+        "input": 1.25,
+        "output": 2.5,
+        "tiers": [
+          {
+            "cacheRead": 0.4,
+            "cacheWrite": 0,
+            "input": 2.5,
+            "inputTokensAbove": 200000,
+            "output": 5
+          }
+        ]
+      },
+      "id": "grok-4.20-0309-non-reasoning",
+      "input": [
+        "text",
+        "image"
+      ],
+      "inputLimits": {
+        "images": {
+          "resize": {
+            "jpegQuality": 80,
+            "maxBytes": 4718592,
+            "maxHeight": 2000,
+            "maxWidth": 2000
+          }
+        }
+      },
+      "maxTokens": 30000,
+      "name": "Grok 4.20 (Non-Reasoning)",
+      "provider": "xai",
+      "reasoning": false
+    },
+    "grok-build-0.1": {
+      "api": "openai-responses",
+      "baseUrl": "https://api.x.ai/v1",
+      "compat": {
+        "supportsLongCacheRetention": false
+      },
+      "contextWindow": 256000,
+      "cost": {
+        "input": 1,
+        "output": 2,
+        "cacheRead": 0.2,
+        "cacheWrite": 0,
+        "tiers": [
+          {
+            "inputTokensAbove": 200000,
+            "input": 2,
+            "output": 4,
+            "cacheRead": 0.4,
+            "cacheWrite": 0
+          }
+        ]
+      },
+      "id": "grok-build-0.1",
+      "input": [
+        "text",
+        "image"
+      ],
+      "inputLimits": {
+        "images": {
+          "resize": {
+            "jpegQuality": 80,
+            "maxBytes": 4718592,
+            "maxHeight": 2000,
+            "maxWidth": 2000
+          }
+        }
+      },
+      "maxTokens": 30000,
+      "name": "Grok Build 0.1",
+      "provider": "xai",
+      "reasoning": false
+    }
   }
 }
