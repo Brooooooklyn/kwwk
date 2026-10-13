@@ -41,5 +41,11 @@ struct CursorEndStreamFailureTests {
         #expect(try #require(CursorConnectResponse.failureFromEndStream(body)).category == .invalidRequest)
         let login = Data(#"{"error":{"code":"unauthenticated","message":"Error","details":[{"debug":{"error":"ERROR_NOT_LOGGED_IN","details":{"title":"Authentication error","detail":"If you are logged in, try logging out and back in."}}}]}}"#.utf8)
         #expect(try #require(CursorConnectResponse.failureFromEndStream(login)).category == .authentication)
+        // The region wording is the only way out of the sign-in reading, for
+        // either code.
+        #expect(ProviderFailure(message: "no access", providerCode: "permission_denied").category == .authentication)
+        #expect(ProviderFailure(
+            message: "This region is not yet available for your team", providerCode: "permission_denied"
+        ).category == .invalidRequest)
     }
 }
