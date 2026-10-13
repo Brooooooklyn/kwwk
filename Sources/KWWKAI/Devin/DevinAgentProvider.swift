@@ -712,6 +712,8 @@ final class DevinStreamState: @unchecked Sendable {
     private var toolArgs: [String: String] = [:]
     private var toolOrder: [String] = []
     private var activeToolCallId: String?
+    /// Ids given here to calls Devin opened without one.
+    private var mintedToolCallIds: Set<String> = []
     private var responseId: String?
     private var responseModel: String?
     private var lastStopReason: UInt64 = DevinProto.StopReason.unspecified
@@ -824,9 +826,16 @@ final class DevinStreamState: @unchecked Sendable {
         let step: Step = lock.withLock {
             var named = call.id.isEmpty ? activeToolCallId : call.id
             // A call that opens with a name and no id still runs: it gets an
-            // id of ours, as magpie's Devin plugin gives one (`events`).
-            if named == nil, !call.name.isEmpty {
-                named = "call_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            // id of ours, as magpie's Devin plugin gives one (`events`). A
+            // name is what opens a call there, so a second name with no id
+            // after such a call is the next call, not more of the first:
+            // taken as one, their arguments would run together and decode
+            // to `{}`.
+            if call.id.isEmpty, !call.name.isEmpty,
+               activeToolCallId.map(mintedToolCallIds.contains) ?? true {
+                let minted = "call_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                mintedToolCallIds.insert(minted)
+                named = minted
             }
             guard let id = named else { return .skip }
             activeToolCallId = id

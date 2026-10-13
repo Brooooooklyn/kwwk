@@ -609,6 +609,27 @@ struct DevinProviderStreamTests {
         #expect(call.arguments == .object(["command": .string("ls")]))
     }
 
+    /// magpie's Devin plugin opens a call at each name (`events`: `tools++`),
+    /// so two calls Devin sends without ids stay two.
+    @Test("two tool calls that open with a name and no id stay two calls, each with its own arguments")
+    func idlessToolCallsStayApart() async throws {
+        let (_, final) = await chatFinal([
+            frame(chatDelta { $0.bytesField(6, toolCall(name: "read", args: "{\"path\":")) }),
+            frame(chatDelta { $0.bytesField(6, toolCall(args: "\"a.txt\"}")) }),
+            frame(chatDelta { $0.bytesField(6, toolCall(name: "read", args: "{\"path\":\"b.txt\"}")) }),
+            frame(Data("{}".utf8), flags: 0x02),
+        ])
+        let calls = try #require(final).content.compactMap { block -> ToolCall? in
+            if case .toolCall(let call) = block { return call }
+            return nil
+        }
+        #expect(calls.map(\.arguments) == [
+            .object(["path": .string("a.txt")]),
+            .object(["path": .string("b.txt")]),
+        ])
+        #expect(Set(calls.map(\.id)).count == 2)
+    }
+
     @Test("Gemini schema normalization folds type arrays into nullable")
     func geminiSchema() {
         let schema: JSONValue = .object([
