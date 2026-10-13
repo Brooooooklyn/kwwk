@@ -197,12 +197,18 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
             message = "input is too long for the model's context: " + message
         } else if message.contains("INSUFFICIENT_MODEL_CAPACITY") {
             status = 503
-        } else if message.contains("MONTHLY_REQUEST_COUNT") || message.contains("USAGE_LIMIT") {
+        } else if saysUsageLimit(message) {
             status = 429
             message = "usage limit reached: " + message
         }
         return ProviderFailure(
             message: "Kiro: " + message, httpStatus: status, providerCode: reason.isEmpty ? nil : reason
         )
+    }
+
+    /// Whether an error's words name a spent allowance: Kiro's reasons for
+    /// one, whichever status or exception carries them.
+    static func saysUsageLimit(_ message: String) -> Bool {
+        message.contains("MONTHLY_REQUEST_COUNT") || message.contains("USAGE_LIMIT")
     }
 }
