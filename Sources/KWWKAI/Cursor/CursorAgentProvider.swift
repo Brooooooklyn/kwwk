@@ -140,12 +140,20 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                 // is another one than the one that refused.
                 if !rerouted, Self.shouldReroute(failure, written: state.snapshot().content),
                    let named = await CursorAgentEndpoint.resolve(
-                       apiKey: apiKey, apiHost: defaultBaseHost, clientVersion: clientVersion, client: httpClient
-                   ), named != endpoint {
+                       apiKey: apiKey, apiHost: defaultBaseHost, clientVersion: clientVersion, client: httpClient,
+                       cancellation: options?.cancellation
+                   ), named != endpoint, options?.cancellation?.isCancelled != true {
                     rerouted = true
                     endpoint = named
                     Self.endpoints.remember(named, for: apiKey)
                     continue
+                }
+                // Cancelled while the config was asked.
+                if options?.cancellation?.isCancelled == true {
+                    let aborted = state.aborted()
+                    out.push(.error(reason: .aborted, error: aborted))
+                    out.end(aborted)
+                    return
                 }
                 var msg = errorMessage(model: model, text: failure.message)
                 msg.failure = failure

@@ -54,7 +54,8 @@ struct CursorAgentEndpoint: Equatable, Sendable {
     /// Ask Cursor's API which agent API serves the account behind `apiKey`;
     /// nil when the config cannot be had or names none.
     static func resolve(
-        apiKey: String, apiHost: String, clientVersion: String, client: HTTPClient
+        apiKey: String, apiHost: String, clientVersion: String, client: HTTPClient,
+        cancellation: CancellationHandle? = nil
     ) async -> CursorAgentEndpoint? {
         guard let url = URL(string: "https://\(apiHost)/aiserver.v1.ServerConfigService/GetServerConfig") else {
             return nil
@@ -70,7 +71,8 @@ struct CursorAgentEndpoint: Equatable, Sendable {
                 "x-cursor-client-type": "cli",
                 "x-ghost-mode": "true",
             ],
-            body: Data("{}".utf8)
+            body: Data("{}".utf8),
+            cancellation: cancellation
         ), response.statusCode < 300 else { return nil }
         return named(byServerConfig: body)
     }
