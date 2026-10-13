@@ -266,8 +266,37 @@ func terminalLoginCallbacks() -> OAuthLogin.Callbacks {
         },
         onProgress: { msg in
             FileHandle.standardError.write(Data("\(msg)\n".utf8))
+        },
+        onUserCode: { code, _ in
+            if Clipboard.copy(code) {
+                FileHandle.standardError.write(Data("code copied to the clipboard\n".utf8))
+            }
         }
     )
+}
+
+/// Best-effort copy for a device flow's code, so a page that does not take
+/// it from the link needs a paste rather than typing.
+enum Clipboard {
+    static func copy(_ text: String) -> Bool {
+        #if os(macOS)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
+        let pipe = Pipe()
+        process.standardInput = pipe
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        pipe.fileHandleForWriting.write(Data(text.utf8))
+        pipe.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+        #else
+        return false
+        #endif
+    }
 }
 
 /// Best-effort URL opener. macOS uses `/usr/bin/open`; Linux tries

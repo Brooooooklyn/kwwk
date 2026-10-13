@@ -98,6 +98,28 @@ struct OAuthLoginShapeTests {
         #expect(server.redirectURI == "http://localhost:53982/callback")
     }
 
+    @Test("GitHub's verification page opens with the code filled in")
+    func copilotVerificationURLCarriesCode() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((
+            status: 200,
+            body: #"{"device_code":"DC","user_code":"AB12-CD34","verification_uri":"https://github.com/login/device","interval":0}"#
+        ))
+        client.queue.append((status: 200, body: #"{"access_token":"ghp_access"}"#))
+        client.queue.append((
+            status: 200,
+            body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
+        ))
+        let opened = LockedBox<[URL]>([])
+        _ = try await OAuthLogin.loginGitHubCopilot(
+            clientID: "test-client",
+            callbacks: OAuthLogin.Callbacks(onAuthURL: { url in opened.set(opened.get() + [url]) }, onProgress: { _ in }),
+            client: client,
+            pollSleep: { _ in }
+        )
+        #expect(opened.get().map(\.absoluteString) == ["https://github.com/login/device?user_code=AB12-CD34"])
+    }
+
     @Test("device-flow keeps the longer interval GitHub asks for after slow_down")
     func copilotDeviceFlowSlowDown() async throws {
         let client = SequentialStubClient()

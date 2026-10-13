@@ -310,10 +310,12 @@ public enum OAuthLogin {
         guard let obj = try JSONSerialization.jsonObject(with: deviceBody) as? [String: Any],
               let userCode = obj["user_code"] as? String,
               let deviceCode = obj["device_code"] as? String,
-              let verifyURLString = obj["verification_uri"] as? String,
-              let verifyURL = URL(string: verifyURLString) else {
+              let verifyURLString = (obj["verification_uri_complete"] as? String)
+                ?? (obj["verification_uri"] as? String),
+              let plainVerifyURL = URL(string: verifyURLString) else {
             throw OAuthError.invalidResponse("copilot device code response")
         }
+        let verifyURL = gitHubVerificationURL(plainVerifyURL, userCode: userCode)
         let interval = (obj["interval"] as? Int) ?? 5
 
         await callbacks.onUserCode?(userCode, verifyURL)
@@ -324,6 +326,17 @@ public enum OAuthLogin {
                 pollSleep: pollSleep
             )
         }
+    }
+
+    /// GitHub's answer names the bare page; its `user_code` query fills the
+    /// code in, so the user confirms it instead of typing it.
+    static func gitHubVerificationURL(_ url: URL, userCode: String) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = components.queryItems ?? []
+        guard !items.contains(where: { $0.name == "user_code" }) else { return url }
+        items.append(URLQueryItem(name: "user_code", value: userCode))
+        components.queryItems = items
+        return components.url ?? url
     }
 
     private static func pollGitHubCopilot(
