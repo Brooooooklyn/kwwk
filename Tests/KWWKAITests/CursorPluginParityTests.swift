@@ -347,6 +347,27 @@ struct CursorHTTPFailureParityTests {
         #expect(broken.isRetryable)
     }
 
+    /// A status Connect would not have written for the code is the
+    /// server's own word and stays: the plugin's `statusOf` takes a 401 as
+    /// a lapsed sign-in whatever the code, and a 402 is never a rate limit
+    /// to wait out.
+    @Test("a status that is not Connect's rendering of the code is kept")
+    func statusTheCodeDoesNotExplain() {
+        let lapsed = CursorConnectResponse.failureFromHTTP(status: 401, body: #"{"code":"unknown","message":"session ended"}"#)
+        #expect(lapsed.httpStatus == 401)
+        #expect(lapsed.category == .authentication)
+
+        let unpaid = CursorConnectResponse.failureFromHTTP(status: 402, body: #"{"code":"resource_exhausted","message":"Error"}"#)
+        #expect(unpaid.httpStatus == 402)
+        #expect(unpaid.category == .quota)
+        #expect(!unpaid.isRetryable)
+
+        // Connect's own rendering adds nothing to the code and is left out.
+        for (status, code) in [(401, "unauthenticated"), (403, "permission_denied"), (429, "resource_exhausted"), (400, "invalid_argument")] {
+            #expect(CursorConnectResponse.failureFromHTTP(status: status, body: #"{"code":"\#(code)","message":"no"}"#).httpStatus == nil)
+        }
+    }
+
     @Test("a body that is no Connect error stays the HTTP error it is")
     func plainHTTPError() {
         for body in ["Unauthorized", "", "<html>blocked</html>", #"{"message":"no code"}"#] {
