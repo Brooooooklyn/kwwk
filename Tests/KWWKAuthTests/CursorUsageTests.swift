@@ -23,13 +23,12 @@ struct CursorUsageTests {
          "autoBucketModels":["default","composer-1.5","composer-2"]}
         """#)
         let month = 2_678_400
-        #expect(got == [
-            OAuthUsageWindow(window: .primary, usedPercent: 14.000000000000002, resetsAt: 1_794_295_641_814, windowSeconds: month),
-            OAuthUsageWindow(window: .primary, usedPercent: 28.000000000000004, resetsAt: 1_794_295_641_814,
-                             windowSeconds: month, limitID: "cursor:auto", limitName: "Cursor Models"),
-            OAuthUsageWindow(window: .primary, usedPercent: 0, resetsAt: 1_794_295_641_814,
-                             windowSeconds: month, limitID: "cursor:api", limitName: "Other Models"),
-        ])
+        // The percentages are compared loosely: Foundation on Linux reads
+        // 14.000000000000002 one ulp away from Darwin's.
+        #expect(got.map { ($0.usedPercent * 1000).rounded() } == [14000, 28000, 0])
+        #expect(got.map(\.limitID) == [nil, "cursor:auto", "cursor:api"])
+        #expect(got.map(\.limitName) == [nil, "Cursor Models", "Other Models"])
+        #expect(got.allSatisfy { $0.window == .primary && $0.resetsAt == 1_794_295_641_814 && $0.windowSeconds == month })
     }
 
     /// The plugin's usage.test.mjs "the period's three windows": no cycle
