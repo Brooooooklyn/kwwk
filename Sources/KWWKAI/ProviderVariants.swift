@@ -412,7 +412,7 @@ public enum ProviderVariants {
 
     // MARK: - Shared helpers
 
-    private static func copilotEditorHeaders(integrationID: String) -> [String: String] {
+    static func copilotEditorHeaders(integrationID: String) -> [String: String] {
         [
             "editor-version": "vscode/1.107.0",
             "editor-plugin-version": "copilot-chat/0.35.0",

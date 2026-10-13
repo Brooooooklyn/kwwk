@@ -161,6 +161,7 @@ func runCodingTUIInternal(
     // across accounts, mutated by `/login` / `/logout`. Created up front so
     // the welcome header and the goal-continuation gate read live login state.
     let sessionProviders = SessionProviders(providerSlots)
+    sessionProviders.refreshAccountModels(authResolvers: authResolvers)
 
     // Logged-out start: no provider slots and the sentinel model. The welcome
     // card and prompt breadcrumb swap in a "/login to sign in" hint instead
