@@ -39,6 +39,20 @@ func rewindRowLabel(_ msg: Message) -> String {
     return flat.count <= 80 ? flat : String(flat.prefix(80)) + "…"
 }
 
+/// Text placed back into the editor for a rewound prompt: the stored body
+/// minus the trailing `<attachments>` block `buildPromptWithAttachments`
+/// appended, so resubmitting re-resolves the `@` paths instead of sending a
+/// stale flattened copy alongside a fresh one. Prompts without attachments
+/// are returned unchanged.
+@MainActor
+private func rewindEditorText(_ msg: Message) -> String {
+    let text = queuedMessageBodyText(msg)
+    guard text.hasSuffix("\n</attachments>"),
+          let open = text.range(of: "\n\n<attachments>\n")
+    else { return text }
+    return String(text[..<open.lowerBound])
+}
+
 /// Open the "rewind to message" selector (double-Esc from idle, or `/rewind`).
 /// Lists every rewindable user prompt in the transcript; on confirm the live
 /// context is truncated to just BEFORE the chosen prompt (the prompt and
@@ -155,7 +169,7 @@ func openRewindSelector(
                                 dequeueCycle: dequeueCycle
                             )
 
-                            frame.input.value = queuedMessageBodyText(captured)
+                            frame.input.value = rewindEditorText(captured)
                                 .replacingOccurrences(of: "\n", with: " ")
                             frame.input.moveEnd()
                             recomputeTranscript()

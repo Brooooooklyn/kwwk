@@ -140,6 +140,89 @@ struct RewindSessionRaceTests {
         #expect(loadedNew.messages.count == 1)
         #expect(rewindRaceText(loadedNew.messages[0]) == "new session sentinel")
     }
+
+    @MainActor
+    @Test("rewind restores the typed prompt without the <attachments> block")
+    func rewindStripsAttachmentsBlockFromEditor() async throws {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kwwk-rewind-attach-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "let a = 1\nlet b = 2\n".write(
+            to: dir.appendingPathComponent("a.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let built = try await buildPromptWithAttachments(
+            text: "fix @./a.swift",
+            store: AttachmentStore(),
+            cwd: dir.path,
+            modelSupportsImages: true
+        )
+        #expect(built.text.contains("<attachments>"))
+
+        let seed: [Message] = [
+            .user(UserMessage(text: built.text)),
+            .assistant(fauxAssistantMessage("done")),
+        ]
+        let agent = Agent(
+            initialState: AgentInitialState(model: faux.getModel(), messages: seed),
+            sessionId: "rewind-attach"
+        )
+        let store = SessionStore(directory: dir)
+        let recorder = SessionRecorder(
+            store: store,
+            sessionId: "rewind-attach",
+            cwd: dir.path,
+            model: agent.state.model.id,
+            provider: agent.state.model.provider
+        )
+        await recorder.ensureCreated()
+        await recorder.flush(messages: seed)
+        let recorderBox = RecorderBox(
+            recorder: recorder,
+            unsubscribe: {},
+            sessionId: "rewind-attach"
+        )
+
+        let frame = CodingFrame()
+        let modal = ModalHost(
+            renderModalLines: { _ in },
+            restoreTranscript: {},
+            requestRender: {}
+        )
+        let rewinding = RewindMainActorRef(false)
+
+        openRewindSelector(
+            agent: agent,
+            modal: modal,
+            frame: frame,
+            sessionStore: store,
+            recorderBox: recorderBox,
+            retry: TurnRetryState(),
+            attachments: AttachmentStore(),
+            dequeueCycle: DequeueCycleState(),
+            terminalWidth: { 80 },
+            commit: { _ in },
+            replaceTranscript: { _ in },
+            recomputeTranscript: {},
+            updateFrameStatus: {},
+            requestRender: {},
+            setRewinding: { rewinding.value = $0 }
+        )
+        modal.routeConfirm()
+        for _ in 0..<200 where rewinding.value {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        #expect(!rewinding.value)
+        #expect(agent.state.messages.isEmpty)
+        #expect(frame.input.value == "fix @./a.swift")
+    }
 }
 
 @MainActor
