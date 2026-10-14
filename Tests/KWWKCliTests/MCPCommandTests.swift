@@ -178,4 +178,24 @@ struct MCPCommandTests {
         (code, _) = await box.run(["logout", "down"])
         #expect(code == 2)
     }
+
+    @Test("get compares the sign-in against the URL with ${VAR} expanded")
+    func getExpandsURLForSignIn() async throws {
+        let box = try Sandbox()
+        defer { try? FileManager.default.removeItem(at: box.root) }
+        let environment = ["MCP_HOST": "api.example.com"]
+        _ = await box.run(
+            ["add-json", "srv", #"{"type":"http","url":"https://${MCP_HOST}/mcp"}"#],
+            environment: environment
+        )
+        #expect(try box.config(.user)["mcpServers"]?["srv"]?["url"] == "https://${MCP_HOST}/mcp")
+        let store = MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: box.home))
+        try await store.update(server: "srv", serverURL: URL(string: "https://api.example.com/mcp")!) {
+            $0.tokens = MCPOAuthTokens(accessToken: "t")
+        }
+        let (code, output) = await box.run(["get", "srv"], environment: environment)
+        #expect(code == 0)
+        #expect(output.out.contains("URL: https://${MCP_HOST}/mcp"))
+        #expect(output.out.contains("OAuth: on, signed in"))
+    }
 }

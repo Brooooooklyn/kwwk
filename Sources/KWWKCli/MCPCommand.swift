@@ -413,7 +413,10 @@ enum MCPCommand {
                         let record = MCPOAuthFileStore.readRecords(
                             url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory)
                         )[name]
-                        let signedIn = record?.serverURL == url && record?.tokens != nil
+                        // Login stores the URL with ${VAR} expanded, so compare against that.
+                        var expander = Expander(home: homeDirectory, environment: environment)
+                        let resolvedURL = URL(string: expander.expand(url, field: "url"))?.absoluteString ?? url
+                        let signedIn = record?.serverURL == resolvedURL && record?.tokens != nil
                         io.out("  OAuth: on, \(signedIn ? "signed in" : "not signed in (kwwk mcp login \(name))")")
                         for (key, value) in (fields["oauth"]?.cliObject ?? [:]).sorted(by: { $0.key < $1.key }) {
                             let text = value.cliString ?? (value.cliInt.map(String.init) ?? "\(value)")
