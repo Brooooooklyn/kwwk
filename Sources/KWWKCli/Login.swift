@@ -1,5 +1,8 @@
 import Foundation
 import KWWKAI
+#if canImport(Darwin)
+import Darwin
+#endif
 
 /// Flow a picked `/login` entry runs. OAuth entries dispatch to the
 /// browser-based PKCE flow (TUI suspended for the handoff); `apiKey` entries
@@ -303,6 +306,22 @@ enum Clipboard {
 /// `xdg-open`, else falls back to stderr so the user can click manually.
 enum Browser {
     static func open(_ url: URL) {
+        #if os(iOS)
+        // iOS has neither `Process` nor `open(1)`. uikittools' `uiopen` hands
+        // the URL to SpringBoard, which is the only route from a CLI to a
+        // browser here. Probe for it rather than naming one bootstrap's path:
+        // the launcher puts physical RootHide paths on PATH for this process.
+        let pathOpeners = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":").filter { $0.hasPrefix("/") }.map { "\($0)/uiopen" }
+        let openers = pathOpeners + ["/var/jb/usr/bin/uiopen", "/usr/bin/uiopen"]
+        for opener in openers
+        where FileManager.default.isExecutableFile(atPath: opener) {
+            if spawnAndWait(opener, [url.absoluteString]) { return }
+        }
+        FileHandle.standardError.write(Data(
+            "please open manually:\n  \(url.absoluteString)\n".utf8
+        ))
+        #else
         #if os(macOS)
         let opener = "/usr/bin/open"
         #else
@@ -319,8 +338,26 @@ enum Browser {
                 "please open manually:\n  \(url.absoluteString)\n".utf8
             ))
         }
+        #endif
     }
 }
+
+#if os(iOS)
+/// `posix_spawn` + reap, standing in for the `Process` that iOS Foundation
+/// does not ship. Reports whether the child both spawned and exited zero, so
+/// a missing or failing opener falls through to the manual instructions.
+private func spawnAndWait(_ path: String, _ arguments: [String]) -> Bool {
+    var argv: [UnsafeMutablePointer<CChar>?] = ([path] + arguments).map { strdup($0) }
+    argv.append(nil)
+    defer { for argument in argv { free(argument) } }
+
+    var pid: pid_t = 0
+    guard posix_spawn(&pid, path, nil, nil, &argv, environ) == 0 else { return false }
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+    return status == 0
+}
+#endif
 
 // MARK: - OAuth flow (TUI suspended)
 

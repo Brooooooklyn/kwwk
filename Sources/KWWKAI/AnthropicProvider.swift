@@ -784,9 +784,9 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
     /// calls the tool when it is the only one offered — as the agent loop's
     /// terminal turn offers it.
     static func refusesForcedToolChoice(_ modelId: String) -> Bool {
-        let pattern = #/claude-[a-z]+-(\d)[-.](\d{1,2})(?!\d)/#
-        guard let match = modelId.lowercased().firstMatch(of: pattern),
-              let major = Int(match.1), let minor = Int(match.2) else { return false }
+        guard let match = firstMatch(forcedToolChoicePattern, in: modelId.lowercased()),
+              let major = match[1].flatMap({ Int($0) }),
+              let minor = match[2].flatMap({ Int($0) }) else { return false }
         return (major, minor) >= (5, 1)
     }
 
@@ -797,14 +797,32 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
     /// so a relay's or Bedrock's spelling of the same model is covered. Older
     /// Claudes and other vendors' models keep the caller's temperature.
     static func refusesTemperature(_ modelId: String) -> Bool {
-        let pattern = #/claude-(opus|sonnet|haiku|fable|mythos)-(\d)(?!\d)(?:[-.](\d{1,2})(?!\d))?/#
-        guard let match = modelId.lowercased().firstMatch(of: pattern), let major = Int(match.2) else { return false }
-        let version = (major, match.3.flatMap { Int($0) } ?? 0)
-        switch match.1 {
+        guard let match = firstMatch(temperaturePattern, in: modelId.lowercased()),
+              let family = match[1], let major = match[2].flatMap({ Int($0) }) else { return false }
+        let version = (major, match[3].flatMap { Int($0) } ?? 0)
+        switch family {
         case "opus": return version >= (4, 7)
         case "sonnet": return version >= (5, 0)
         case "haiku": return version >= (5, 5)
         default: return true
+        }
+    }
+
+    // NSRegularExpression rather than `Regex` literals, which need iOS 16.
+    private static let forcedToolChoicePattern = try! NSRegularExpression(
+        pattern: #"claude-[a-z]+-(\d)[-.](\d{1,2})(?!\d)"#
+    )
+    private static let temperaturePattern = try! NSRegularExpression(
+        pattern: #"claude-(opus|sonnet|haiku|fable|mythos)-(\d)(?!\d)(?:[-.](\d{1,2})(?!\d))?"#
+    )
+
+    /// Capture groups of the first match, index 0 being the whole match; a
+    /// group that did not participate is nil.
+    private static func firstMatch(_ regex: NSRegularExpression, in string: String) -> [String?]? {
+        let range = NSRange(string.startIndex..., in: string)
+        guard let result = regex.firstMatch(in: string, range: range) else { return nil }
+        return (0..<result.numberOfRanges).map { index in
+            Range(result.range(at: index), in: string).map { String(string[$0]) }
         }
     }
 

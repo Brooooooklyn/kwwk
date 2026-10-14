@@ -1,4 +1,4 @@
-#if os(macOS) || os(Linux)
+#if os(macOS) || os(Linux) || os(iOS)
 import Foundation
 #if canImport(Darwin)
 import Darwin
