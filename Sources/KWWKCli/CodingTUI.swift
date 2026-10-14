@@ -251,6 +251,7 @@ func runCodingTUIInternal(
         frame.stateLine = codingFrameStateLine(
             mode: frameStatus.mode,
             isStreaming: agent.state.isStreaming,
+            hasDraft: !frame.input.value.isEmpty,
             runningBackgroundTasks: frameStatus.runningBackgroundTasks,
             queuedPrompts: agent.queuedSteeringCount(),
             spinner: frame.spinner
@@ -1060,11 +1061,14 @@ func runCodingTUIInternal(
             switch parsed {
             case .command(let name, let args):
                 // Commands mutate shared session state and therefore remain
-                // idle-only.
+                // idle-only. The rejected command goes into ↑ history: the
+                // first Esc clears it from the editor (the slash popup step)
+                // before the second one stops the agent.
                 guard !busy else {
+                    frame.input.addToHistory(text)
                     runner.tui.commit([
                         "",
-                        Style.error("  slash commands run only when the agent is idle — stop it first (Esc) or wait"),
+                        Style.error(busySlashCommandNotice),
                         "",
                     ])
                     updateFrameStatus()
@@ -1310,15 +1314,21 @@ func runCodingTUIInternal(
         runner.tui.forceRepaint()
     }
 
-    // Esc. Three modes of operation:
+    // Esc. Each press does the first of these that applies:
     //   1. modal open → cancel the modal (no agent state touched).
-    //   2. agent streaming or manual compacting → abort the active owner.
-    //   3. idle with an empty editor → arm double-Esc; a second press
+    //   2. a bare `/query` in the editor → close the slash popup and drop
+    //      the query.
+    //   3. any other draft in the editor → clear it (kept in ↑ history).
+    //   4. agent streaming or manual compacting → abort the active owner.
+    //   5. idle with an empty editor → arm double-Esc; a second press
     //      within the window opens the rewind-to-message selector.
+    //
+    // So with a draft in the editor it takes two presses to stop the agent;
+    // the state line says "Esc twice to cancel" then.
     //
     // Double-Esc invariant: only an Esc that did NOTHING else may count as a
     // tap of the double-tap. Every branch that consumes the press for another
-    // purpose (modal cancel or abort) — and any press with draft text
+    // purpose (modal cancel, draft clear or abort) — and any press with draft text
     // in the editor — resets the arm, so cancelling a modal and then pressing
     // Esc again can never surprise-open the selector.
     let doubleEsc = DoubleEscState()
@@ -1567,7 +1577,7 @@ final class GoalLoggedOutHintState {
     var shown = false
 }
 
-private enum CodingFrameMode {
+enum CodingFrameMode {
     case idle
     case aborting
     case compacting(messageCount: Int)
@@ -1695,20 +1705,30 @@ private func promptMetaLabel(
     return parts.joined(separator: Theme.faintText(" · "))
 }
 
-private func codingFrameStateLine(
+/// Shown when Enter on a slash command is rejected because the agent is
+/// busy. Esc clears a draft before it interrupts, so stopping the agent from
+/// here takes two presses; the command is kept in ↑ history meanwhile.
+let busySlashCommandNotice =
+    "  slash commands run only when the agent is idle — wait, or Esc twice to stop it (↑ recalls the command)"
+
+/// The state line under the prompt box. `hasDraft` reflects text in the
+/// editor: Esc clears that first, so the cancel hint asks for two presses.
+func codingFrameStateLine(
     mode: CodingFrameMode,
     isStreaming: Bool,
+    hasDraft: Bool,
     runningBackgroundTasks: Int,
     queuedPrompts: Int,
     spinner: String
 ) -> String {
     var parts: [String] = []
+    let cancelHint = hasDraft ? "Esc twice to cancel" : "Esc to cancel"
 
     switch mode {
     case .compacting(let count):
         parts.append(Theme.paint("\(spinner) compacting \(count) messages", Theme.warn, bold: true))
         parts.append(Theme.faintText("new prompts queue"))
-        parts.append(Theme.faintText("Esc to cancel"))
+        parts.append(Theme.faintText(cancelHint))
     case .shaking:
         parts.append(Theme.paint("\(spinner) shaking context", Theme.warn, bold: true))
     case .preparingAttachments:
@@ -1723,11 +1743,11 @@ private func codingFrameStateLine(
         if !reason.isEmpty {
             parts.append(Theme.faintText(String(reason.prefix(40))))
         }
-        parts.append(Theme.faintText("Esc to cancel"))
+        parts.append(Theme.faintText(cancelHint))
     case .idle:
         if isStreaming {
             parts.append(Theme.paint("\(spinner) generating", Theme.accent, bold: true))
-            parts.append(Theme.faintText("Esc to cancel"))
+            parts.append(Theme.faintText(cancelHint))
         } else {
             parts.append(Theme.faintText("/ commands · @ attach · ⇧⏎ newline"))
         }

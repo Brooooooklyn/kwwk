@@ -259,6 +259,27 @@ struct SlashInputParseTests {
         #expect(escapeClearsSlashMenu("") == nil)
     }
 
+    @Test("cancel hints ask for two Esc presses while a draft is in the editor")
+    func cancelHintCountsTheDraftStep() {
+        func line(_ mode: CodingFrameMode, streaming: Bool, draft: Bool) -> String {
+            ANSI.stripEscapes(codingFrameStateLine(
+                mode: mode,
+                isStreaming: streaming,
+                hasDraft: draft,
+                runningBackgroundTasks: 0,
+                queuedPrompts: 0,
+                spinner: "*"
+            ))
+        }
+        #expect(line(.idle, streaming: true, draft: false).contains("Esc to cancel"))
+        #expect(line(.idle, streaming: true, draft: true).contains("Esc twice to cancel"))
+        #expect(line(.compacting(messageCount: 3), streaming: false, draft: true).contains("Esc twice to cancel"))
+        let retrying = CodingFrameMode.retrying(attempt: 0, until: Date(), reason: "")
+        #expect(line(retrying, streaming: true, draft: true).contains("Esc twice to cancel"))
+        #expect(!line(.idle, streaming: false, draft: true).contains("Esc"))
+        #expect(busySlashCommandNotice.contains("Esc twice"))
+    }
+
     @MainActor
     @Test("slash menu marks a cut description with an ellipsis")
     func descriptionEllipsis() {
