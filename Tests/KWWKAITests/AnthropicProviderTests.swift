@@ -291,7 +291,11 @@ struct AnthropicProviderTests {
         #expect(json?["model"] as? String == "claude-test")
         #expect(json?["max_tokens"] as? Int == Self.sampleModel.maxTokens)
         #expect(json?["system"] as? String == "Be concise.")
-        #expect((json?["messages"] as? [[String: Any]])?.count == 4)
+        // The tool result and the user's "thanks" go back as one user turn.
+        let messages = json?["messages"] as? [[String: Any]]
+        #expect(messages?.compactMap { $0["role"] as? String } == ["user", "assistant", "user"])
+        let lastBlocks = messages?.last?["content"] as? [[String: Any]]
+        #expect(lastBlocks?.compactMap { $0["type"] as? String } == ["tool_result", "text"])
         let tools = json?["tools"] as? [[String: Any]]
         #expect(tools?.first?["name"] as? String == "calc")
     }
