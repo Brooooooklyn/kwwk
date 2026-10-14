@@ -334,6 +334,9 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
 
     // MARK: - Prompt history (Up/Down recall)
 
+    /// True while Up/Down is walking the recall ring (until the next edit).
+    var isBrowsingHistory: Bool { historyIndex > -1 }
+
     /// Append a submitted prompt to the recall ring. Trims, drops empties and
     /// consecutive duplicates, caps at 100 entries (newest first).
     func addToHistory(_ text: String) {

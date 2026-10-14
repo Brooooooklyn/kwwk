@@ -89,6 +89,33 @@ struct AtPathCompletionTests {
         #expect(frame.atMenuActive)
     }
 
+    @Test("a recalled history entry ending in @path doesn't hijack ↑/↓")
+    func historyBrowsing() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.atPathCwd = dir.path
+        frame.input.addToHistory("older")
+        frame.input.addToHistory("summarize @e")
+        frame.input.addToHistory("newer")
+
+        frame.input.cursorUp()
+        frame.input.cursorUp()
+        frame.input.cursorUp()
+        frame.input.cursorDown()
+        #expect(frame.input.value == "summarize @e")
+        #expect(frame.input.cursor == frame.input.value.count)
+        #expect(!frame.atMenuActive)
+        frame.input.cursorDown()
+        #expect(frame.input.value == "newer")
+        // Editing the recalled entry opens the popup again.
+        frame.input.cursorUp()
+        frame.input.moveEnd()
+        frame.input.insert("t")
+        #expect(frame.input.value == "summarize @et")
+        #expect(frame.atMenuActive)
+    }
+
     @Test("no cwd, no popup; slash popup wins")
     func gating() {
         let frame = CodingFrame(viewportHeight: 20)

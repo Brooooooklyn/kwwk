@@ -225,9 +225,11 @@ final class CodingFrame: Component, @unchecked Sendable {
     }
 
     /// Whether the `@` file popup is showing. The slash popup and modals
-    /// take precedence.
+    /// take precedence, and a recalled history entry doesn't open it until
+    /// it's edited, so ↑/↓ keep walking history.
     var atMenuActive: Bool {
-        modalLines == nil && slashQuery() == nil && !atCandidates().isEmpty
+        modalLines == nil && slashQuery() == nil && !input.isBrowsingHistory
+            && !atCandidates().isEmpty
     }
 
     func atMenuMove(_ delta: Int) {
