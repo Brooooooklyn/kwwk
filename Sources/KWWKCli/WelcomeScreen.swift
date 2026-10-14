@@ -166,6 +166,54 @@ enum WelcomeScreen {
 /// Best-effort current git branch for the welcome card + prompt breadcrumb.
 /// Returns nil outside a repo or if `git` is unavailable.
 enum GitInfo {
+    #if os(iOS)
+    /// iOS Foundation has no `Process`, so read the ref the way git writes
+    /// it. Walks up from `cwd` for a `.git`; a linked worktree or submodule
+    /// stores a `gitdir:` pointer in a file where the directory would be.
+    /// Returns nil on a detached HEAD, matching the `--abbrev-ref` path.
+    static func currentBranch(cwd: String) -> String? {
+        let fileManager = FileManager.default
+        var directory = URL(fileURLWithPath: cwd).standardizedFileURL
+
+        while true {
+            let dotGit = directory.appendingPathComponent(".git")
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: dotGit.path, isDirectory: &isDirectory) {
+                guard let gitDirectory = resolveGitDirectory(dotGit, isDirectory: isDirectory.boolValue),
+                      let head = try? String(
+                          contentsOf: gitDirectory.appendingPathComponent("HEAD"),
+                          encoding: .utf8
+                      )
+                else { return nil }
+
+                let reference = head.trimmingCharacters(in: .whitespacesAndNewlines)
+                let prefix = "ref: refs/heads/"
+                guard reference.hasPrefix(prefix) else { return nil }
+                let branch = String(reference.dropFirst(prefix.count))
+                return branch.isEmpty ? nil : branch
+            }
+
+            let parent = directory.deletingLastPathComponent().standardizedFileURL
+            if parent.path == directory.path { return nil }
+            directory = parent
+        }
+    }
+
+    private static func resolveGitDirectory(_ dotGit: URL, isDirectory: Bool) -> URL? {
+        if isDirectory { return dotGit }
+        guard let pointer = try? String(contentsOf: dotGit, encoding: .utf8) else { return nil }
+        let prefix = "gitdir:"
+        guard let line = pointer.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
+            return nil
+        }
+        let path = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return nil }
+        return URL(
+            fileURLWithPath: path,
+            relativeTo: dotGit.deletingLastPathComponent()
+        ).standardizedFileURL
+    }
+    #else
     static func currentBranch(cwd: String) -> String? {
         let proc = Process()
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
@@ -187,4 +235,5 @@ enum GitInfo {
             return nil
         }
     }
+    #endif
 }
