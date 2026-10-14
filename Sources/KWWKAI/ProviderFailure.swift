@@ -166,7 +166,12 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         if status == 401 || status == 403 {
             // Kimi refuses an over-plan context as 401; it is an input
             // rejection, so it takes the shrinking path, not a login error.
-            return ProviderContextLimit.isPlanContextLimit(text) ? .contextOverflow : .authentication
+            if ProviderContextLimit.isPlanContextLimit(text) { return .contextOverflow }
+            // Kimi Code reports a spent 5-hour / weekly / monthly plan window
+            // as 403 "You've reached your … usage limit". The login is fine;
+            // treating it as authentication would send the user to sign in again.
+            if Self.isPlanUsageLimit(text) { return .quota }
+            return .authentication
         }
         if status == nil || status == 400 || status == 413,
            ProviderContextLimit.isInputOverflow(text) { return .contextOverflow }
@@ -260,6 +265,16 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
     private static func isCurlTransferInterrupted(_ text: String) -> Bool {
         ["transfer closed with", "was not closed cleanly", "stream error in the http/2 framing layer"]
             .contains(where: text.contains)
+    }
+
+    /// Plan-window exhaustion wording delivered on 401/403 (Kimi Code:
+    /// https://www.kimi.com/code/docs/en/kimi-code/error-reference.html).
+    /// Concurrency caps on 403 are not included: they are not spent quota.
+    static func isPlanUsageLimit(_ text: String) -> Bool {
+        guard !text.contains("concurrent request limit") else { return false }
+        return Self.match(#"\b(reached your [a-z0-9() -]{0,40}usage limit)\b"#, in: text) != nil
+            || text.contains("quota will reset")
+            || text.contains("quota will be refreshed")
     }
 
     private static func isTransientLimit(_ text: String) -> Bool {

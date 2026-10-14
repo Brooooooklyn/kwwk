@@ -190,4 +190,25 @@ struct ProviderFailureParityTests {
         } catch { #expect(error is CancellationError) }
         #expect(attempts == 1)
     }
+
+    // Kimi Code error reference: a spent plan window is 403, not a dead login.
+    // https://www.kimi.com/code/docs/en/kimi-code/error-reference.html
+    @Test(arguments: [
+        "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+        "You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+        "You've reached your monthly usage limit for this billing cycle. Your quota will be refreshed in the next cycle. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+    ])
+    func kimiPlanWindowOn403IsQuota(text: String) {
+        let failure = ProviderFailure(message: text, httpStatus: 403)
+        #expect(failure.category == .quota)
+        #expect(!failure.isRetryable)
+    }
+
+    @Test(arguments: [
+        (401, "The API Key appears to be invalid or may have expired. Please verify your credentials and try again."),
+        (401, "Invalid Authentication"),
+    ])
+    func kimiNonQuotaRefusalsStayAuthentication(status: Int, text: String) {
+        #expect(ProviderFailure(message: text, httpStatus: status).category == .authentication)
+    }
 }

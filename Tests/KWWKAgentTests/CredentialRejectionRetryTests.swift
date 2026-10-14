@@ -179,12 +179,16 @@ struct CredentialRejectionRetryTests {
         #expect(lastAssistant(agent)?.failure?.httpStatus == 403)
     }
 
-    @Test("Kimi's over-plan 401 and Cursor's region refusal are not reported")
+    @Test("Kimi's over-plan 401, Kimi's spent plan window and Cursor's region refusal are not reported")
     func nonLoginRefusalsAreNotReported() async throws {
         let refusals = [
             Self.failure(
                 #"{"error":{"type":"authentication_error","message":"Your current plan supports only k3 up to 256K context. 1M context is available on higher-tier Kimi Code plans."},"type":"error"}"#,
                 status: 401
+            ),
+            Self.failure(
+                "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+                status: 403
             ),
             Self.failure("This region is not yet available for your team", status: nil, code: "permission_denied"),
             Self.failure("This region is not yet available for your team", status: nil, code: "unauthenticated"),
