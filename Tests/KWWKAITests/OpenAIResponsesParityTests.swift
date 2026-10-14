@@ -106,6 +106,55 @@ struct OpenAIResponsesParityTests {
         #expect(result.usage.totalTokens == 5423)
     }
 
+    // MARK: Reasoning summary
+
+    @Test("a reasoning summary's parts are kept apart as paragraphs")
+    func reasoningSummaryParts() async throws {
+        // Each summary part opens with its own bold title, as Codex streams them.
+        let sse = """
+        data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}
+
+        data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}
+
+        data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"**Inspecting files**\\n\\nI will read X."}
+
+        data: {"type":"response.reasoning_summary_part.done","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"**Inspecting files**\\n\\nI will read X."}}
+
+        data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":""}}
+
+        data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":"**Planning edit**\\n\\nThen change Y."}
+
+        data: {"type":"response.reasoning_summary_part.done","output_index":0,"summary_index":1,"part":{"type":"summary_text","text":"**Planning edit**\\n\\nThen change Y."}}
+
+        data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}
+
+        data: {"type":"response.completed","response":{"id":"r","status":"completed"}}
+
+        """
+        let joined = "**Inspecting files**\n\nI will read X.\n\n**Planning edit**\n\nThen change Y."
+        let provider = OpenAIResponsesProvider(
+            api: Self.codex.api,
+            client: ScriptedResponsesClient([.init(body: sse)]),
+            webSocketClient: nil,
+            defaultAPIKey: "k"
+        )
+        let stream = provider.stream(model: Self.codex, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
+        var deltas = ""
+        var ended: String?
+        for await event in stream {
+            if case .thinkingDelta(_, let delta, _) = event { deltas += delta }
+            if case .thinkingEnd(_, let content, _) = event { ended = content }
+        }
+        let result = await stream.result()
+        #expect(deltas == joined)
+        #expect(ended == joined)
+        guard case .thinking(let thinking) = result.content.first else {
+            Issue.record("expected a thinking block, got \(result.content)")
+            return
+        }
+        #expect(thinking.thinking == joined)
+    }
+
     // MARK: Error text
 
     @Test("an error event's sentence is shown from either shape")

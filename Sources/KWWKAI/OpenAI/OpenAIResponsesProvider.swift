@@ -804,6 +804,18 @@ public final class OpenAIResponsesProvider:
                     }
                 }
 
+            case "response.reasoning_summary_part.added":
+                // Each summary part opens with its own bold title; set the
+                // parts apart as paragraphs rather than running them together.
+                if case .int(let outputIndex) = obj["output_index"] ?? .null,
+                   case .int(let summaryIndex) = obj["summary_index"] ?? .null,
+                   summaryIndex > 0,
+                   let index = state.reasoningIndex(for: outputIndex) {
+                    let separator = "\n\n"
+                    state.appendThinking(at: index, text: separator)
+                    out.push(.thinkingDelta(contentIndex: index, delta: separator, partial: state.snapshot()))
+                }
+
             case "response.function_call_arguments.delta":
                 if case .int(let outputIndex) = obj["output_index"] ?? .null,
                    case .string(let delta) = obj["delta"] ?? .null {
