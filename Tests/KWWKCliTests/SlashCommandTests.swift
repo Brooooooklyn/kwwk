@@ -172,6 +172,106 @@ struct SlashInputParseTests {
         // Tab completion stays advertised mid-stream.
         #expect(busy.contains("Tab complete"))
     }
+
+    private static let catalog = [
+        SlashCommandInfo(name: "compact", description: "Summarize older turns and retain recent context"),
+        SlashCommandInfo(name: "compact-model", description: "Pick the model used for context summaries"),
+        SlashCommandInfo(name: "goal", description: "Set/show/stop an autonomous goal the agent pursues across turns"),
+        SlashCommandInfo(name: "idle-compact", description: "Compact automatically while idle"),
+        SlashCommandInfo(name: "mcp", description: "Manage MCP servers"),
+        SlashCommandInfo(name: "model", description: "Pick a model for this session"),
+        SlashCommandInfo(name: "new", description: "Start a fresh session", aliases: ["clear"]),
+        SlashCommandInfo(name: "rewind", description: "Rewind the conversation to a prior message"),
+        SlashCommandInfo(name: "thinking", description: "Show / set thinking level"),
+    ]
+
+    @Test("ranking keeps prefix and word-start hits and drops loose ones")
+    func tieredRanking() {
+        // `/m`: prefix hits first, then the word-start hit; `/compact` and
+        // `/idle-compact` merely contain an `m` and stay out.
+        #expect(rankSlashCommands(query: "m", commands: Self.catalog).map(\.name)
+            == ["mcp", "model", "compact-model"])
+        // Word-start brings in `/idle-compact`, ranked after the prefix hits.
+        #expect(rankSlashCommands(query: "comp", commands: Self.catalog).map(\.name)
+            == ["compact", "compact-model", "idle-compact"])
+        // Descriptions never match: `/nope` lists nothing.
+        #expect(rankSlashCommands(query: "nope", commands: Self.catalog).isEmpty)
+        // With no prefix/word-start hit the loose tiers remain the fallback.
+        #expect(rankSlashCommands(query: "cpt", commands: Self.catalog).first?.name == "compact")
+    }
+
+    @MainActor
+    @Test("Enter runs a popup row only on a prefix match or an explicit pick")
+    func submitNeedsPrefixOrSelection() {
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.slashCommands = Self.catalog
+
+        frame.input.value = "/mod"
+        #expect(frame.slashCommandNameForSubmit() == "model")
+        frame.input.value = "/cle"
+        #expect(frame.slashCommandNameForSubmit() == "new")
+
+        // Loose subsequence hit: highlighted, but Enter must not run it…
+        frame.input.value = "/cpt"
+        #expect(frame.slashMenuActive)
+        #expect(frame.selectedSlashCommandName() == "compact")
+        #expect(frame.slashCommandNameForSubmit() == nil)
+        // …until the user picks a row with ↑/↓.
+        frame.menuMove(1)
+        frame.menuMove(-1)
+        #expect(frame.slashCommandNameForSubmit() == "compact")
+        // Editing the query drops the explicit pick again.
+        frame.input.value = "/cpc"
+        #expect(frame.slashCommandNameForSubmit() == nil)
+
+        frame.input.value = "/nope"
+        #expect(!frame.slashMenuActive)
+        #expect(frame.slashCommandNameForSubmit() == nil)
+    }
+
+    @MainActor
+    @Test("a bare unknown /name is reported; paths and args still prompt")
+    func unknownBareCommand() {
+        let registry = SlashCommandRegistry()
+        registry.register(SlashCommand(
+            name: "new",
+            description: "start a new session",
+            aliases: ["clear"],
+            handler: { _, _ in }
+        ))
+
+        #expect(unknownBareSlashCommand("/nope", registry: registry) == "nope")
+        #expect(unknownBareSlashCommand("/new", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("/clear", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("/Users/me/file", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("/notes.md", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("/unknown with args", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("/", registry: registry) == nil)
+        #expect(unknownBareSlashCommand("hello", registry: registry) == nil)
+    }
+
+    @Test("Esc clears the slash query first, then any draft, then reaches the agent")
+    func escapeLadder() {
+        #expect(escapeClearsSlashMenu("/m") == true)
+        #expect(escapeClearsSlashMenu("/nope") == true)
+        #expect(escapeClearsSlashMenu("fix the test") == false)
+        #expect(escapeClearsSlashMenu("/model gpt") == false)
+        #expect(escapeClearsSlashMenu("") == nil)
+    }
+
+    @MainActor
+    @Test("slash menu marks a cut description with an ellipsis")
+    func descriptionEllipsis() {
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.slashCommands = Self.catalog
+        frame.input.value = "/goal"
+
+        let width = 48
+        let lines = frame.render(width: width).map { ANSI.stripEscapes($0) }
+        let row = lines.first { $0.contains("/goal") && $0.contains("Set/show") }
+        #expect(row?.hasSuffix("…") == true)
+        #expect(lines.allSatisfy { ANSI.visibleWidth($0) <= width })
+    }
 }
 
 @Suite("/verbose command")

@@ -1004,11 +1004,25 @@ func runCodingTUIInternal(
             }
             // Slash popup open → resolve the highlighted command, so Enter on
             // `/comp` runs `/compact` rather than failing on the partial name.
+            // A loose (non-prefix) match runs only once the user picked it
+            // with ↑/↓; otherwise a bare unknown `/name` is reported below.
             var text = frame.input.value
-            if frame.slashMenuActive, let name = frame.selectedSlashCommandName() {
+            if frame.slashMenuActive, let name = frame.slashCommandNameForSubmit() {
                 text = "/\(name)"
             }
             guard !text.isEmpty else { return }
+
+            if let unknown = unknownBareSlashCommand(text, registry: slashRegistry) {
+                frame.input.value = ""
+                runner.tui.commit([
+                    "",
+                    Style.error("  unknown command: /\(unknown)"),
+                    "",
+                ])
+                updateFrameStatus()
+                runner.tui.requestRender()
+                return
+            }
 
             // Submission only dispatches exact registered names/aliases.
             // Fuzzy matching is an explicit popup/completion affordance; if
@@ -1316,6 +1330,20 @@ func runCodingTUIInternal(
                 modal.routeCancel()
                 return
             }
+            // Draft text comes before the agent: the first Esc closes an open
+            // slash popup (dropping its `/query`), the next clears any other
+            // draft (kept in ↑ history so it isn't lost), and only an empty
+            // editor lets Esc interrupt the agent.
+            if let dismissesSlashMenu = escapeClearsSlashMenu(frame.input.value) {
+                doubleEsc.lastPress = nil
+                if !dismissesSlashMenu {
+                    frame.input.addToHistory(frame.input.value)
+                }
+                frame.input.value = ""
+                updateFrameStatus()
+                runner.tui.requestRender()
+                return
+            }
             let wasStreaming = agent.state.isStreaming
             if abortInteractiveAgentWork(
                 agent: agent,
@@ -1567,6 +1595,26 @@ func abortInteractiveAgentWork(
     guard agent.state.isStreaming || isManualCompacting else { return false }
     agent.abort()
     return true
+}
+
+/// What an Esc press clears before it may touch the agent: nil for an empty
+/// editor (Esc falls through to abort / double-Esc); otherwise whether the
+/// clear dismisses the slash popup (the draft is a bare `/query`) rather
+/// than dropping an ordinary draft.
+func escapeClearsSlashMenu(_ input: String) -> Bool? {
+    guard !input.isEmpty else { return nil }
+    return bareSlashQuery(input) != nil
+}
+
+/// The command name when Enter on `text` should report an unknown command
+/// instead of running or sending anything: a bare `/name` (no arguments)
+/// that no command or alias answers to. Path-like text (`/Users/me/file`,
+/// `/notes.md`) is left alone so it is still sent as a prompt.
+@MainActor
+func unknownBareSlashCommand(_ text: String, registry: SlashCommandRegistry) -> String? {
+    guard let name = bareSlashQuery(text), !name.isEmpty else { return nil }
+    guard !name.contains(where: { $0 == "/" || $0 == "." || $0 == "\\" }) else { return nil }
+    return registry.find(name) == nil ? name : nil
 }
 
 /// Submit a direct prompt without losing it if another run acquires ownership

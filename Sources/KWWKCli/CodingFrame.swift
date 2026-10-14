@@ -47,6 +47,9 @@ final class CodingFrame: Component, @unchecked Sendable {
     /// pinning the selection to the bottom row and scrolling on every step).
     private var menuScroll = 0
     private var menuFilter: String?
+    /// Whether the user moved the highlight with ↑/↓ since the query last
+    /// changed. Only then may Enter run a row the query doesn't prefix-match.
+    private var menuNavigated = false
     private static let menuMaxRows = 8
 
     private var liveLines: [String] = []
@@ -121,6 +124,7 @@ final class CodingFrame: Component, @unchecked Sendable {
         guard !matches.isEmpty else { return }
         syncSelection(matches)
         menuSelection = (menuSelection + delta + matches.count) % matches.count
+        menuNavigated = true
     }
 
     func selectedSlashCommandName() -> String? {
@@ -130,12 +134,27 @@ final class CodingFrame: Component, @unchecked Sendable {
         return matches[min(menuSelection, matches.count - 1)].name
     }
 
+    /// The command Enter should run for the open popup, or nil when it must
+    /// not run anything. A row runs only when the typed query is a prefix of
+    /// its name/alias, or the user picked it with ↑/↓ — so a stray `/nope`
+    /// never executes whatever loose match happens to be highlighted.
+    func slashCommandNameForSubmit() -> String? {
+        guard let query = slashQuery() else { return nil }
+        let matches = filteredCommands()
+        guard !matches.isEmpty else { return nil }
+        syncSelection(matches)
+        let selected = matches[min(menuSelection, matches.count - 1)]
+        guard menuNavigated || slashQueryIsPrefix(query, of: selected) else { return nil }
+        return selected.name
+    }
+
     private func syncSelection(_ matches: [SlashCommandInfo]) {
         let q = slashQuery()
         if q != menuFilter {
             menuFilter = q
             menuSelection = 0
             menuScroll = 0
+            menuNavigated = false
         }
         if menuSelection >= matches.count { menuSelection = max(0, matches.count - 1) }
     }
@@ -270,7 +289,7 @@ final class CodingFrame: Component, @unchecked Sendable {
             // 2-space gutter + 2-wide marker so the selected '❯' aligns under
             // the queue list's "↓/↳" and unselected names align with bodies.
             let descAvail = max(0, width - 2 - 2 - nameW - 2)
-            let desc = ANSI.truncate(Theme.faintText(m.description), to: descAvail)
+            let desc = Theme.faintText(ANSI.fit(m.description, to: descAvail))
             out.append("  " + marker + Box.pad(name, to: nameW) + "  " + desc)
         }
         // Enter is rejected while the agent is busy (slash commands are

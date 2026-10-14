@@ -925,7 +925,7 @@ private func handleHotkeysCommand(_ ctx: SlashContext, _ args: String) async {
         ("Tab / ← / →", "switch the provider tab in /model"),
         ("↑ / ↓", "move by line · recall history when empty · move in popups"),
         ("Alt/Option+↑", "pop a queued prompt back into the input to edit"),
-        ("Esc", "stop the agent (and close an open popup/modal)"),
+        ("Esc", "close a popup/modal · clear the input · then stop the agent"),
         ("Ctrl+L", "repaint the screen"),
         ("Ctrl+C", "exit"),
         ("Ctrl+D", "exit when the input is empty"),

@@ -270,13 +270,15 @@ func slashFuzzyMatch(_ query: String, _ target: String) -> Bool {
     return qi == query.endIndex
 }
 
-/// Score a fuzzy match, higher = tighter. Mirrors omp: exact (100) >
-/// starts-with (80) > contains (60) > subsequence (40 minus a per-gap
+/// Score a fuzzy match, higher = tighter: exact (100) > starts-with (80) >
+/// word-start (70, the query begins a `-`/`_`/`:`-separated word, so `comp`
+/// finds `idle-compact`) > contains (60) > subsequence (40 minus a per-gap
 /// penalty). Returns 0 for a non-match. Both args must be lowercased.
 func slashFuzzyScore(_ query: String, _ target: String) -> Int {
     if query.isEmpty { return 1 }
     if target == query { return 100 }
     if target.hasPrefix(query) { return 80 }
+    if slashWordStartMatch(query, target) { return slashWordStartScore }
     if target.contains(query) { return 60 }
 
     var qi = query.startIndex
@@ -295,12 +297,36 @@ func slashFuzzyScore(_ query: String, _ target: String) -> Int {
     return max(1, 40 - gaps * 5)
 }
 
+/// Lowest score that counts as a deliberate name hit (prefix or word-start).
+/// When any command reaches it, looser contains/subsequence hits are dropped
+/// so `/m` lists `/model`, not every command that merely contains an `m`.
+private let slashWordStartScore = 70
+
+/// True when `query` is a prefix of a word inside `target` that follows a
+/// `-`, `_`, or `:` separator. Both args must be lowercased.
+private func slashWordStartMatch(_ query: String, _ target: String) -> Bool {
+    var previous: Character?
+    var index = target.startIndex
+    while index != target.endIndex {
+        if let previous, previous == "-" || previous == "_" || previous == ":",
+           target[index...].hasPrefix(query) {
+            return true
+        }
+        previous = target[index]
+        index = target.index(after: index)
+    }
+    return false
+}
+
 /// The single shared ranker. `query` is the text after the leading `/` (no
-/// slash). Scores each command's name, aliases, and (at half weight) its
-/// description, keeping any candidate that scores > 0; ties preserve the
-/// input order so callers that pass commands pre-sorted by name get a stable,
-/// predictable top match. An empty query returns every command unchanged so
-/// the bare-`/` popup lists the full catalog in registry order.
+/// slash). Scores each command's name and aliases, tiered prefix >
+/// word-start > contains > subsequence. Descriptions are not matched: a
+/// subsequence hit on prose drags unrelated commands into the popup. When
+/// any candidate is a prefix or word-start hit only those tiers are kept;
+/// otherwise the looser tiers are the fallback (`/cpt` → `/compact`). Ties
+/// preserve the input order so callers that pass commands pre-sorted by name
+/// get a stable, predictable top match. An empty query returns every command
+/// unchanged so the bare-`/` popup lists the full catalog in registry order.
 ///
 /// Both `CodingFrame`'s popup and `slashCompletion` funnel through this so the
 /// highlighted row, the Tab completion, and the inline ghost suffix can never
@@ -311,24 +337,31 @@ func rankSlashCommands(query: String, commands: [SlashCommandInfo]) -> [SlashCom
 
     var scored: [(cmd: SlashCommandInfo, score: Int, index: Int)] = []
     for (index, cmd) in commands.enumerated() {
-        let lowerName = cmd.name.lowercased()
-        var best = slashFuzzyMatch(lower, lowerName) ? slashFuzzyScore(lower, lowerName) : 0
-        for alias in cmd.aliases {
-            let lowerAlias = alias.lowercased()
-            if slashFuzzyMatch(lower, lowerAlias) {
-                best = max(best, slashFuzzyScore(lower, lowerAlias))
+        var best = 0
+        for target in [cmd.name] + cmd.aliases {
+            let lowerTarget = target.lowercased()
+            if slashFuzzyMatch(lower, lowerTarget) {
+                best = max(best, slashFuzzyScore(lower, lowerTarget))
             }
         }
-        let lowerDesc = cmd.description.lowercased()
-        if !lowerDesc.isEmpty && slashFuzzyMatch(lower, lowerDesc) {
-            best = max(best, slashFuzzyScore(lower, lowerDesc) / 2)
-        }
         if best > 0 { scored.append((cmd, best, index)) }
+    }
+    if scored.contains(where: { $0.score >= slashWordStartScore }) {
+        scored.removeAll { $0.score < slashWordStartScore }
     }
     scored.sort { a, b in
         a.score != b.score ? a.score > b.score : a.index < b.index
     }
     return scored.map(\.cmd)
+}
+
+/// True when `query` (no leading slash) is a case-insensitive prefix of the
+/// command's name or one of its aliases — the match strength at which Enter
+/// may run a popup row the user never explicitly selected.
+func slashQueryIsPrefix(_ query: String, of command: SlashCommandInfo) -> Bool {
+    let lower = query.lowercased()
+    guard !lower.isEmpty else { return false }
+    return ([command.name] + command.aliases).contains { $0.lowercased().hasPrefix(lower) }
 }
 
 /// Lookup table for slash commands. Single-threaded: all registration and
