@@ -885,6 +885,7 @@ func runCodingTUIInternal(
         SlashCommandInfo(name: $0.name, description: $0.description, aliases: $0.aliases)
     }
     frame.slashCommands = slashCommandInfos
+    frame.atPathCwd = cwd
     frame.promptRow.ghostHintProvider = { input in
         // Suppress the inline ghost suffix while the slash popup is open — the
         // menu already shows (and highlights) the completion target, so a
@@ -1010,6 +1011,14 @@ func runCodingTUIInternal(
             // A lone `/` with nothing picked yet keeps the popup open rather
             // than sending `/` to the model.
             if frame.slashSubmitKeepsMenuOpen() { return }
+            // `@` popup with a row picked via ↑/↓ → Enter accepts that path
+            // instead of sending the half-typed one.
+            if let completed = frame.atPathCompletionForSubmit() {
+                frame.input.value = completed
+                frame.input.moveEnd()
+                runner.tui.requestRender()
+                return
+            }
             var text = frame.input.value
             if frame.slashMenuActive, let name = frame.slashCommandNameForSubmit() {
                 text = "/\(name)"
@@ -1191,6 +1200,10 @@ func runCodingTUIInternal(
             if frame.slashMenuActive, let name = frame.selectedSlashCommandName() {
                 frame.input.value = "/\(name) "
                 frame.input.moveEnd()
+            } else if let completed = frame.atPathCompletionForTab() {
+                // `@` popup open → complete the path to the highlighted row.
+                frame.input.value = completed
+                frame.input.moveEnd()
             } else if frame.input.cursor == frame.input.value.count,
                let completion = slashCompletion(for: frame.input.value, commands: slashCommandInfos) {
                 frame.input.value = completion.completedInput
@@ -1211,6 +1224,7 @@ func runCodingTUIInternal(
         Task { @MainActor in
             if modal.isOpen { modal.routeUp() }
             else if frame.slashMenuActive { frame.menuMove(-1); runner.tui.requestRender() }
+            else if frame.atMenuActive { frame.atMenuMove(-1); runner.tui.requestRender() }
             else { frame.input.cursorUp(); updateFrameStatus(); runner.tui.requestRender() }
         }
     }
@@ -1218,6 +1232,7 @@ func runCodingTUIInternal(
         Task { @MainActor in
             if modal.isOpen { modal.routeDown() }
             else if frame.slashMenuActive { frame.menuMove(1); runner.tui.requestRender() }
+            else if frame.atMenuActive { frame.atMenuMove(1); runner.tui.requestRender() }
             else { frame.input.cursorDown(); updateFrameStatus(); runner.tui.requestRender() }
         }
     }
@@ -1319,11 +1334,12 @@ func runCodingTUIInternal(
 
     // Esc. Each press does the first of these that applies:
     //   1. modal open → cancel the modal (no agent state touched).
-    //   2. a bare `/query` in the editor → close the slash popup and drop
+    //   2. the `@` file popup open → close it, keeping the draft.
+    //   3. a bare `/query` in the editor → close the slash popup and drop
     //      the query.
-    //   3. any other draft in the editor → clear it (kept in ↑ history).
-    //   4. agent streaming or manual compacting → abort the active owner.
-    //   5. idle with an empty editor → arm double-Esc; a second press
+    //   4. any other draft in the editor → clear it (kept in ↑ history).
+    //   5. agent streaming or manual compacting → abort the active owner.
+    //   6. idle with an empty editor → arm double-Esc; a second press
     //      within the window opens the rewind-to-message selector.
     //
     // So with a draft in the editor it takes two presses to stop the agent;
@@ -1347,6 +1363,12 @@ func runCodingTUIInternal(
             // slash popup (dropping its `/query`), the next clears any other
             // draft (kept in ↑ history so it isn't lost), and only an empty
             // editor lets Esc interrupt the agent.
+            // An open `@` popup closes first, keeping the draft as typed.
+            if frame.dismissAtMenu() {
+                doubleEsc.lastPress = nil
+                runner.tui.requestRender()
+                return
+            }
             if let dismissesSlashMenu = escapeClearsSlashMenu(frame.input.value) {
                 doubleEsc.lastPress = nil
                 if !dismissesSlashMenu {

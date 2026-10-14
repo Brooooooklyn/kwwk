@@ -52,6 +52,22 @@ final class CodingFrame: Component, @unchecked Sendable {
     private var menuNavigated = false
     private static let menuMaxRows = 8
 
+    /// Directory `@path` completions resolve against. Nil (the default)
+    /// disables the `@` popup; the TUI sets it to the session's cwd.
+    var atPathCwd: String?
+    private var atSelection = 0
+    private var atScroll = 0
+    /// Whether the user moved the `@` highlight with ↑/↓ since the query
+    /// last changed. Only then does Enter accept the highlighted path
+    /// instead of submitting the prompt.
+    private var atNavigated = false
+    /// Candidates for the last query, so a render or key press doesn't
+    /// re-list the directory unless the typed path changed.
+    private var atCache: (key: String, candidates: [String])?
+    /// The query whose popup Esc closed. The popup stays shut until the
+    /// typed path changes.
+    private var atDismissedKey: String?
+
     private var liveLines: [String] = []
     private var modalLines: [String]?
     private var viewportHeight: Int
@@ -172,6 +188,78 @@ final class CodingFrame: Component, @unchecked Sendable {
         if menuSelection >= matches.count { menuSelection = max(0, matches.count - 1) }
     }
 
+    // MARK: - @path popup
+
+    private func atQuery() -> AtPathQuery? {
+        guard atPathCwd != nil else { return nil }
+        return atPathQuery(in: input.value, cursor: input.cursor)
+    }
+
+    /// Candidates for the `@path` being typed, empty when the popup would
+    /// have nothing useful to offer (no match, or the only match is exactly
+    /// what's typed already).
+    private func atCandidates() -> [String] {
+        guard let cwd = atPathCwd, let query = atQuery() else {
+            // No `@` token any more: forget the listing and the dismissal so
+            // the next `@` lists the directory afresh.
+            atCache = nil
+            atDismissedKey = nil
+            return []
+        }
+        let key = cwd + "\u{0}" + query.path
+        if key == atDismissedKey { return [] }
+        if atDismissedKey != nil { atDismissedKey = nil }
+        let candidates: [String]
+        if let atCache, atCache.key == key {
+            candidates = atCache.candidates
+        } else {
+            candidates = atPathCandidates(for: query.path, cwd: cwd)
+            atCache = (key, candidates)
+            atSelection = 0
+            atScroll = 0
+            atNavigated = false
+        }
+        if candidates == [query.path] { return [] }
+        if atSelection >= candidates.count { atSelection = max(0, candidates.count - 1) }
+        return candidates
+    }
+
+    /// Whether the `@` file popup is showing. The slash popup and modals
+    /// take precedence.
+    var atMenuActive: Bool {
+        modalLines == nil && slashQuery() == nil && !atCandidates().isEmpty
+    }
+
+    func atMenuMove(_ delta: Int) {
+        let candidates = atCandidates()
+        guard !candidates.isEmpty else { return }
+        atSelection = (atSelection + delta + candidates.count) % candidates.count
+        atNavigated = true
+    }
+
+    /// The editor value Tab produces: the `@path` token replaced by the
+    /// highlighted candidate. Nil when the popup is closed.
+    func atPathCompletionForTab() -> String? {
+        guard atMenuActive, let query = atQuery() else { return nil }
+        let candidates = atCandidates()
+        return atPathCompletedInput(query, candidate: candidates[atSelection])
+    }
+
+    /// The editor value Enter produces, only once the user picked a row
+    /// with ↑/↓; otherwise nil and Enter submits the prompt as typed.
+    func atPathCompletionForSubmit() -> String? {
+        guard atNavigated else { return nil }
+        return atPathCompletionForTab()
+    }
+
+    /// Close the `@` popup without touching the draft (first Esc). Returns
+    /// false when it wasn't open.
+    func dismissAtMenu() -> Bool {
+        guard atMenuActive, let cwd = atPathCwd, let query = atQuery() else { return false }
+        atDismissedKey = cwd + "\u{0}" + query.path
+        return true
+    }
+
     // MARK: - Render
 
     func render(width: Int) -> [String] {
@@ -198,8 +286,11 @@ final class CodingFrame: Component, @unchecked Sendable {
             // pending queue list takes the same slot. (A modal replaces this
             // whole branch.)
             let menu = renderSlashMenu(width: safeWidth)
+            let atMenu = menu.isEmpty ? renderAtMenu(width: safeWidth) : []
             if !menu.isEmpty {
                 rows.append(contentsOf: menu)
+            } else if !atMenu.isEmpty {
+                rows.append(contentsOf: atMenu)
             } else {
                 rows.append(contentsOf: renderQueuedPrompts(width: safeWidth))
             }
@@ -265,6 +356,35 @@ final class CodingFrame: Component, @unchecked Sendable {
                 + ANSI.truncate(Theme.faintText(body), to: avail))
         }
         out.append("  " + Theme.faintText("⌥↑ edit · /queue clear to drop"))
+        return out
+    }
+
+    /// The `@path` completion list that floats above the prompt box, in the
+    /// same slot and style as the slash popup.
+    private func renderAtMenu(width: Int) -> [String] {
+        guard atMenuActive else { return [] }
+        let candidates = atCandidates()
+        let maxRows = min(Self.menuMaxRows, candidates.count)
+        atScroll = edgeScrollOffset(
+            selection: atSelection,
+            count: candidates.count,
+            windowSize: maxRows,
+            previous: atScroll
+        )
+        let start = atScroll
+        let visible = candidates[start..<min(candidates.count, start + maxRows)]
+        let avail = max(0, width - 4)
+        var out: [String] = []
+        for (offset, candidate) in visible.enumerated() {
+            let selected = start + offset == atSelection
+            let marker = selected ? Theme.accentText("❯ ", bold: false) : "  "
+            let raw = ANSI.fitTail("@" + candidate, to: avail)
+            let label = selected ? Theme.accentText(raw, bold: true) : Theme.mutedText(raw)
+            out.append("  " + marker + label)
+        }
+        let enterHint = atNavigated ? " · ↵ select" : ""
+        let position = candidates.count > maxRows ? "\(atSelection + 1)/\(candidates.count) · " : ""
+        out.append("  " + Theme.faintText("\(position)↑↓ move · Tab complete\(enterHint) · Esc close"))
         return out
     }
 
