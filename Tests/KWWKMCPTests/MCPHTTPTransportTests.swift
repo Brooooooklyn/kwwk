@@ -206,4 +206,26 @@ struct MCPHTTPTransportTests {
         #expect(await waitUntil { closed.values.count == 1 })
         #expect(await !client.isConnected)
     }
+
+    @Test("a huge timeout means no timeout instead of trapping")
+    func hugeTimeouts() async throws {
+        let server = FakeHTTPMCPServer()
+        let transport = MCPStreamableHTTPTransport(url: URL(string: "https://x.example/mcp")!, httpClient: server)
+        let client = MCPClient(transport: transport, requestTimeoutSeconds: 1e11)
+        try await client.connect(timeoutSeconds: 1e11)
+        let tools = try await client.request(method: "tools/list", params: nil, maxTotalTimeoutSeconds: 1e20)
+        #expect(tools["tools"] != nil)
+        let value = try await MCPWait.value(
+            of: Task { 42 },
+            timeoutSeconds: 1e11,
+            cancellation: nil,
+            what: "startup"
+        )
+        #expect(value == 42)
+        #expect(MCPWait.nanoseconds(.infinity) == 10_000_000_000_000_000_000)
+        #expect(MCPWait.nanoseconds(-1) == 0)
+        #expect(MCPWait.nanoseconds(.nan) == 0)
+        #expect(MCPWait.nanoseconds(1.5) == 1_500_000_000)
+        await client.close()
+    }
 }

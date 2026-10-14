@@ -275,7 +275,7 @@ public actor MCPClient {
                 }
                 if let total = maxTotalTimeoutSeconds {
                     entry.deadlineTask = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: UInt64(max(0, total) * 1_000_000_000))
+                        try? await Task.sleep(nanoseconds: MCPWait.nanoseconds(total))
                         guard !Task.isCancelled else { return }
                         await self?.deadlineReached(id: id, seconds: total)
                     }
@@ -306,7 +306,7 @@ public actor MCPClient {
         entry.timeoutTask?.cancel()
         let seconds = entry.timeoutSeconds
         entry.timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: MCPWait.nanoseconds(seconds))
             guard !Task.isCancelled else { return }
             await self?.timedOut(id: id)
         }
