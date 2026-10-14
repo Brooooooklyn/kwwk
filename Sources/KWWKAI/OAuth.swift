@@ -65,21 +65,10 @@ public actor OAuthManager {
         self.client = client
     }
 
+    /// Every provider `OAuthSubscriptions` can renew, and Devin's, which
+    /// renews nothing: it is here so `apiKey(for:)` knows the id.
     public static func defaultProviders() -> [OAuthProvider] {
-        [
-            AnthropicOAuthProvider(),
-            OpenAICodexOAuthProvider(),
-            GitHubCopilotOAuthProvider(),
-            CursorOAuthProvider(),
-            DevinOAuthProvider(),
-            KiroOAuthProvider(),
-            QoderOAuthProvider(site: .global),
-            QoderOAuthProvider(site: .cn),
-            WorkBuddyOAuthProvider(site: .china),
-            WorkBuddyOAuthProvider(site: .international),
-            KimiCodingOAuthProvider(),
-            XaiOAuthProvider(),
-        ]
+        OAuthSubscriptions.refreshers() + [DevinOAuthProvider()]
     }
 
     public func register(_ provider: OAuthProvider) {

@@ -335,34 +335,9 @@ func runOAuthFlow(providerId: String) async throws {
 
     let callbacks = terminalLoginCallbacks()
     let flow = Task {
-        switch providerId {
-        case "anthropic":
-            return try await OAuthLogin.loginAnthropic(callbacks: callbacks)
-        case "openai-codex":
-            return try await OAuthLogin.loginOpenAICodex(callbacks: callbacks)
-        case "github-copilot":
-            return try await OAuthLogin.loginGitHubCopilot(callbacks: callbacks)
-        case "cursor":
-            return try await OAuthLogin.loginCursor(callbacks: callbacks)
-        case "devin":
-            return try await OAuthLogin.loginDevin(callbacks: callbacks)
-        case "kiro":
-            return try await OAuthLogin.loginKiro(callbacks: callbacks)
-        case "qoder", "qoder-cn":
-            return try await OAuthLogin.loginQoder(site: .of(providerId), callbacks: callbacks)
-        case WorkBuddySite.china.id:
-            return try await OAuthLogin.loginWorkBuddy(site: .china, callbacks: callbacks)
-        case WorkBuddySite.international.id:
-            return try await OAuthLogin.loginWorkBuddy(site: .international, callbacks: callbacks)
-        case "kimi-coding":
-            return try await OAuthLogin.loginKimiCoding(callbacks: callbacks)
-        case "xai":
-            return try await OAuthLogin.loginXai(callbacks: callbacks)
-        case "zai":
-            return try await OAuthLogin.loginZai(callbacks: callbacks)
-        case "openrouter":
-            return try await OAuthLogin.loginOpenRouter(callbacks: callbacks)
-        default:
+        do {
+            return try await OAuthSubscriptions.login(providerId: providerId, callbacks: callbacks)
+        } catch OAuthError.unknownProvider {
             throw LoginError.unknownProvider(providerId)
         }
     }
