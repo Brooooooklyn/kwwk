@@ -47,7 +47,7 @@ struct GoogleGeminiTests {
     @Test("streams text across two parts and reports usage")
     func basicText() async throws {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "test-key")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "test-key", wire: .generateContent)
         let s = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]),
@@ -67,7 +67,7 @@ struct GoogleGeminiTests {
     @Test("emits a single toolcall block with parsed args")
     func toolUse() async throws {
         let client = StubSSEClient(body: Self.toolUseSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         let s = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "calc"))]),
@@ -91,7 +91,7 @@ struct GoogleGeminiTests {
     @Test("defaults arguments to {} when the args field is missing")
     func missingArgs() async throws {
         let client = StubSSEClient(body: Self.missingArgsSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         let s = provider.stream(
             model: Self.model,
             context: Context(
@@ -113,7 +113,7 @@ struct GoogleGeminiTests {
     @Test("parts with thought=true become thinking blocks")
     func thoughtFlag() async throws {
         let client = StubSSEClient(body: Self.thoughtSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         let s = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]),
@@ -133,7 +133,7 @@ struct GoogleGeminiTests {
     @Test("puts the api key in the URL query string (not Authorization)")
     func apiKeyInURL() async throws {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key", wire: .generateContent)
         _ = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]),
@@ -147,7 +147,7 @@ struct GoogleGeminiTests {
     @Test("resolved auth query key controls URL auth")
     func resolvedAuthQueryKey() async throws {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key", wire: .generateContent)
         _ = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]),
@@ -165,7 +165,7 @@ struct GoogleGeminiTests {
     @Test("resolved auth ignores mismatched query key names")
     func resolvedAuthMismatchedQueryKeyName() async throws {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "default-key", wire: .generateContent)
         _ = provider.stream(
             model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]),
@@ -181,7 +181,7 @@ struct GoogleGeminiTests {
     @Test("encodes tools as functionDeclarations + systemInstruction")
     func bodyEncoding() async throws {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         _ = provider.stream(
             model: Self.model,
             context: Context(
@@ -240,7 +240,7 @@ struct GoogleGeminiTests {
 
     static func encodedBody(model: Model, context: Context, options: StreamOptions?) async throws -> [String: Any] {
         let client = StubSSEClient(body: Self.textSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         // Awaiting the settled result is deterministic: the stub records the
         // request before it starts streaming, so no fixed sleep is needed.
         _ = await provider.stream(model: model, context: context, options: options).result()
@@ -372,7 +372,7 @@ struct GoogleGeminiTests {
 
     // The three bodies are magpie's fixtures for #667 (gemini_empty_reply_test.go).
     static func settle(_ sse: String) async -> AssistantMessage {
-        let provider = GoogleGeminiProvider(client: StubSSEClient(body: sse), defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: StubSSEClient(body: sse), defaultAPIKey: "k", wire: .generateContent)
         return await provider.stream(
             model: model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil
         ).result()
@@ -637,7 +637,7 @@ struct GoogleGeminiTests {
     @Test("usage subtracts cache from input and folds thoughts into output")
     func usageAccounting() async throws {
         let client = StubSSEClient(body: Self.usageSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         let s = provider.stream(model: Self.model,
             context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
         for await _ in s {}

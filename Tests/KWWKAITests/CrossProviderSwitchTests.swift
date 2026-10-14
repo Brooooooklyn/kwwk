@@ -433,7 +433,7 @@ struct CrossProviderSwitchTests {
     @Test("anthropic → gemini: foreign thinking downgraded to plain text, no thought part")
     func anthropicToGemini() async throws {
         let client = StubSSEClient(body: Self.geminiDone)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k-test")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k-test", wire: .generateContent)
         let body = try await Self.capture(
             provider, client, model: Self.gemini(),
             messages: Self.foreignTurn(provider: "anthropic", api: "anthropic-messages", model: "claude-src",

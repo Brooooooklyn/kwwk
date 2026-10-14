@@ -128,7 +128,7 @@ struct ReasoningEncoderTests {
     @Test("gemini 3 pro emits string thinkingLevel, not integer budget")
     func gemini3Level() async throws {
         let client = StubSSEClient(body: Self.geminiSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "k", wire: .generateContent)
         let model = Model(id: "gemini-3-pro-preview", name: "G3", api: "google-generative-ai",
                           provider: "google", baseURL: "https://generativelanguage.googleapis.com",
                           reasoning: true, input: [.text], contextWindow: 1_000_000, maxTokens: 8192)

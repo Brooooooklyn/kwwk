@@ -133,7 +133,7 @@ struct MaxReasoningTests {
     @Test("Gemini clamps max to its highest supported thinking level")
     func gemini() async throws {
         let client = StubSSEClient(body: Self.geminiSSE)
-        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "key")
+        let provider = GoogleGeminiProvider(client: client, defaultAPIKey: "key", wire: .generateContent)
         let geminiModel = model(
             api: "google-generative-ai",
             provider: "google",

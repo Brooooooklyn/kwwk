@@ -4,7 +4,9 @@ import FoundationNetworking
 #endif
 
 /// Google Gemini (Generative AI API) streaming provider —
-/// `/v1beta/models/{model}:streamGenerateContent?alt=sse`.
+/// `/v1beta/models/{model}:streamGenerateContent?alt=sse`, or the Interactions
+/// API (`/v1beta/interactions`, GoogleGeminiInteractions.swift) on Google's
+/// own AI Studio host; see `Wire`.
 ///
 /// Notable differences:
 ///  - Messages are `contents: [{role, parts: [...]}]`. Roles are `user` /
@@ -21,6 +23,21 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
     public typealias URLBuilder = @Sendable (Model, StreamOptions?, URL, String?) -> URL
     public typealias AuthHeaderBuilder = @Sendable (String) -> [String: String]
 
+    /// Which of Google's two wires a request goes over.
+    ///
+    /// AI Studio keys created since October 2026 get 404 from
+    /// `generateContent` for every model ("no longer available to new users
+    /// … use the Interactions API"), while the same key answers on
+    /// `/v1beta/interactions`. Older keys answer on both. So `.automatic`
+    /// sends a model on Google's own host (`generativelanguage.googleapis.com`)
+    /// over Interactions, and keeps `generateContent` for Vertex, a custom
+    /// `urlBuilder`, and any relay that only mimics the Gemini API.
+    public enum Wire: Sendable, Equatable {
+        case automatic
+        case generateContent
+        case interactions
+    }
+
     public let api: String
     public let client: HTTPClient
     public let defaultBaseURL: URL
@@ -30,6 +47,9 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
     /// When non-nil, auth travels as a header instead of the `?key=` URL
     /// parameter. Used by Vertex AI (Bearer OAuth token).
     public let authHeaderBuilder: AuthHeaderBuilder?
+    public let wire: Wire
+    /// A caller-supplied `urlBuilder` names a `generateContent` endpoint.
+    private let hasCustomURLBuilder: Bool
 
     public init(
         api: String = "google-generative-ai",
@@ -38,9 +58,12 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         defaultAPIKey: String? = nil,
         extraHeaders: [String: String] = [:],
         urlBuilder: URLBuilder? = nil,
-        authHeaderBuilder: AuthHeaderBuilder? = nil
+        authHeaderBuilder: AuthHeaderBuilder? = nil,
+        wire: Wire = .automatic
     ) {
         self.api = api
+        self.wire = wire
+        self.hasCustomURLBuilder = urlBuilder != nil
         self.client = client
         self.defaultBaseURL = defaultBaseURL
         self.defaultAPIKey = defaultAPIKey
@@ -64,8 +87,33 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
     public func stream(model: Model, context: Context, options: StreamOptions?) -> AssistantMessageStream {
         let out = AssistantMessageStream()
-        Task.detached { await self.run(out: out, model: model, context: context, options: options) }
+        if usesInteractions(model) {
+            Task.detached { await self.runInteractions(out: out, model: model, context: context, options: options) }
+        } else {
+            Task.detached { await self.run(out: out, model: model, context: context, options: options) }
+        }
         return out
+    }
+
+    /// Whether `model` goes over the Interactions API (see `Wire`).
+    func usesInteractions(_ model: Model) -> Bool {
+        switch wire {
+        case .interactions: return true
+        case .generateContent: return false
+        case .automatic:
+            guard !hasCustomURLBuilder, authHeaderBuilder == nil else { return false }
+            return URL(string: interactionsBase(model))?.host?.lowercased() == Self.aiStudioHost
+        }
+    }
+
+    static let aiStudioHost = "generativelanguage.googleapis.com"
+
+    /// The host root a request goes to, without a trailing `/` or `/v1beta`.
+    func interactionsBase(_ model: Model) -> String {
+        var base = model.baseURL.isEmpty ? defaultBaseURL.absoluteString : model.baseURL
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.hasSuffix("/v1beta") { base.removeLast("/v1beta".count) }
+        return base
     }
 
     private func run(
@@ -398,23 +446,23 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
     // MARK: - Thinking-level model detection (Gemini 3.x / Gemma 4)
 
-    private static func isGemini3Pro(_ id: String) -> Bool {
+    static func isGemini3Pro(_ id: String) -> Bool {
         id.range(of: #"gemini-3(\.\d+)?-pro"#, options: .regularExpression) != nil
     }
-    private static func isGemini3Flash(_ id: String) -> Bool {
+    static func isGemini3Flash(_ id: String) -> Bool {
         id.range(of: #"gemini-3(\.\d+)?-flash"#, options: .regularExpression) != nil
             || id == "gemini-flash-latest" || id == "gemini-flash-lite-latest"
     }
-    private static func isGemma4(_ id: String) -> Bool {
+    static func isGemma4(_ id: String) -> Bool {
         id.range(of: #"gemma-?4"#, options: .regularExpression) != nil
     }
-    private static func usesThinkingLevel(_ id: String) -> Bool {
+    static func usesThinkingLevel(_ id: String) -> Bool {
         isGemini3Pro(id) || isGemini3Flash(id) || isGemma4(id)
     }
 
     /// Map a reasoning level to a Gemini `thinkingLevel` string, mirroring pi's
     /// per-family clamping (Gemini 3 Pro has no MINIMAL; Gemma 4 has no MEDIUM).
-    private static func geminiThinkingLevel(_ reasoning: ReasoningLevel, modelId id: String) -> String {
+    static func geminiThinkingLevel(_ reasoning: ReasoningLevel, modelId id: String) -> String {
         if isGemini3Pro(id) {
             switch reasoning {
             case .minimal, .low: return "LOW"
@@ -443,7 +491,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
     /// Studio; magpie #1062), which is what reasoning off and `.minimal` were
     /// both sent as. A level the catalog lists, or a model it does not
     /// describe, goes as the family table chose.
-    private static func catalogThinkingLevel(_ wire: String, model: Model) -> String {
+    static func catalogThinkingLevel(_ wire: String, model: Model) -> String {
         guard let map = model.thinkingLevelMap,
               let chosen = ModelThinkingLevel(rawValue: wire.lowercased()),
               let entry = map[chosen.rawValue], entry == nil else { return wire }
@@ -509,7 +557,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
     /// Major Gemini version from a model id (`gemini-3-pro` -> 3). Returns nil
     /// for non-gemini ids. Mirrors pi's getGeminiMajorVersion.
-    private static func geminiMajorVersion(_ id: String) -> Int? {
+    static func geminiMajorVersion(_ id: String) -> Int? {
         let lower = id.lowercased()
         guard let match = lower.range(
             of: #"^gemini(?:-live)?-(\d+)"#, options: .regularExpression
@@ -521,7 +569,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
     /// Whether the model nests images inside `functionResponse.parts` (Gemini
     /// major version >= 3; default true for non-gemini). Mirrors pi.
-    private static func supportsMultimodalFunctionResponse(_ id: String) -> Bool {
+    static func supportsMultimodalFunctionResponse(_ id: String) -> Bool {
         if let v = geminiMajorVersion(id) { return v >= 3 }
         return true
     }
@@ -717,7 +765,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         }
     }
 
-    private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
+    static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
         AssistantMessage(
             content: [],
             api: api,
@@ -731,7 +779,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         )
     }
 
-    private static func makeAborted(api: String, model: Model) -> AssistantMessage {
+    static func makeAborted(api: String, model: Model) -> AssistantMessage {
         AssistantMessage(
             content: [],
             api: api,

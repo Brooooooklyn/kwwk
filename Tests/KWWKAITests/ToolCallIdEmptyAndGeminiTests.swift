@@ -128,7 +128,7 @@ struct ToolCallIdEmptyAndGeminiTests {
 
     @Test("Gemini's functionCall.id is the call's id; a call without one gets one made up")
     func geminiReadsId() async {
-        let provider = GoogleGeminiProvider(client: StubSSEClient(body: Self.geminiIdSSE), defaultAPIKey: "k")
+        let provider = GoogleGeminiProvider(client: StubSSEClient(body: Self.geminiIdSSE), defaultAPIKey: "k", wire: .generateContent)
         let message = await provider.stream(model: GoogleGeminiTests.model,
                                             context: Context(messages: [.user(UserMessage(text: "calc"))]), options: nil).result()
         let ids = Self.calls(message).map(\.id)

@@ -15,7 +15,7 @@ struct ProviderFailureIntegrationTests {
         case "anthropic": provider = AnthropicProvider(client: client)
         case "completions": provider = OpenAICompletionsProvider(client: client)
         case "responses": provider = OpenAIResponsesProvider(client: client)
-        case "gemini": provider = GoogleGeminiProvider(client: client)
+        case "gemini": provider = GoogleGeminiProvider(client: client, wire: .generateContent)
         case "mistral": provider = MistralConversationsProvider(client: client)
         default:
             provider = BedrockProvider(client: client, region: "us-east-1", environment: [:], resolveProfileFiles: false,
@@ -36,7 +36,7 @@ struct ProviderFailureIntegrationTests {
     }
     @Test func geminiBlockedPromptIsNotAnIncompleteStream() async {
         let client = StubSSEClient(body: "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n")
-        let result = await GoogleGeminiProvider(client: client).stream(model: OpenAICompletionsTests.model, context: Context(messages: []), options: nil).result()
+        let result = await GoogleGeminiProvider(client: client, wire: .generateContent).stream(model: OpenAICompletionsTests.model, context: Context(messages: []), options: nil).result()
         #expect(result.stopReason == .error)
         #expect(result.failure?.category == .refusal)
         #expect(result.failure?.isRetryable == false)
