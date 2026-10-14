@@ -335,7 +335,7 @@ struct CrossProviderSwitchTests {
 
     // MARK: - Foreign id outside Anthropic's alphabet → Anthropic
 
-    @Test("devin id with '.' and ':' is sanitized to Anthropic's tool_use id pattern and stays linked")
+    @Test("devin id with '.' and ':' is encoded to Anthropic's tool_use id pattern and stays linked")
     func devinIdAcrossSwitchToAnthropic() async throws {
         let client = StubSSEClient(body: Self.anthropicDone)
         let provider = AnthropicProvider(client: client, defaultAPIKey: "sk-test")
@@ -345,7 +345,8 @@ struct CrossProviderSwitchTests {
                                        toolId: "functions.read:0")
         )
         let ids = Self.anthropicToolIds(body)
-        #expect(ids.calls == ["functions_read_0"])
+        // base64url of "functions.read:0", so no other id can share it
+        #expect(ids.calls == ["kw_ZnVuY3Rpb25zLnJlYWQ6MA"])
         #expect(ids.calls == ids.results)
     }
 

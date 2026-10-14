@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 
 /// Shared message-normalization pre-encode pass.
@@ -159,25 +160,57 @@ public enum TransformMessages {
 
     // MARK: - Tool-call id normalization
 
-    /// Normalize a single foreign tool-call id so any target accepts it:
+    /// Normalize a single foreign tool-call id so any target accepts it,
+    /// without ever sending two distinct ids as one:
     /// - Pipe-delimited ids (Responses-API origin) keep only the segment before
-    ///   the first `|` (pi's `normalizeToolCallId`).
-    /// - Every char outside `[a-zA-Z0-9_-]` becomes `_`. Anthropic rejects any
-    ///   other `tool_use.id` with a 400, and providers such as Devin or Kimi
-    ///   mint ids with `.` or `:`; a switch to Claude must not wedge the session.
-    /// - `openai` caps ids at 40 chars.
+    ///   the first `|` (pi's `normalizeToolCallId`); that segment is the call's
+    ///   own `call_id`.
+    /// - An id of `[a-zA-Z0-9_-]` only, within the target's length, goes as
+    ///   it is.
+    /// - Any other id (Devin's `Bash:0#…`, Kimi's `functions.read:0`, a
+    ///   relay's) is `idMark` and its unpadded base64url, which Anthropic's
+    ///   `^[a-zA-Z0-9_-]+$` takes and which maps distinct ids to distinct
+    ///   ones. Replacing each bad char with `_` sent `Bash:0#ab` and
+    ///   `Bash.0#ab` as the same id, and their results crossed (magpie
+    ///   `safeCallID`, #1304). A safe id that already begins with a mark is
+    ///   encoded too, so no id can pass for another's rewrite.
+    /// - An id still longer than the target allows (40 for `openai` and
+    ///   Responses-origin ids, else 64, Bedrock's and Codex's cap) is
+    ///   `hashMark` and its SHA-256, cut to the limit, instead of a plain
+    ///   prefix, which collapsed ids that differ only past the cut.
+    /// The mapping keeps no state, so a call and its result always agree.
     static func normalizeId(_ id: String, model: Model) -> String {
         let callId = id.firstIndex(of: "|").map { String(id[..<$0]) } ?? id
-        let sanitized = String(callId.map { c -> Character in
-            let isAllowed = (c.isASCII && c.isLetter)
-                || (c.isASCII && c.isNumber)
-                || c == "_" || c == "-"
-            return isAllowed ? c : "_"
-        })
-        if id.contains("|") || model.provider == "openai" {
-            return String(sanitized.prefix(40))
+        let limit = id.contains("|") || model.provider == "openai" ? 40 : 64
+        let marked = callId.hasPrefix(idMark) || callId.hasPrefix(hashMark)
+        if isSafeId(callId), !marked, callId.count <= limit {
+            return callId
         }
-        return sanitized
+        if !isSafeId(callId) || marked {
+            let encoded = idMark + base64URL(Data(callId.utf8))
+            if encoded.count <= limit { return encoded }
+        }
+        let digest = SHA256.hash(data: Data(callId.utf8)).map { String(format: "%02x", $0) }.joined()
+        return hashMark + String(digest.prefix(limit - hashMark.count))
+    }
+
+    /// Prefix of a tool-call id `normalizeId` base64url-encoded.
+    static let idMark = "kw_"
+    /// Prefix of a tool-call id `normalizeId` hashed to fit a length limit.
+    static let hashMark = "kwh_"
+
+    /// Whether `id` matches Anthropic's `^[a-zA-Z0-9_-]+$`.
+    static func isSafeId(_ id: String) -> Bool {
+        !id.isEmpty && id.unicodeScalars.allSatisfy { c in
+            (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "_" || c == "-"
+        }
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 
     /// Normalize tool-call ids on cross-model assistant turns and propagate the
