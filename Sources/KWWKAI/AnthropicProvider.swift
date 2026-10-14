@@ -640,6 +640,11 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                 "pause_after_compaction": true,
             ]]]
         }
+        if DeepSeekToolTurnReasoning.appliesToAnthropic(model) {
+            // DeepSeek refuses a tool turn without thinking, and Claude's
+            // redacted thinking (magpie #1611, #1822).
+            messages = DeepSeekToolTurnReasoning.anthropicMessages(messages)
+        }
         if let cc = cacheControl, !messages.isEmpty {
             applyCacheControl(cc, toLastBlockOf: &messages[messages.count - 1])
         }
