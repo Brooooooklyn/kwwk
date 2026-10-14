@@ -2,7 +2,8 @@
   "capturedAt": "2026-10-14T10:54:44.849Z",
   "expect": {
     "category": "invalidRequest",
-    "credentialRejection": false
+    "credentialRejection": false,
+    "outcome": "requestRejected"
   },
   "parser": "http",
   "provider": "github-copilot",

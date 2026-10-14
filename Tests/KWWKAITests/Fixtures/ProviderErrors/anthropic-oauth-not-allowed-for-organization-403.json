@@ -2,7 +2,8 @@
   "capturedAt": "unknown",
   "expect": {
     "category": "authentication",
-    "credentialRejection": false
+    "credentialRejection": false,
+    "outcome": "accessDenied"
   },
   "parser": "http",
   "provider": "anthropic",

@@ -2,7 +2,8 @@
   "capturedAt": "2026-10-14T09:40:00.000Z",
   "expect": {
     "category": "authentication",
-    "credentialRejection": true
+    "credentialRejection": true,
+    "outcome": "signInRequired"
   },
   "parser": "http",
   "provider": "openai-codex",

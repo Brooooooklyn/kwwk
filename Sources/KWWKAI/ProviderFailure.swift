@@ -267,6 +267,54 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             .contains(where: text.contains)
     }
 
+    /// What a failure means for the person who hit it, in terms a host can
+    /// show and act on without knowing any provider's wire. kwwk owns every
+    /// provider quirk that decides this (Kimi's over-plan 401 is a context
+    /// limit, its spent plan window a quota, xAI's and Kiro's 403 a refused
+    /// login, Anthropic's organization 403 an account limit, Cursor's region
+    /// refusal a rejected request); a host maps these cases to its own copy
+    /// and never reads statuses or provider codes itself.
+    public enum Outcome: String, Codable, Sendable, CaseIterable {
+        /// The provider refused the login itself: sign in again.
+        case signInRequired
+        /// Signed in, but this account may not do this (plan, organization
+        /// policy, model entitlement). Signing in again does not help.
+        case accessDenied
+        /// The account's allowance or credit is spent.
+        case quotaExhausted
+        /// A short-window limit; asking again later works.
+        case rateLimited
+        /// The conversation is too long for the model or the plan.
+        case contextTooLong
+        /// The provider refused this request as made.
+        case requestRejected
+        /// The provider is down or overloaded.
+        case serviceUnavailable
+        case timeout
+        /// The connection to the provider failed.
+        case network
+        /// The provider declined the content.
+        case contentRefused
+        case cancelled
+        case unknown
+    }
+
+    public var outcome: Outcome {
+        switch category {
+        case .authentication: isCredentialRejection ? .signInRequired : .accessDenied
+        case .contextOverflow: .contextTooLong
+        case .quota: .quotaExhausted
+        case .rateLimit: .rateLimited
+        case .invalidRequest: .requestRejected
+        case .server: .serviceUnavailable
+        case .timeout: .timeout
+        case .transport: .network
+        case .refusal: .contentRefused
+        case .cancelled: .cancelled
+        case .unknown: .unknown
+        }
+    }
+
     /// Whether this failure says the credential itself was refused, so that
     /// renewing the login could help. Narrower than `.authentication`: a 401
     /// or a gRPC `unauthenticated` is a refused credential, but a 403 (or

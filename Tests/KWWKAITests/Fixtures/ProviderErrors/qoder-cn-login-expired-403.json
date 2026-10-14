@@ -2,7 +2,8 @@
   "capturedAt": "2026-10-14T10:55:15.431Z",
   "expect": {
     "category": "authentication",
-    "credentialRejection": true
+    "credentialRejection": true,
+    "outcome": "signInRequired"
   },
   "parser": "qoder",
   "provider": "qoder-cn",

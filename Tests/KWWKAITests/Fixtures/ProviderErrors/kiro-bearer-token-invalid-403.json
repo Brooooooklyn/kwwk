@@ -2,7 +2,8 @@
   "capturedAt": "2026-10-14T10:55:11.901Z",
   "expect": {
     "category": "authentication",
-    "credentialRejection": true
+    "credentialRejection": true,
+    "outcome": "signInRequired"
   },
   "parser": "kiro",
   "provider": "kiro",

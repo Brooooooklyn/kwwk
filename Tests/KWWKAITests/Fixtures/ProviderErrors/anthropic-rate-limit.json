@@ -2,7 +2,8 @@
   "capturedAt": "2026-10-14T10:54:42.848Z",
   "expect": {
     "category": "rateLimit",
-    "credentialRejection": false
+    "credentialRejection": false,
+    "outcome": "rateLimited"
   },
   "parser": "http",
   "provider": "anthropic",

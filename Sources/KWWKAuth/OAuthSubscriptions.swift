@@ -22,25 +22,36 @@ public enum OAuthSubscriptions {
 
     public struct Provider: Sendable, Equatable {
         public let id: String
+        /// The subscription as a list of logins names it ("ChatGPT Codex").
         public let name: String
         public let upkeep: Upkeep
+        /// The provider's own brand as a sentence names it ("Your Codex
+        /// sign-in has expired"). Brands read the same in every language.
+        public let brand: String
+
+        public init(id: String, name: String, upkeep: Upkeep, brand: String? = nil) {
+            self.id = id
+            self.name = name
+            self.upkeep = upkeep
+            self.brand = brand ?? name
+        }
     }
 
     /// Every sign-in `login(providerId:)` runs, in the order kwwk lists them.
     public static let providers: [Provider] = [
-        Provider(id: "openai-codex", name: "ChatGPT Codex", upkeep: .refreshed),
-        Provider(id: "anthropic", name: "Claude Pro or Max", upkeep: .refreshed),
-        Provider(id: "github-copilot", name: "GitHub Copilot", upkeep: .refreshed),
+        Provider(id: "openai-codex", name: "ChatGPT Codex", upkeep: .refreshed, brand: "Codex"),
+        Provider(id: "anthropic", name: "Claude Pro or Max", upkeep: .refreshed, brand: "Claude"),
+        Provider(id: "github-copilot", name: "GitHub Copilot", upkeep: .refreshed, brand: "Copilot"),
         Provider(id: "cursor", name: "Cursor", upkeep: .refreshed),
         Provider(id: "devin", name: "Devin", upkeep: .session),
         Provider(id: "kiro", name: "Kiro", upkeep: .refreshed),
-        Provider(id: QoderSite.global.id, name: QoderSite.global.name, upkeep: .refreshed),
-        Provider(id: QoderSite.cn.id, name: QoderSite.cn.name, upkeep: .refreshed),
-        Provider(id: WorkBuddySite.china.id, name: WorkBuddySite.china.name, upkeep: .refreshed),
-        Provider(id: WorkBuddySite.international.id, name: WorkBuddySite.international.name, upkeep: .refreshed),
-        Provider(id: "kimi-coding", name: "Kimi For Coding", upkeep: .refreshed),
+        Provider(id: QoderSite.global.id, name: QoderSite.global.name, upkeep: .refreshed, brand: "Qoder"),
+        Provider(id: QoderSite.cn.id, name: QoderSite.cn.name, upkeep: .refreshed, brand: "Qoder"),
+        Provider(id: WorkBuddySite.china.id, name: WorkBuddySite.china.name, upkeep: .refreshed, brand: "WorkBuddy"),
+        Provider(id: WorkBuddySite.international.id, name: WorkBuddySite.international.name, upkeep: .refreshed, brand: "WorkBuddy"),
+        Provider(id: "kimi-coding", name: "Kimi For Coding", upkeep: .refreshed, brand: "Kimi"),
         Provider(id: "xai", name: "Grok", upkeep: .refreshed),
-        Provider(id: "zai", name: "Z.ai Coding Plan", upkeep: .permanent),
+        Provider(id: "zai", name: "Z.ai Coding Plan", upkeep: .permanent, brand: "Z.ai"),
         Provider(id: "openrouter", name: "OpenRouter", upkeep: .permanent),
     ]
 

@@ -27,3 +27,6 @@ input).
    - `expect.category`: the `ProviderFailure.Category` it must classify as.
    - `expect.credentialRejection`: whether renewing the login could help,
      i.e. whether the agent loop reports the token to its source.
+   - `expect.outcome`: the `ProviderFailure.Outcome` a host shows, e.g.
+     `signInRequired` or `accessDenied`. Hosts map this case and nothing
+     else, so it is the contract the fixture pins.

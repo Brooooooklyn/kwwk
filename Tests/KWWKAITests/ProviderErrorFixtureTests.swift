@@ -15,6 +15,7 @@ struct ProviderErrorFixtureTests {
         struct Expect: Decodable, Sendable {
             var category: String
             var credentialRejection: Bool
+            var outcome: String
         }
         var name = ""
         var provider: String
@@ -86,5 +87,6 @@ struct ProviderErrorFixtureTests {
         let failure = try await Self.parse(fixture)
         #expect(failure.category.rawValue == fixture.expect.category, "\(failure)")
         #expect(failure.isCredentialRejection == fixture.expect.credentialRejection, "\(failure)")
+        #expect(failure.outcome.rawValue == fixture.expect.outcome, "\(failure)")
     }
 }
