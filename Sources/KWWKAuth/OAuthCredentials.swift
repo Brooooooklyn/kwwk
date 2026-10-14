@@ -201,13 +201,26 @@ public actor OAuthStore {
     public func get(_ providerId: String) -> OAuthCredentials? { credentials[providerId] }
 
     public func set(_ credentials: OAuthCredentials, for providerId: String) throws {
+        reloadFromDisk()
         self.credentials[providerId] = credentials
         try persist()
     }
 
     public func remove(_ providerId: String) throws {
+        reloadFromDisk()
         credentials.removeValue(forKey: providerId)
         try persist()
+    }
+
+    /// Another store on this file (the CLI opens one per /login, /logout and
+    /// registration) may have written since init; start from its entries so a
+    /// write here doesn't resurrect or drop them. A missing or unreadable file
+    /// keeps the in-memory snapshot.
+    private func reloadFromDisk() {
+        guard isPersistent,
+              let data = try? Data(contentsOf: url),
+              let onDisk = try? JSONDecoder().decode([String: OAuthCredentials].self, from: data) else { return }
+        credentials = onDisk
     }
 
     private func persist() throws {
