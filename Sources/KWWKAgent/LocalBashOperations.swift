@@ -61,7 +61,7 @@ public struct LocalBashOperations: BashOperations {
         try? stderrPipe.fileHandleForWriting.close()
 
         control.setPid(spawned.pid)
-        cancellation?.onCancel { _ in control.terminate() }
+        let cancelRegistration = cancellation?.onCancel { _ in control.terminate() }
 
         var timeoutTask: Task<Void, Never>?
         if let timeout, timeout > 0 {
@@ -101,6 +101,8 @@ public struct LocalBashOperations: BashOperations {
             group.notify(queue: .global()) { cont.resume() }
         }
         timeoutTask?.cancel()
+        // The child has been reaped; a later abort must not signal its stale pid.
+        cancelRegistration?.cancel()
 
         let stdout = String(decoding: outBox.data, as: UTF8.self)
         let stderr = String(decoding: errBox.data, as: UTF8.self)

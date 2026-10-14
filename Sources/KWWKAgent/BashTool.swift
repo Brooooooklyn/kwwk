@@ -585,7 +585,7 @@ private func runBashForegroundWithFlip(
         throw CodingToolError.commandFailed(stderr: "\(error)", exitCode: -1)
     }
     control.setPid(spawned.pid)
-    cancellation?.onCancel { _ in control.terminate() }
+    let cancelRegistration = cancellation?.onCancel { _ in control.terminate() }
 
     let bundle = ForegroundBashExecution(
         spawned: spawned,
@@ -595,6 +595,9 @@ private func runBashForegroundWithFlip(
     )
 
     let exit = await bundle.waitUpTo(seconds: input.timeoutSeconds)
+    // The run's handle only owns the foreground phase. Once the process has
+    // exited or been adopted, a later abort of the run must not signal it.
+    cancelRegistration?.cancel()
 
     if let status = exit {
         // Completed within soft timeout. If the inline output had to be

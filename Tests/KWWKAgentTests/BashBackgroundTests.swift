@@ -688,6 +688,54 @@ struct BashToolBackgroundTests {
         }
     }
 
+    @Test("cancelling the run after a soft-timeout flip leaves the adopted task running")
+    func autoBackgroundSurvivesLaterRunCancel() async throws {
+        let outputDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        let cwdDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: cwdDir) }
+        let manager = BackgroundTaskManager(outputDir: outputDir)
+        let releaseFile = cwdDir.appendingPathComponent("release-flip-cancel")
+        let tool = createBashTool(cwd: cwdDir.path, options: BashToolOptions(
+            environment: testBashEnvironment,
+            defaultTimeoutSeconds: 1,
+            manager: manager,
+            sessionId: "flip-cancel",
+            autoBackgroundOnTimeout: true,
+            hardTimeoutSeconds: 30
+        ))
+        let runCancellation = CancellationHandle()
+        let result = try await tool.execute(
+            "call-flip-cancel",
+            .object([
+                "command": .string("while [ ! -f \(shellQuote(releaseFile.path)) ]; do sleep 0.1; done; printf 'survived-abort\\n'"),
+                "description": .string("flip then abort"),
+            ]),
+            runCancellation,
+            nil
+        )
+        guard let taskId = taskId(from: result) else {
+            Issue.record("expected auto-backgrounded task id")
+            return
+        }
+
+        // The run is aborted after the tool already reported the flip.
+        runCancellation.cancel(reason: "user abort")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(await manager.get(taskId)?.status == .running)
+
+        FileManager.default.createFile(atPath: releaseFile.path, contents: Data())
+        #expect(await awaitUntil(8_000) {
+            await manager.get(taskId)?.status.isTerminal == true
+        })
+        let snap = await manager.get(taskId)
+        #expect(snap?.status == .completed)
+        if let file = snap?.outputFile {
+            let contents = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
+            #expect(contents.contains("survived-abort"))
+        }
+    }
+
     @Test("auto-backgrounded pipeline retains failing pipeline status")
     func autoBackgroundPipelineFailure() async throws {
         guard let shellPath = pipefailTestShellPath else {
