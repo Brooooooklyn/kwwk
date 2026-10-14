@@ -79,12 +79,12 @@ public func createReadTool(
             }
             let offset: Int? = {
                 if case .int(let v) = obj["offset"] ?? .null { return v }
-                if case .double(let v) = obj["offset"] ?? .null { return Int(v) }
+                if case .double(let v) = obj["offset"] ?? .null { return clampedToolInt(v) }
                 return nil
             }()
             let limit: Int? = {
                 if case .int(let v) = obj["limit"] ?? .null { return v }
-                if case .double(let v) = obj["limit"] ?? .null { return Int(v) }
+                if case .double(let v) = obj["limit"] ?? .null { return clampedToolInt(v) }
                 return nil
             }()
 
@@ -120,7 +120,7 @@ public func createReadTool(
             // Total line count via a single newline pass — cheap and
             // allocation-free, unlike materializing every line as a String.
             let totalLines = text.utf8.reduce(1) { $0 + ($1 == 0x0A ? 1 : 0) }
-            let startLine = (offset.map { max(0, $0 - 1) }) ?? 0
+            let startLine = (offset.map { $0 > 0 ? $0 - 1 : 0 }) ?? 0
             let startDisplay = startLine + 1
             if startLine >= totalLines {
                 throw CodingToolError.offsetOutOfRange(offset: offset ?? 0, totalLines: totalLines)
@@ -132,7 +132,11 @@ public func createReadTool(
                 // Only split up to the requested window instead of every line
                 // in the file: `maxSplits` stops scanning past the window and
                 // keeps the remainder as one unsplit chunk, which we drop.
-                let needed = startLine + limit
+                // A negative limit selects nothing; a huge one saturates
+                // (split stops at EOF anyway) instead of overflowing.
+                let limit = max(0, limit)
+                let sum = startLine.addingReportingOverflow(limit)
+                let needed = sum.overflow ? Int.max : sum.partialValue
                 let head = text.split(separator: "\n", maxSplits: needed, omittingEmptySubsequences: false)
                 let windowEnd = min(needed, head.count)
                 selectedContent = head[startLine..<windowEnd].joined(separator: "\n")

@@ -260,7 +260,7 @@ private struct BashInput {
         let timeoutSec: Int = {
             let raw: Int
             if case .int(let v) = obj["timeout"] ?? .null { raw = v }
-            else if case .double(let v) = obj["timeout"] ?? .null { raw = Int(v) }
+            else if case .double(let v) = obj["timeout"] ?? .null, let n = clampedToolInt(v) { raw = n }
             else { raw = defaultTimeoutSec }
             return min(max(raw, 1), maxTimeoutSec)
         }()

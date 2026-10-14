@@ -65,7 +65,7 @@ public func createFindTool(
             )
             let limit: Int? = {
                 if case .int(let v) = obj["limit"] ?? .null { return v }
-                if case .double(let v) = obj["limit"] ?? .null { return Int(v) }
+                if case .double(let v) = obj["limit"] ?? .null { return clampedToolInt(v) }
                 return nil
             }()
 

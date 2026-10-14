@@ -76,13 +76,13 @@ public func createLSTool(
             let limit: Int? = {
                 if case .object(let obj) = args {
                     if case .int(let v) = obj["limit"] ?? .null { return v }
-                    if case .double(let v) = obj["limit"] ?? .null { return Int(v) }
+                    if case .double(let v) = obj["limit"] ?? .null { return clampedToolInt(v) }
                 }
                 return nil
             }()
 
             var entries = try await ops.list(path: path)
-            if let limit { entries = Array(entries.prefix(limit)) }
+            if let limit { entries = Array(entries.prefix(max(0, limit))) }
             let lines = entries.map { entry -> String in
                 switch entry.kind {
                 case .directory: return "\(entry.name)/"

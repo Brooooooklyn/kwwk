@@ -246,12 +246,12 @@ public func createGrepTool(
             }()
             let context: Int = {
                 if case .int(let v) = obj["context"] ?? .null { return max(0, v) }
-                if case .double(let v) = obj["context"] ?? .null { return max(0, Int(v)) }
+                if case .double(let v) = obj["context"] ?? .null, let n = clampedToolInt(v) { return max(0, n) }
                 return 0
             }()
             let limit: Int? = {
                 if case .int(let v) = obj["limit"] ?? .null { return v }
-                if case .double(let v) = obj["limit"] ?? .null { return Int(v) }
+                if case .double(let v) = obj["limit"] ?? .null { return clampedToolInt(v) }
                 return nil
             }()
 
