@@ -174,11 +174,16 @@ enum ANSI {
         // any non-reset SGR opens the pen, a reset (`ESC[0m`/`ESC[m`) closes
         // it. We append a trailing reset iff the pen is still open at the cut.
         var styleOpen = false
+        // Same ZWJ / regional-indicator join state as `visibleWidth`, so a
+        // joined scalar adds no columns and a glyph is never cut in half.
+        var prevWasZWJ = false
+        var prevWasRI = false
         let scalars = Array(s.unicodeScalars)
         var i = 0
         while i < scalars.count {
             let v = scalars[i].value
             if v == 0x1B {
+                prevWasZWJ = false; prevWasRI = false
                 let end = skipEscape(scalars, from: i)
                 for k in i..<end { out.unicodeScalars.append(scalars[k]) }
                 if let final = scalars[safe: end - 1]?.value, final == 0x6D {
@@ -194,11 +199,19 @@ enum ANSI {
                 i = end
                 continue
             }
-            if v < 0x20 || v == 0x7F { i += 1; continue }
-            let cw = columnWidth(of: v)
+            if v < 0x20 || v == 0x7F { i += 1; prevWasZWJ = false; prevWasRI = false; continue }
+            let isRI = v >= 0x1F1E6 && v <= 0x1F1FF
+            let joined = prevWasZWJ || (isRI && prevWasRI)
+            let cw = joined ? 0 : columnWidth(of: v)
             if visible + cw > width { break }
             out.unicodeScalars.append(scalars[i])
             visible += cw
+            if v == 0x200D {
+                prevWasZWJ = true; prevWasRI = false
+            } else {
+                prevWasZWJ = false
+                prevWasRI = isRI && !prevWasRI
+            }
             i += 1
         }
         if styleOpen {
@@ -257,6 +270,13 @@ enum ANSI {
             visible = 0
         }
 
+        // Same ZWJ / regional-indicator join state as `visibleWidth`: a
+        // joined scalar adds no columns and never starts a new row, so a
+        // glyph stays whole. `droppedBase` drops the joined tail of a glyph
+        // too wide for any row instead of emitting it on its own.
+        var prevWasZWJ = false
+        var prevWasRI = false
+        var droppedBase = false
         let scalars = Array(s.unicodeScalars)
         var i = 0
         while i < scalars.count {
@@ -264,11 +284,13 @@ enum ANSI {
 
             if v == 0x0A {
                 finishRow()
+                prevWasZWJ = false; prevWasRI = false; droppedBase = false
                 i += 1
                 continue
             }
 
             if v == 0x1B {
+                prevWasZWJ = false; prevWasRI = false; droppedBase = false
                 let end = skipEscape(scalars, from: i)
                 var escape = ""
                 for k in i..<end { escape.unicodeScalars.append(scalars[k]) }
@@ -285,6 +307,21 @@ enum ANSI {
             }
 
             if v < 0x20 || v == 0x7F {
+                prevWasZWJ = false; prevWasRI = false; droppedBase = false
+                i += 1
+                continue
+            }
+
+            let isRI = v >= 0x1F1E6 && v <= 0x1F1FF
+            let joined = prevWasZWJ || (isRI && prevWasRI)
+            if v == 0x200D {
+                prevWasZWJ = true; prevWasRI = false
+            } else {
+                prevWasZWJ = false
+                prevWasRI = isRI && !prevWasRI
+            }
+            if joined {
+                if !droppedBase { current.unicodeScalars.append(scalars[i]) }
                 i += 1
                 continue
             }
@@ -297,6 +334,7 @@ enum ANSI {
                 current.unicodeScalars.append(scalars[i])
                 visible += cw
             }
+            if v != 0x200D { droppedBase = cw > width }
             i += 1
         }
 

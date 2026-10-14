@@ -48,6 +48,26 @@ struct TUIClusterFixTests {
         #expect(ANSI.graphemeWidth("中") == 2)
     }
 
+    @Test("truncate keeps a flag or ZWJ sequence whole at its 2-column width")
+    func truncateClusterAware() {
+        // Summing per-scalar widths cut the flag in half and counted the
+        // family as 6 columns, dropping text that visibleWidth says fits.
+        #expect(ANSI.truncate("🇺🇸", to: 2) == "🇺🇸")
+        #expect(ANSI.truncate("👨‍👩‍👧 abcd", to: 7) == "👨‍👩‍👧 abcd")
+        #expect(ANSI.truncate("👨‍👩‍👧 abcd", to: 5) == "👨‍👩‍👧 ab")
+        #expect(ANSI.truncate("🇺🇸🇬🇧", to: 3) == "🇺🇸")
+        #expect(ANSI.truncate("你好ab", to: 5) == "你好a")
+    }
+
+    @Test("wrap keeps a flag or ZWJ sequence whole on one row")
+    func wrapClusterAware() {
+        #expect(ANSI.wrap("👨‍👩‍👧", width: 4) == ["👨‍👩‍👧"])
+        #expect(ANSI.wrap("🇺🇸", width: 2) == ["🇺🇸"])
+        #expect(ANSI.wrap("🇺🇸🇬🇧", width: 2) == ["🇺🇸", "🇬🇧"])
+        #expect(ANSI.wrap("ab👨‍👩‍👧cd", width: 4) == ["ab👨‍👩‍👧", "cd"])
+        #expect(ANSI.wrap("你好ab", width: 3) == ["你", "好a", "b"])
+    }
+
     // MARK: - Kitty CSI-u punctuation (finding 9)
 
     @Test("Ctrl+/ decodes to name \"/\" with ctrl on kitty terminals")
