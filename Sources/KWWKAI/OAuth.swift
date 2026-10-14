@@ -207,28 +207,39 @@ public actor OAuthManager {
         if let existing = inFlightRefresh[providerId] {
             return try await existing.value
         }
-        let client = self.client
-        let task = Task<OAuthCredentials, Error> { [store] in
-            // Re-read the raw source answer: the overlay key must be what the
-            // source serves, or the next read would mistake the source's
-            // unchanged entry for a new login and drop the held rotation —
-            // then re-refresh with a consumed refresh token.
-            let served = try await self.source.credentials(for: providerId)
-            let current = await self.reconciled(served, for: providerId) ?? stale
-            if let rejected {
-                if current.access != rejected { return current }
-            } else if !current.isExpired { return current }
-            let refreshed = try await provider.refresh(current, using: client)
-            if let store {
-                try await store.set(refreshed, for: providerId)
-            } else {
-                await self.holdRotation(refreshed, from: served ?? stale, for: providerId)
-            }
-            return refreshed
+        let task = Task<OAuthCredentials, Error> {
+            try await self.performRefresh(providerId, provider: provider, stale: stale, rejected: rejected)
         }
         inFlightRefresh[providerId] = task
         defer { inFlightRefresh[providerId] = nil }
         return try await task.value
+    }
+
+    /// Body of the shared refresh task. An actor method rather than the task
+    /// closure itself, so its calls into this actor are plainly synchronous
+    /// whichever way a compiler infers the closure's isolation.
+    private func performRefresh(
+        _ providerId: String,
+        provider: OAuthProvider,
+        stale: OAuthCredentials,
+        rejected: String?
+    ) async throws -> OAuthCredentials {
+        // Re-read the raw source answer: the overlay key must be what the
+        // source serves, or the next read would mistake the source's
+        // unchanged entry for a new login and drop the held rotation —
+        // then re-refresh with a consumed refresh token.
+        let served = try await source.credentials(for: providerId)
+        let current = reconciled(served, for: providerId) ?? stale
+        if let rejected {
+            if current.access != rejected { return current }
+        } else if !current.isExpired { return current }
+        let refreshed = try await provider.refresh(current, using: client)
+        if let store {
+            try await store.set(refreshed, for: providerId)
+        } else {
+            holdRotation(refreshed, from: served ?? stale, for: providerId)
+        }
+        return refreshed
     }
 
     /// The credentials in effect for a raw source answer: the held rotation

@@ -29,7 +29,7 @@ final class MCPRuntime: Sendable {
 
     init(
         cwd: String,
-        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        homeDirectory: String = cliHomeDirectory(),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         let loaded = MCPConfigFile.load(

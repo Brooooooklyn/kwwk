@@ -5,8 +5,12 @@ let package = Package(
     name: "kwwk",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17),
-        .macCatalyst(.v17),
+        // iOS 15 is where Swift Concurrency became part of the OS; nothing in
+        // the tree needs a later iOS API. SwiftPM raises every target to this
+        // floor, so a `--triple arm64-apple-ios15.0` build only gets an iOS 15
+        // binary when it says 15 here too.
+        .iOS(.v15),
+        .macCatalyst(.v15),
     ],
     products: [
         // Provider sign-in, token refresh and subscription usage with no

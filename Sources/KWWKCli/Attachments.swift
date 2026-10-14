@@ -157,8 +157,7 @@ func normalizePastePath(_ body: String, cwd: String) -> String {
         }
     }
     if t.hasPrefix("~/") {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        t = home + String(t.dropFirst(1))
+        t = cliHomeDirectory() + String(t.dropFirst(1))
     }
     if !t.hasPrefix("/") {
         // Resolve relative to cwd without calling realpath — the user
