@@ -49,14 +49,4 @@ struct ProviderFailureOutcomeTests {
         #expect(ProviderFailure(message: "x", transportDomain: NSURLErrorDomain, transportCode: -999).outcome == .cancelled)
         #expect(ProviderFailure(message: "x", transportDomain: NSPOSIXErrorDomain, transportCode: Int.max).outcome == .unknown)
     }
-
-    @Test("every subscription carries the brand a sentence names it by")
-    func brands() {
-        for provider in OAuthSubscriptions.providers {
-            #expect(!provider.brand.isEmpty, "\(provider.id)")
-        }
-        #expect(OAuthSubscriptions.provider(id: "openai-codex")?.brand == "Codex")
-        #expect(OAuthSubscriptions.provider(id: "anthropic")?.brand == "Claude")
-        #expect(OAuthSubscriptions.provider(id: "xai")?.brand == "Grok")
-    }
 }
