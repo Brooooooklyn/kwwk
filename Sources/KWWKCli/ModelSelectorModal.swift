@@ -221,7 +221,7 @@ final class ModelSelectorModal: Modal {
         // otherwise a truncated suffix fragment would crowd out the very
         // text the user is typing. An overlong query shows its TAIL (where
         // the cursor is).
-        let suffixText = "   \(visible.count) match\(visible.count == 1 ? "" : "es")   Esc: clear"
+        let suffixText = "   \(visible.count) match\(visible.count == 1 ? "" : "es") · Esc clear"
         let labelCols = ANSI.visibleWidth("  ") + ANSI.visibleWidth(label)
         var suffix = Style.dimmed(suffixText)
         var budget = width - labelCols - ANSI.visibleWidth(suffixText)
@@ -250,7 +250,7 @@ final class ModelSelectorModal: Modal {
             i == activeTab ? Theme.chipText(tabs[i]) : Style.dimmed(tabs[i])
         }
         let fullBar = "  " + tabs.indices.map(paint).joined(separator: Style.dimmed(" · "))
-        let withHint = fullBar + "   " + Style.dimmed("tab / ←→: filter provider")
+        let withHint = fullBar + "   " + Style.dimmed("Tab/←→ filter provider")
         if ANSI.visibleWidth(withHint) <= width { return withHint }
         if ANSI.visibleWidth(fullBar) <= width { return fullBar }
 

@@ -350,8 +350,7 @@ final class CodingFrame: Component, @unchecked Sendable {
         guard modalLines == nil, !queuedPrompts.isEmpty else { return [] }
         let avail = max(0, width - 4)
         var out: [String] = []
-        let label = queuedPrompts.count == 1 ? "queued" : "queued (\(queuedPrompts.count))"
-        out.append("  " + Theme.accentText("↓ \(label)", bold: false))
+        out.append("  " + Theme.accentText("↓ queued (\(queuedPrompts.count))", bold: false))
         for prompt in queuedPrompts {
             let body = prompt.isEmpty ? "(empty)" : prompt
             out.append("  " + Theme.paint("↳ ", Theme.accentDim)
@@ -434,9 +433,9 @@ final class CodingFrame: Component, @unchecked Sendable {
         let selectedRunnable = enterRuns(matches[menuSelection], query: slashQuery() ?? "")
         let runHint = isBusy ? " · commands run when idle" : (selectedRunnable ? " · ↵ run" : "")
         if matches.count > maxRows {
-            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete\(runHint)"))
+            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete\(runHint) · Esc close"))
         } else {
-            out.append("  " + Theme.faintText("↑↓ move · Tab complete\(runHint)"))
+            out.append("  " + Theme.faintText("↑↓ move · Tab complete\(runHint) · Esc close"))
         }
         return out
     }

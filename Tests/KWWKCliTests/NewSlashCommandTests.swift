@@ -74,6 +74,30 @@ struct NewSlashCommandTests {
     }
 
     @MainActor
+    @Test("/hotkeys documents the Ctrl-C ladder and the Ctrl+J newline")
+    func hotkeysCtrlCAndNewline() async {
+        let (ctx, notifier) = await makeContext()
+        await runCommand("hotkeys", ctx: ctx)
+        #expect(notifier.joined.contains("clear the input · press again to exit"))
+        #expect(notifier.joined.contains("Ctrl+J"))
+    }
+
+    @MainActor
+    @Test("notifyTransient goes to the state line when wired, else the transcript")
+    func notifyTransientRouting() async {
+        let (ctx, notifier) = await makeContext()
+        ctx.notifyTransient("/model: cancelled")
+        #expect(notifier.joined.contains("/model: cancelled"))
+
+        let (wired, wiredNotifier) = await makeContext()
+        var flashed: [String] = []
+        wired.flashNotice = { flashed.append($0) }
+        wired.notifyTransient("/model: cancelled")
+        #expect(flashed == ["/model: cancelled"])
+        #expect(wiredNotifier.lines.isEmpty)
+    }
+
+    @MainActor
     @Test("/copy copies the LAST assistant reply's real text")
     func copyLastReply() async {
         let (ctx, notifier) = await makeContext()

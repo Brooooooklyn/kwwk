@@ -511,7 +511,7 @@ struct AskModalTests {
         #expect(lines.contains(where: { $0.contains("JWT") && $0.contains("(Recommended)") }))
         #expect(lines.contains(where: { $0.contains("↳ Bearer tokens") }))
         #expect(lines.contains(where: { $0.contains(Ask.otherOptionLabel) }))
-        #expect(lines.contains(where: { $0.contains("Esc: cancel") }))
+        #expect(lines.contains(where: { $0.contains("Esc cancel") }))
     }
 
     @Test("long lists window within maxRows, clamp to width, and follow the cursor")
@@ -620,7 +620,7 @@ struct AskModalTests {
         _ = modal.handleText("custom")
         let lines = modal.render(maxRows: 10, width: 80)
         #expect(lines.contains(where: { $0.contains("custom") }))
-        #expect(lines.contains(where: { $0.contains("Enter: submit") }))
+        #expect(lines.contains(where: { $0.contains("↵ submit") }))
     }
 }
 

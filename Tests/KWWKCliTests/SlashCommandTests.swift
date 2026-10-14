@@ -328,6 +328,39 @@ struct SlashInputParseTests {
         #expect(busySlashCommandNotice.contains("Esc twice"))
     }
 
+    @Test("idle state line names the send key; a transient notice replaces it")
+    func stateLineIdleHintAndNotice() {
+        func line(streaming: Bool, notice: String?) -> String {
+            ANSI.stripEscapes(codingFrameStateLine(
+                mode: .idle,
+                isStreaming: streaming,
+                hasDraft: false,
+                runningBackgroundTasks: 0,
+                queuedPrompts: 0,
+                spinner: "*",
+                notice: notice
+            ))
+        }
+        #expect(line(streaming: false, notice: nil) == "↵ send · / commands · @ attach · ⇧↵ newline")
+        let noticed = line(streaming: false, notice: "press Ctrl-C again to exit")
+        #expect(noticed == "press Ctrl-C again to exit")
+        let busy = line(streaming: true, notice: "/model: cancelled")
+        #expect(busy.contains("/model: cancelled"))
+        #expect(busy.contains("generating"))
+        #expect(busy.contains("Esc to cancel"))
+    }
+
+    @MainActor
+    @Test("slash menu footer offers Esc close like the @ menu")
+    func slashFooterEscClose() {
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.slashCommands = [SlashCommandInfo(name: "compact", description: "summarize")]
+        frame.input.value = "/comp"
+        let footer = frame.render(width: 80).map { ANSI.stripEscapes($0) }
+            .first { $0.contains("Tab complete") } ?? ""
+        #expect(footer.contains("↑↓ move · Tab complete · ↵ run · Esc close"))
+    }
+
     @MainActor
     @Test("slash menu marks a cut description with an ellipsis")
     func descriptionEllipsis() {

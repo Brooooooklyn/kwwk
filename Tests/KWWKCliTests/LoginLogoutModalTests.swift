@@ -56,7 +56,7 @@ struct LoginLogoutModalTests {
         #expect(ctx.modal.isOpen, "the API-key form replaces the picker in place")
         let rendered = (harness.modalLines ?? []).joined(separator: "\n")
         #expect(rendered.contains("OpenRouter API key"))
-        #expect(rendered.contains("Enter: submit"))
+        #expect(rendered.contains("↵ submit"))
 
         // Typed input is consumed by the form (never falls through to the
         // prompt box) and cancelling notifies without side effects.

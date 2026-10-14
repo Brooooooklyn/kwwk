@@ -121,6 +121,10 @@ final class SlashContext {
     /// Host veto `/idle-compact` installs into `Agent.idleCompact` (unsent
     /// draft, open modal, busy frame). Nil in headless / test contexts.
     var idleCompactVeto: (@Sendable () async -> Bool)?
+    /// Show a short-lived one-liner in the TUI state line instead of the
+    /// transcript. Nil in headless / test contexts, where
+    /// `notifyTransient` falls back to a dimmed transcript line.
+    var flashNotice: (@MainActor (String) -> Void)?
 
     convenience init(
         agent: Agent,
@@ -206,6 +210,18 @@ final class SlashContext {
     @MainActor
     func notify(_ line: String) {
         notifyBlock([line])
+    }
+
+    /// Ephemeral status with no lasting value (`/model: cancelled`): the TUI
+    /// shows it under the prompt box for a few seconds rather than adding it
+    /// to scrollback. `text` is plain (no indent, no styling).
+    @MainActor
+    func notifyTransient(_ text: String) {
+        if let flashNotice {
+            flashNotice(text)
+        } else {
+            notify(Style.dimmed("  " + text))
+        }
     }
 }
 

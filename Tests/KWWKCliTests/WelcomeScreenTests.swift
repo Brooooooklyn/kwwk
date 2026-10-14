@@ -38,6 +38,18 @@ struct WelcomeScreenTests {
         #expect(compact.contains("not signed in — run /login"))
     }
 
+    @Test("cwd under home is shown with ~")
+    func cwdAbbreviatesHome() {
+        #expect(WelcomeScreen.abbreviatingHome("/var/mobile/proj", home: "/var/mobile") == "~/proj")
+        #expect(WelcomeScreen.abbreviatingHome("/var/mobile", home: "/var/mobile/") == "~")
+        #expect(WelcomeScreen.abbreviatingHome("/var/mobile2/proj", home: "/var/mobile") == "/var/mobile2/proj")
+        #expect(WelcomeScreen.abbreviatingHome("/tmp/project", home: "/") == "/tmp/project")
+
+        var ctx = context(loggedOut: false)
+        ctx.cwd = cliHomeDirectory() + "/work/project"
+        #expect(plain(WelcomeScreen.render(ctx, width: 100)).contains("~/work/project"))
+    }
+
     @Test("logged-in card greets with Welcome back! and no banner")
     func loggedInGreeting() {
         let wide = plain(WelcomeScreen.render(context(loggedOut: false), width: 100))

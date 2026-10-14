@@ -428,6 +428,16 @@ struct CodingFrameTests {
         #expect(firstQueued < boxBottom)
     }
 
+    @Test("a single queued prompt still shows its count")
+    func singleQueuedPromptShowsCount() {
+        let frame = CodingFrame(viewportHeight: 12)
+        frame.queuedPrompts = ["fix the failing test"]
+
+        let joined = frame.render(width: 50).map { ANSI.stripEscapes($0) }.joined(separator: "\n")
+        #expect(joined.contains("queued (1)"))
+        #expect(joined.contains("⌥↑ edit"))
+    }
+
     @Test("slash menu takes the footer slot and hides the queue list")
     func slashMenuHidesQueueList() {
         let frame = CodingFrame(viewportHeight: 14)

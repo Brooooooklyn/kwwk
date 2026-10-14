@@ -254,7 +254,8 @@ func runCodingTUIInternal(
             hasDraft: !frame.input.value.isEmpty,
             runningBackgroundTasks: frameStatus.runningBackgroundTasks,
             queuedPrompts: agent.queuedSteeringCount(),
-            spinner: frame.spinner
+            spinner: frame.spinner,
+            notice: frameStatus.notice
         )
         // Surface the pending queue as a live list above the input (omp-style).
         frame.queuedPrompts = agent.queuedSteeringMessages().map { queuedPromptPreview($0) }
@@ -277,6 +278,24 @@ func runCodingTUIInternal(
             ? "not signed in"
             : ProviderAttribution.getProviderDisplayName(agent.state.model.provider)
         welcomeHeader.update(header)
+    }
+
+    // Show a one-line notice in the state line under the prompt box and drop
+    // it after `seconds`, instead of committing it to scrollback. A newer
+    // notice replaces an older one; the older one's timer then does nothing.
+    let flashNotice: @MainActor @Sendable (String, TimeInterval) -> Void = { text, seconds in
+        frameStatus.noticeToken += 1
+        let token = frameStatus.noticeToken
+        frameStatus.notice = text
+        updateFrameStatus()
+        runner.tui.requestRender()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard frameStatus.noticeToken == token else { return }
+            frameStatus.notice = nil
+            updateFrameStatus()
+            runner.tui.requestRender()
+        }
     }
 
     let recomputeTranscript: @MainActor @Sendable () -> Void = {
@@ -987,6 +1006,7 @@ func runCodingTUIInternal(
         }
     }
     slashContext.idleCompactVeto = idleCompactVeto
+    slashContext.flashNotice = { text in flashNotice(text, transientNoticeSeconds) }
     agent.idleCompact = idleCompaction.agentOptions(canCompact: idleCompactVeto)
     runner.onInputActivity = { agentBox.agent.noteIdleActivity() }
 
@@ -1304,10 +1324,12 @@ func runCodingTUIInternal(
                     retry.trackedActive = false
                 }
             } else if !frame.input.value.isEmpty {
+                // The hint lives only as long as the exit arm, in the state
+                // line rather than scrollback, so it never outlasts its truth.
                 frame.input.value = ""
-                runner.tui.commit(["", Style.dimmed("  cleared — press Ctrl-C again to exit")])
+                flashNotice("cleared — press Ctrl-C again to exit", CtrlCState.window)
             } else {
-                runner.tui.commit(["", Style.dimmed("  press Ctrl-C again to exit")])
+                flashNotice("press Ctrl-C again to exit", CtrlCState.window)
             }
             updateFrameStatus()
             runner.tui.requestRender()
@@ -1544,6 +1566,10 @@ private final class FrameStatusState {
     var isPreparingAttachments = false
     var isRewinding = false
     var isSessionSwitching = false
+    /// Transient one-line notice for the state line; `noticeToken` lets an
+    /// expiry timer clear only the notice it was scheduled for.
+    var notice: String?
+    var noticeToken = 0
 
     func reconcileMode(messageCount: Int, isStreaming: Bool) {
         switch mode {
@@ -1744,17 +1770,29 @@ private func promptMetaLabel(
 let busySlashCommandNotice =
     "  slash commands run only when the agent is idle — wait, or Esc twice to stop it (↑ recalls the command)"
 
+/// The idle prompt-box hint: the keys that act on the draft.
+let idlePromptHint = "↵ send · / commands · @ attach · ⇧↵ newline"
+
+/// How long a transient state-line notice (`/model: cancelled`, …) stays up.
+let transientNoticeSeconds: TimeInterval = 4
+
 /// The state line under the prompt box. `hasDraft` reflects text in the
 /// editor: Esc clears that first, so the cancel hint asks for two presses.
+/// `notice` is a short-lived one-liner (see `SlashContext.notifyTransient`)
+/// shown first; while idle it takes the place of the key hint.
 func codingFrameStateLine(
     mode: CodingFrameMode,
     isStreaming: Bool,
     hasDraft: Bool,
     runningBackgroundTasks: Int,
     queuedPrompts: Int,
-    spinner: String
+    spinner: String,
+    notice: String? = nil
 ) -> String {
     var parts: [String] = []
+    if let notice, !notice.isEmpty {
+        parts.append(Theme.paint(notice, Theme.accentDim))
+    }
     let cancelHint = hasDraft ? "Esc twice to cancel" : "Esc to cancel"
 
     switch mode {
@@ -1781,8 +1819,8 @@ func codingFrameStateLine(
         if isStreaming {
             parts.append(Theme.paint("\(spinner) generating", Theme.accent, bold: true))
             parts.append(Theme.faintText(cancelHint))
-        } else {
-            parts.append(Theme.faintText("/ commands · @ attach · ⇧⏎ newline"))
+        } else if parts.isEmpty {
+            parts.append(Theme.faintText(idlePromptHint))
         }
     }
 

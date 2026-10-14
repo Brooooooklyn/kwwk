@@ -257,7 +257,7 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
                         Style.dimmed("  Tokens: \(s.tokensUsed.formatted(.number.grouping(.automatic)))"),
                     ])
                 case .dropped:
-                    ctx.notify(Style.dimmed("  /goal: no active goal — /goal <objective> to start one"))
+                    ctx.notifyTransient("/goal: no active goal — /goal <objective> to start one")
                 }
                 return
             }

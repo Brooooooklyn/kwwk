@@ -242,7 +242,7 @@ final class AskModal: Modal {
         let titleLines = ANSI.wrap(Style.header(title), width: width)
 
         if mode == .otherInput {
-            let footer = Style.dimmed("  Enter: submit   Esc: back to options")
+            let footer = Style.dimmed("  ↵ submit · Esc back to options")
             let footerLines = ANSI.wrap(footer, width: width)
             // The zero-width CURSOR_MARKER rides at the caret (end of the
             // typed text, or before the placeholder) so the hardware cursor
@@ -327,9 +327,9 @@ final class AskModal: Modal {
             entryRows.append(rows)
         }
 
-        var hints = ["↑/↓: move", prompt.question.multi ? "Enter: toggle" : "Enter: select"]
-        if prompt.allowBack || prompt.allowForward { hints.append("←/→: question") }
-        hints.append("Esc: cancel")
+        var hints = ["↑↓ move", prompt.question.multi ? "↵ toggle" : "↵ select"]
+        if prompt.allowBack || prompt.allowForward { hints.append("←→ question") }
+        hints.append("Esc cancel")
 
         // Cosmetic blank spacers are dropped on short terminals; chrome is
         // the wrapped title + footer (+ 3 spacers when roomy), everything
@@ -338,8 +338,8 @@ final class AskModal: Modal {
         // appear whenever rows are actually hidden.
         let totalRows = entryRows.reduce(0) { $0 + $1.count }
         let windowedProbe = totalRows + titleLines.count + 1 > maxRows
-        let position = windowedProbe ? "\(selectedIndex + 1)/\(entries.count)   " : ""
-        let footer = Style.dimmed("  " + position + hints.joined(separator: "   "))
+        let position = windowedProbe ? "\(selectedIndex + 1)/\(entries.count) · " : ""
+        let footer = Style.dimmed("  " + position + hints.joined(separator: " · "))
         let footerLines = ANSI.wrap(footer, width: width)
 
         let roomy = maxRows >= totalRows + titleLines.count + footerLines.count + 3

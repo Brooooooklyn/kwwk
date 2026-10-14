@@ -207,7 +207,7 @@ final class FormModal: Modal {
             out.append(ANSI.fit(Style.error(errorLine), to: width))
             out.append("")
         }
-        out.append(ANSI.fit(Style.dimmed("  Tab/↑/↓: next field   Enter: submit   Esc: cancel"), to: width))
+        out.append(ANSI.fit(Style.dimmed("  Tab/↑↓ next field · ↵ submit · Esc cancel"), to: width))
         return out
     }
 

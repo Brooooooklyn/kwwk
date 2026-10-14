@@ -39,8 +39,8 @@ enum WelcomeScreen {
     private static let tips: [(key: String, desc: String)] = [
         ("/",          "slash commands"),
         ("@path",      "attach a file or image"),
-        ("⇧⏎",         "insert a newline"),
-        ("Esc",        "interrupt · Ctrl-C to quit"),
+        ("⇧↵ / Ctrl+J", "insert a newline"),
+        ("Esc",        "interrupt · Ctrl-C twice to quit"),
     ]
 
     static func render(_ ctx: WelcomeContext, width: Int) -> [String] {
@@ -75,7 +75,7 @@ enum WelcomeScreen {
         if ctx.loggedOut {
             lines.append("  " + Theme.faintText("not signed in — run /login to pick a provider"))
         }
-        lines.append("  " + Theme.faintText(shorten(ctx.cwd, to: max(20, width - 4))))
+        lines.append("  " + Theme.faintText(shorten(abbreviatingHome(ctx.cwd), to: max(20, width - 4))))
         return lines
     }
 
@@ -140,7 +140,7 @@ enum WelcomeScreen {
         if ctx.loggedOut {
             lines.append("  " + Theme.faintText("not signed in — run /login to pick a provider"))
         }
-        lines.append("  " + Theme.faintText(shorten(ctx.cwd, to: max(20, width - 4))))
+        lines.append("  " + Theme.faintText(shorten(abbreviatingHome(ctx.cwd), to: max(20, width - 4))))
         return lines
     }
 
@@ -156,6 +156,16 @@ enum WelcomeScreen {
         case ..<604800: return "\(Int(delta / 86400))d ago"
         default: return "\(Int(delta / 604800))w ago"
         }
+    }
+
+    /// `path` with the home directory spelled `~`, so the cwd line spends
+    /// its width on the part of the path that tells projects apart.
+    static func abbreviatingHome(_ path: String, home: String = cliHomeDirectory()) -> String {
+        let home = home.hasSuffix("/") ? String(home.dropLast()) : home
+        guard !home.isEmpty else { return path }
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
 
     private static func shorten(_ path: String, to maxLen: Int) -> String {

@@ -18,6 +18,10 @@ func edgeScrollOffset(selection: Int, count: Int, windowSize: Int, previous: Int
     return max(0, min(scroll, max(0, count - windowSize)))
 }
 
+/// Key hint on the footer of every list-style modal. Same `·` separator and
+/// key glyphs as the slash popup and the prompt-box state line.
+let modalFooterHint = "↑↓ move · ↵ confirm · Esc cancel"
+
 /// Selection + windowing + render engine shared by list-style modals.
 /// `ModelSelectorModal` builds on it for `/model`; `ListSelectorModal` wraps
 /// it for plain string-row pickers (e.g. the `/login` provider list) so new
@@ -112,7 +116,7 @@ final class ModalListCore {
             if roomy { out.append("") }
             out.append(Style.dimmed("  \(emptyMessage)"))
             if roomy { out.append("") }
-            out.append(Style.dimmed("  ↑/↓: move   Enter: confirm   Esc: cancel"))
+            out.append(Style.dimmed("  \(modalFooterHint)"))
             return out
         }
 
@@ -171,7 +175,7 @@ final class ModalListCore {
         if roomy { out.append("") }
         for line in visible { out.append(line.text) }
         if roomy { out.append("") }
-        let move = "↑/↓: move   Enter: confirm   Esc: cancel"
+        let move = modalFooterHint
         guard windowed else {
             out.append(Style.dimmed("  \(move)"))
             return out
@@ -187,10 +191,10 @@ final class ModalListCore {
         if above > 0 { extent.append("\(above) above") }
         if below > 0 { extent.append("\(below) below") }
         let withExtent = position + " · " + extent.joined(separator: " · ")
-        if !extent.isEmpty, ANSI.visibleWidth("  \(withExtent)   \(move)") <= width {
+        if !extent.isEmpty, ANSI.visibleWidth("  \(withExtent) · \(move)") <= width {
             position = withExtent
         }
-        out.append(Style.dimmed("  \(position)   \(move)"))
+        out.append(Style.dimmed("  \(position) · \(move)"))
         return out
     }
 }

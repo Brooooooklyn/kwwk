@@ -153,7 +153,7 @@ struct ModelSelectorModalTests {
         #expect(footer.contains("16/28"))
         #expect(footer.contains("above"))
         #expect(footer.contains("below"))
-        #expect(footer.contains("Esc: cancel"))
+        #expect(footer.contains("Esc cancel"))
         // The listed rows plus the above/below counts account for all 28.
         let shown = lines.filter { $0.hasPrefix("    m") || $0.hasPrefix("  ❯ m") }.count
         let numbers = footer.components(separatedBy: " ").compactMap(Int.init)
@@ -175,7 +175,7 @@ struct ModelSelectorModalTests {
         let narrow = modal.render(maxRows: 16, width: 60).map(strip).last ?? ""
         #expect(narrow.contains("16/28"))
         #expect(!narrow.contains("below"))
-        #expect(narrow.contains("Esc: cancel"))
+        #expect(narrow.contains("Esc cancel"))
     }
 
     // MARK: - Provider tab bar
@@ -214,7 +214,7 @@ struct ModelSelectorModalTests {
 
         // "All" tab: every row + the tab bar with the filter hint.
         var lines = body()
-        #expect(lines.contains(where: { $0.contains("All") && $0.contains("tab / ←→: filter provider") }))
+        #expect(lines.contains(where: { $0.contains("All") && $0.contains("Tab/←→ filter provider") }))
         #expect(lines.contains(where: { $0.contains("opus-4") }))
         #expect(lines.contains(where: { $0.contains("gpt-5") }))
 
