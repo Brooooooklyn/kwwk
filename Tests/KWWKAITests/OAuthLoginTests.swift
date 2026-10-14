@@ -566,119 +566,213 @@ struct OAuthLoginShapeTests {
 
     // MARK: - Z.AI
 
-    /// Echo the state from the authorize URL back through the callback so
-    /// the flow's state check passes.
-    private func fireZaiCallback(port: UInt16, authURL: URL, code: String) {
-        let comps = URLComponents(url: authURL, resolvingAgainstBaseURL: false)
-        let state = comps?.queryItems?.first { $0.name == "state" }?.value ?? ""
-        fireCallback(port: port, query: "code=\(code)&state=\(state)")
+    /// ZCode's flow as zcode.z.ai opened it on 2026-10-15, cut to the fields
+    /// that are read.
+    private static let zcodeInit =
+        #"{"code":0,"data":{"flow_id":"f1","poll_token":"pt","authorize_url":"https://chat.z.ai/api/oauth/authorize?client_id=client_P8X5CMWmlaRO9gyO-KSqtg&redirect_uri=https://zcode.z.ai/api/v1/oauth/cli/callback/zai&state=s1&response_type=code","expires_at":4102444800,"poll_interval_sec":2}}"#
+
+    /// The flow opened, polled once while the browser is still out, then
+    /// ready with Z.ai's access token.
+    private static let zcodeSignedIn: [(status: Int, body: String)] = [
+        (200, Self.zcodeInit),
+        (200, #"{"code":0,"data":{"status":"pending"}}"#),
+        (200, #"{"code":0,"data":{"status":"ready","token":"zcode-session","zai":{"access_token":"oauth-tok"},"user":{"user_id":"u7","email":"e@x.ai"}}}"#),
+    ]
+
+    private func zaiCallbacks(
+        opened: CapturedURL = CapturedURL(),
+        progress: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> OAuthLogin.Callbacks {
+        OAuthLogin.Callbacks(onAuthURL: { url in opened.set(url) }, onProgress: progress)
     }
 
-    @Test("zai login exchanges the code and provisions a durable id.secret key")
+    @Test("zai login polls ZCode's flow and provisions a durable id.secret key")
     func zaiLoginFlow() async throws {
         let client = SequentialStubClient()
-        // 1. token exchange (envelope code 0)
-        client.queue.append((
-            status: 200,
-            body: #"{"code":0,"msg":"ok","data":{"zai":{"access_token":"oauth-tok"},"user":{"email":"e@x.ai","id":7}}}"#
-        ))
-        // 2. business login (envelope code 200)
+        client.queue.append(contentsOf: Self.zcodeSignedIn)
+        // business login (envelope code 200)
         client.queue.append((
             status: 200,
             body: #"{"code":200,"success":true,"data":{"access_token":"biz-tok"}}"#
         ))
-        // 3. customer info → default org/project
+        // customer info → default org/project
         client.queue.append((
             status: 200,
             body: #"{"code":200,"data":{"organizations":[{"organizationId":"org-1","isDefault":true,"projects":[{"projectId":"proj-1","isDefault":true}]}]}}"#
         ))
-        // 4. api key list (empty → create)
+        // api key list (empty → create)
         client.queue.append((status: 200, body: #"{"code":200,"data":[]}"#))
-        // 5. create
+        // create
         client.queue.append((status: 200, body: #"{"code":200,"data":{"apiKey":"ak-123"}}"#))
-        // 6. copy → full secret
+        // copy → full secret
         client.queue.append((status: 200, body: #"{"code":200,"data":{"secretKey":"sk-456"}}"#))
-        // 7. the key's subscriptions → a valid GLM Coding Plan
+        // the key's subscriptions → a valid GLM Coding Plan
         client.queue.append((status: 200, body: Self.zaiLitePlan))
 
-        let port: UInt16 = 54549
-        let authURL = CapturedURL()
+        let opened = CapturedURL()
+        let waits = LockedBox<[Int]>([])
         let creds = try await OAuthLogin.loginZai(
-            clientID: "test-client",
-            port: port,
-            callbacks: OAuthLogin.Callbacks(
-                onAuthURL: { url in
-                    authURL.set(url)
-                    self.fireZaiCallback(port: port, authURL: url, code: "ZAI-CODE")
-                },
-                onProgress: { _ in },
-                loopback: OAuthLogin.nioLoopback
-            ),
-            client: client
+            callbacks: zaiCallbacks(opened: opened),
+            client: client,
+            pollSleep: { seconds in waits.set(waits.get() + [seconds]) }
         )
         #expect(creds.access == "ak-123.sk-456")
         #expect(creds.refresh == "")
         #expect(creds.expires == .max)
 
-        // Authorize URL: chat.z.ai authorize with client id + state, no PKCE.
-        let auth = try #require(authURL.get())
-        let comps = try #require(URLComponents(url: auth, resolvingAgainstBaseURL: false))
-        #expect(comps.host == "chat.z.ai")
-        let query = Dictionary(uniqueKeysWithValues: (comps.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        #expect(query["client_id"] == "test-client")
-        #expect(query["response_type"] == "code")
-        #expect(query["redirect_uri"] == "http://localhost:\(port)/callback")
-        #expect(query["state"]?.isEmpty == false)
-        #expect(query["code_challenge"] == nil)
+        // The flow is opened with a bearer only this poller knows, as ZCode.
+        let start = client.recorded[0]
+        #expect(start.method == "POST")
+        #expect(start.url.absoluteString == "https://zcode.z.ai/api/v1/oauth/cli/init")
+        let startBody = try JSONSerialization.jsonObject(with: start.body ?? Data()) as? [String: Any]
+        #expect(startBody?["provider"] as? String == "zai")
+        let bearer = try #require(start.headers["authorization"])
+        #expect(bearer.hasPrefix("Bearer ") && bearer.count == 7 + 64)
+        #expect(start.headers["user-agent"] == "ZCode/3.14.3")
+        let device = try #require(start.headers["x-device-mid"])
 
-        // Request sequence: exchange → business login → customer → list →
-        // create → copy → subscriptions, with the biz bearer on the
-        // provisioning calls.
-        #expect(client.recorded.count == 7)
-        let exchange = client.recorded[0]
-        #expect(exchange.url.absoluteString == "https://zcode.z.ai/api/v1/oauth/token")
-        let exchangeBody = try JSONSerialization.jsonObject(with: exchange.body ?? Data()) as? [String: Any]
-        #expect(exchangeBody?["provider"] as? String == "zai")
-        #expect(exchangeBody?["code"] as? String == "ZAI-CODE")
-        #expect(exchangeBody?["redirect_uri"] as? String == "http://localhost:\(port)/callback")
-        #expect((exchangeBody?["state"] as? String)?.isEmpty == false)
+        // The page is the flow's, sent back to ZCode's own page, not to a
+        // loopback (Z.ai refuses those for this client).
+        let page = try #require(opened.get())
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: page, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        #expect(page.host == "chat.z.ai")
+        #expect(query["client_id"] == "client_P8X5CMWmlaRO9gyO-KSqtg")
+        #expect(query["state"] == "s1")
+        #expect(query["redirect_uri"] == "https://zcode.z.ai/app/oauth/login?redirect=zcode://oauth/callback&app_version=3.14.3")
 
-        let login = client.recorded[1]
+        // Polled at the flow's interval, with the same bearer and machine.
+        #expect(waits.get() == [2, 2])
+        for poll in client.recorded[1...2] {
+            #expect(poll.method == "GET")
+            #expect(poll.url.absoluteString == "https://zcode.z.ai/api/v1/oauth/cli/poll/f1")
+            #expect(poll.headers["authorization"] == bearer)
+            #expect(poll.headers["x-device-mid"] == device)
+        }
+
+        // Then business login → customer → list → create → copy →
+        // subscriptions, with the biz bearer on the provisioning calls.
+        #expect(client.recorded.count == 9)
+        let login = client.recorded[3]
         #expect(login.url.absoluteString == "https://api.z.ai/api/auth/z/login")
         let loginBody = try JSONSerialization.jsonObject(with: login.body ?? Data()) as? [String: Any]
         #expect(loginBody?["token"] as? String == "oauth-tok")
 
-        let customer = client.recorded[2]
+        let customer = client.recorded[4]
         #expect(customer.url.absoluteString.hasSuffix("api/biz/customer/getCustomerInfo"))
         #expect(customer.headers["authorization"] == "Bearer biz-tok")
 
-        let list = client.recorded[3]
+        let list = client.recorded[5]
         #expect(list.method == "GET")
         #expect(list.url.absoluteString.hasSuffix("organization/org-1/projects/proj-1/api_keys"))
 
-        let create = client.recorded[4]
+        let create = client.recorded[6]
         #expect(create.method == "POST")
         let createBody = try JSONSerialization.jsonObject(with: create.body ?? Data()) as? [String: Any]
         #expect(createBody?["name"] as? String == "kwwk")
 
-        let copy = client.recorded[5]
+        let copy = client.recorded[7]
         #expect(copy.url.absoluteString.hasSuffix("api_keys/copy/ak-123"))
 
         // The plan is asked with the minted key itself, bare (no `Bearer`),
         // as ZCode and magpie's zcode plugin ask it.
-        let plan = client.recorded[6]
+        let plan = client.recorded[8]
         #expect(plan.method == "GET")
         #expect(plan.url.absoluteString == "https://api.z.ai/api/biz/subscription/list")
         #expect(plan.headers["authorization"] == "ak-123.sk-456")
     }
 
+    @Test("BigModel (智谱) signs in through the same flow, on its own page and business API")
+    func zaiChinaLoginFlow() async throws {
+        let client = SequentialStubClient()
+        // The flow as zcode.z.ai opened it for BigModel on 2026-10-15.
+        client.queue.append((200, #"{"code":0,"data":{"flow_id":"f2","authorize_url":"https://bigmodel.cn/login?appId=zcode&redirect=https://zcode.z.ai/api/v1/oauth/cli/callback/bigmodel&state=s2","expires_at":4102444800,"poll_interval_sec":2}}"#))
+        // BigModel's token spelled the camel way.
+        client.queue.append((200, #"{"code":0,"data":{"status":"ready","bigmodel":{"accessToken":"bm-tok"}}}"#))
+        client.queue.append((200, #"{"code":200,"data":{"organizations":[{"organizationId":"org-1","projects":[{"projectId":"proj-1"}]}]}}"#))
+        client.queue.append((200, #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak-cn"}]}"#))
+        client.queue.append((200, #"{"code":200,"data":{"secretKey":"sk-cn"}}"#))
+        client.queue.append((200, Self.zaiLitePlan))
+
+        let opened = CapturedURL()
+        let creds = try await OAuthLogin.loginZai(
+            site: .china, callbacks: zaiCallbacks(opened: opened), client: client, pollSleep: { _ in }
+        )
+        #expect(creds.access == "ak-cn.sk-cn")
+        #expect(creds.refresh == "")
+
+        let startBody = try JSONSerialization.jsonObject(with: client.recorded[0].body ?? Data()) as? [String: Any]
+        #expect(startBody?["provider"] as? String == "bigmodel")
+
+        // BigModel's login page names the way back `redirect`.
+        let page = try #require(opened.get())
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: page, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        #expect(page.host == "bigmodel.cn")
+        #expect(query["appId"] == "zcode")
+        #expect(query["state"] == "s2")
+        #expect(query["redirect"] == "https://zcode.z.ai/app/oauth/login?redirect=zcode://oauth/callback&app_version=3.14.3")
+        #expect(query["redirect_uri"] == nil)
+
+        // No business login: BigModel's token goes to its business API bare.
+        #expect(client.recorded.count == 6)
+        let customer = client.recorded[2]
+        #expect(customer.url.absoluteString == "https://bigmodel.cn/api/biz/customer/getCustomerInfo")
+        #expect(customer.headers["authorization"] == "bm-tok")
+        #expect(client.recorded[3].url.absoluteString == "https://bigmodel.cn/api/biz/v1/organization/org-1/projects/proj-1/api_keys")
+        #expect(client.recorded[4].url.absoluteString.hasSuffix("api_keys/copy/ak-cn"))
+        // The plan is asked where BigModel serves it, with the key bare.
+        let plan = client.recorded[5]
+        #expect(plan.url.absoluteString == "https://open.bigmodel.cn/api/biz/subscription/list")
+        #expect(plan.headers["authorization"] == "ak-cn.sk-cn")
+    }
+
+    @Test("a BigModel account with no plan is sent to BigModel to subscribe")
+    func zaiChinaNoPlan() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((200, #"{"code":0,"data":{"flow_id":"f2","authorize_url":"https://bigmodel.cn/login?appId=zcode&redirect=x&state=s2"}}"#))
+        client.queue.append((200, #"{"code":0,"data":{"status":"ready","bigmodel":{"access_token":"bm-tok"}}}"#))
+        client.queue.append((200, #"{"code":200,"data":{"organizations":[{"organizationId":"o","projects":[{"projectId":"p"}]}]}}"#))
+        client.queue.append((200, #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak"}]}"#))
+        client.queue.append((200, #"{"code":200,"data":{"secretKey":"sk"}}"#))
+        client.queue.append((200, #"{"code":200,"data":[]}"#))
+        do {
+            _ = try await OAuthLogin.loginZai(site: .china, callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
+            Issue.record("a planless account signed in")
+        } catch {
+            #expect(error.localizedDescription.contains("BigModel account has no GLM Coding Plan"))
+            #expect(error.localizedDescription.contains("bigmodel.cn/glm-coding"))
+        }
+    }
+
+    @Test("zai poll rides out a hiccup, and a declined sign-in or a refused flow ends it", arguments: [
+        ([(status: 503, body: "busy"), (200, #"{"code":0,"data":{"status":"failed"}}"#)], "declined"),
+        ([(status: 404, body: #"{"code":404,"msg":"flow not found"}"#)], "404"),
+    ] as [([(status: Int, body: String)], String)])
+    func zaiPollEnds(polls: [(status: Int, body: String)], says: String) async throws {
+        let client = SequentialStubClient()
+        client.queue.append((200, Self.zcodeInit))
+        client.queue.append(contentsOf: polls)
+        do {
+            _ = try await OAuthLogin.loginZai(callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
+            Issue.record("the sign-in finished")
+        } catch {
+            #expect("\(error)".contains(says) || error.localizedDescription.contains(says), "\(error)")
+        }
+        #expect(client.recorded.count == 1 + polls.count)
+    }
+
+    @Test("a zai flow past its deadline times the sign-in out")
+    func zaiPollDeadline() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((200, #"{"code":0,"data":{"flow_id":"f1","authorize_url":"https://chat.z.ai/api/oauth/authorize?state=s","expires_at":1000000000,"poll_interval_sec":1}}"#))
+        await #expect(throws: OAuthLoginError.timedOut) {
+            _ = try await OAuthLogin.loginZai(callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
+        }
+    }
+
     @Test("zai login reuses an existing kwwk-named key instead of creating one")
     func zaiLoginReusesKey() async throws {
         let client = SequentialStubClient()
-        client.queue.append((
-            status: 200,
-            body: #"{"code":0,"data":{"zai":{"access_token":"oauth-tok"}}}"#
-        ))
+        client.queue.append(contentsOf: Self.zcodeSignedIn)
         client.queue.append((
             status: 200,
             body: #"{"code":200,"data":{"access_token":"biz-tok"}}"#
@@ -695,59 +789,23 @@ struct OAuthLoginShapeTests {
         client.queue.append((status: 200, body: #"{"code":200,"data":{"secretKey":"sk-full"}}"#))
         client.queue.append((status: 200, body: Self.zaiLitePlan))
 
-        let port: UInt16 = 54550
-        let creds = try await OAuthLogin.loginZai(
-            clientID: "test-client",
-            port: port,
-            callbacks: OAuthLogin.Callbacks(
-                onAuthURL: { url in self.fireZaiCallback(port: port, authURL: url, code: "C") },
-                onProgress: { _ in },
-                loopback: OAuthLogin.nioLoopback
-            ),
-            client: client
-        )
+        let creds = try await OAuthLogin.loginZai(callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
         #expect(creds.access == "ak-9.sk-full")
-        #expect(client.recorded.count == 6)
-        #expect(client.recorded[4].url.absoluteString.hasSuffix("api_keys/copy/ak-9"))
+        #expect(client.recorded.count == 8)
+        #expect(client.recorded[6].url.absoluteString.hasSuffix("api_keys/copy/ak-9"))
     }
 
     @Test("zai envelope failure surfaces the server message")
     func zaiEnvelopeFailure() async throws {
         let client = SequentialStubClient()
         client.queue.append((status: 200, body: #"{"code":500,"msg":"boom"}"#))
-        let port: UInt16 = 54551
-        await #expect(throws: OAuthError.self) {
-            _ = try await OAuthLogin.loginZai(
-                clientID: "test-client",
-                port: port,
-                callbacks: OAuthLogin.Callbacks(
-                    onAuthURL: { url in self.fireZaiCallback(port: port, authURL: url, code: "C") },
-                    onProgress: { _ in },
-                    loopback: OAuthLogin.nioLoopback
-                ),
-                client: client
-            )
+        do {
+            _ = try await OAuthLogin.loginZai(callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
+            Issue.record("the sign-in finished")
+        } catch {
+            #expect(error.localizedDescription.contains("boom"))
         }
         #expect(client.recorded.count == 1)
-    }
-
-    @Test("zai callback with a mismatched state is rejected before any exchange")
-    func zaiStateMismatch() async throws {
-        let client = SequentialStubClient()
-        let port: UInt16 = 54552
-        await #expect(throws: OAuthError.self) {
-            _ = try await OAuthLogin.loginZai(
-                clientID: "test-client",
-                port: port,
-                callbacks: OAuthLogin.Callbacks(
-                    onAuthURL: { _ in self.fireCallback(port: port, query: "code=C&state=WRONG") },
-                    onProgress: { _ in },
-                    loopback: OAuthLogin.nioLoopback
-                ),
-                client: client
-            )
-        }
-        #expect(client.recorded.isEmpty)
     }
 
     /// `/api/biz/subscription/list` as api.z.ai answered a Coding Plan key
@@ -757,27 +815,19 @@ struct OAuthLoginShapeTests {
 
     /// Runs the sign-in over `customer` and a key list, up to the plan read.
     private func zaiLogin(
-        port: UInt16,
         customer: String,
         keys: String = #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak-9"}]}"#,
         tail: [(status: Int, body: String)],
         progress: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> (OAuthCredentials, SequentialStubClient) {
         let client = SequentialStubClient()
-        client.queue.append((status: 200, body: #"{"code":0,"data":{"zai":{"access_token":"oauth-tok"}}}"#))
+        client.queue.append(contentsOf: Self.zcodeSignedIn)
         client.queue.append((status: 200, body: #"{"code":200,"data":{"access_token":"biz-tok"}}"#))
         client.queue.append((status: 200, body: customer))
         client.queue.append((status: 200, body: keys))
         client.queue.append(contentsOf: tail)
         let creds = try await OAuthLogin.loginZai(
-            clientID: "test-client",
-            port: port,
-            callbacks: OAuthLogin.Callbacks(
-                onAuthURL: { url in self.fireZaiCallback(port: port, authURL: url, code: "C") },
-                onProgress: progress,
-                loopback: OAuthLogin.nioLoopback
-            ),
-            client: client
+            callbacks: zaiCallbacks(progress: progress), client: client, pollSleep: { _ in }
         )
         return (creds, client)
     }
@@ -798,11 +848,11 @@ struct OAuthLoginShapeTests {
             {"projectId":"p1","projectName":"默认项目","projectType":"1"}]}]}}
         """#
         let (creds, client) = try await zaiLogin(
-            port: 54553, customer: customer,
+            customer: customer,
             tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, Self.zaiLitePlan)]
         )
         #expect(creds.access == "ak-9.sk")
-        #expect(client.recorded[3].url.absoluteString.hasSuffix("organization/o1/projects/p1/api_keys"))
+        #expect(client.recorded[5].url.absoluteString.hasSuffix("organization/o1/projects/p1/api_keys"))
     }
 
     @Test("zai default project skips team projects and organizations that hold only them")
@@ -825,7 +875,7 @@ struct OAuthLoginShapeTests {
     @Test("zai login makes the key when the listed one names no key id")
     func zaiLoginSkipsKeyWithoutId() async throws {
         let (creds, client) = try await zaiLogin(
-            port: 54554, customer: Self.zaiOneProject,
+            customer: Self.zaiOneProject,
             keys: #"{"code":200,"data":[{"name":"kwwk","apiKey":""}]}"#,
             tail: [
                 (200, #"{"code":200,"data":{"apiKey":"ak-new"}}"#),
@@ -834,7 +884,7 @@ struct OAuthLoginShapeTests {
             ]
         )
         #expect(creds.access == "ak-new.sk")
-        #expect(client.recorded[4].method == "POST")
+        #expect(client.recorded[6].method == "POST")
     }
 
     // Without a plan the coding endpoint answers every request 1113, so the
@@ -842,13 +892,11 @@ struct OAuthLoginShapeTests {
     // zcode plugin, signedIn: "this Z.ai account has no GLM Coding Plan…").
     @Test("zai login refuses an account whose subscriptions hold no valid Coding Plan")
     func zaiLoginNoPlan() async throws {
-        // A port for each sign-in: the last one's listener may not have let
-        // go of its own yet.
         let lists = [#"{"code":200,"data":[]}"#, #"{"code":200,"data":[{"productName":"GLM Coding Lite","status":"EXPIRED"}]}"#]
-        for (list, port) in zip(lists, [54555, 54557] as [UInt16]) {
+        for list in lists {
             do {
                 _ = try await zaiLogin(
-                    port: port, customer: Self.zaiOneProject,
+                    customer: Self.zaiOneProject,
                     tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, list)]
                 )
                 Issue.record("a planless account signed in")
@@ -862,16 +910,16 @@ struct OAuthLoginShapeTests {
     @Test("zai login keeps the key when the subscriptions cannot be read, and names the plan when they can")
     func zaiLoginPlanRead() async throws {
         let unreadable = [(status: 500, body: ""), (status: 200, body: "<html>"), (status: 200, body: #"{"code":500,"msg":"boom"}"#)]
-        for (unread, port) in zip(unreadable, [54556, 54558, 54559] as [UInt16]) {
+        for unread in unreadable {
             let (creds, _) = try await zaiLogin(
-                port: port, customer: Self.zaiOneProject,
+                customer: Self.zaiOneProject,
                 tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), unread]
             )
             #expect(creds.access == "ak-9.sk")
         }
         let said = CapturedLines()
         _ = try await zaiLogin(
-            port: 54560, customer: Self.zaiOneProject,
+            customer: Self.zaiOneProject,
             tail: [(200, #"{"code":200,"data":{"secretKey":"sk"}}"#), (200, Self.zaiLitePlan)],
             progress: { said.add($0) }
         )

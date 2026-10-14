@@ -504,19 +504,68 @@ public enum DevinOAuth {
 /// oh-my-pi's `zai.ts`, which itself mirrors ZCode's desktop flow). The
 /// flow provisions a durable `id.secret` API key, so there is no refresh
 /// provider here either.
+/// A GLM Coding Plan site ZCode signs in to: Z.ai, or BigModel (智谱,
+/// bigmodel.cn) in China. One polling flow on zcode.z.ai serves both; what
+/// differs is ported from magpie's zcode plugin (`SITES`, `authorize`,
+/// `bizAuth`, `plan`).
+public struct ZaiSite: Sendable, Hashable {
+    /// The store id its logins are kept under.
+    public let id: String
+    public let name: String
+    /// What ZCode's flow is opened for (`cli/init` `provider`).
+    public let flowProvider: String
+    /// The authorization page's parameter naming where the browser goes back
+    /// to: Z.ai's `redirect_uri`, BigModel's login page's `redirect`.
+    public let redirectParameter: String
+    /// The business API: account, organizations and API keys.
+    public let businessAPI: URL
+    /// Where the subscriptions are asked with the minted key.
+    public let planAPI: URL
+    /// Z.ai's OAuth token is traded for a business bearer first; BigModel's
+    /// goes to the business API as it is, bare.
+    public let tradesForBusinessToken: Bool
+    /// Where a plan is bought, for a sign-in that finds none.
+    public let subscribe: String
+
+    public static let global = ZaiSite(
+        id: "zai", name: "Z.ai", flowProvider: "zai", redirectParameter: "redirect_uri",
+        businessAPI: URL(string: "https://api.z.ai")!, planAPI: URL(string: "https://api.z.ai")!,
+        tradesForBusinessToken: true, subscribe: "z.ai/subscribe"
+    )
+    public static let china = ZaiSite(
+        id: "zai-coding-cn", name: "BigModel", flowProvider: "bigmodel", redirectParameter: "redirect",
+        businessAPI: URL(string: "https://bigmodel.cn")!, planAPI: URL(string: "https://open.bigmodel.cn")!,
+        tradesForBusinessToken: false, subscribe: "bigmodel.cn/glm-coding"
+    )
+    public static let all: [ZaiSite] = [.global, .china]
+
+    public static func site(id: String) -> ZaiSite? { all.first { $0.id == id } }
+}
+
 public enum ZaiOAuth {
-    public static let clientID = "client_P8X5CMWmlaRO9gyO-KSqtg"
-    public static let authorizeURL = URL(string: "https://chat.z.ai/api/oauth/authorize")!
-    public static let tokenURL = URL(string: "https://zcode.z.ai/api/v1/oauth/token")!
-    public static let bizBaseURL = URL(string: "https://api.z.ai")!
+    /// ZCode's polling sign-in: opens a flow and names the page to sign in on.
+    public static let cliInitURL = URL(string: "https://zcode.z.ai/api/v1/oauth/cli/init")!
+    /// The flow's state, until it hands over Z.ai's access token.
+    public static func cliPollURL(flowID: String) -> URL {
+        URL(string: "https://zcode.z.ai/api/v1/oauth/cli/poll/")!.appendingPathComponent(flowID)
+    }
+    /// The ZCode version this sign-in presents as (magpie pins the same).
+    public static let zcodeAppVersion = "3.14.3"
+    /// Where Z.ai sends the browser back: ZCode's own sign-in page.
+    public static var webLoginURL: URL {
+        var comps = URLComponents(string: "https://zcode.z.ai/app/oauth/login")!
+        comps.queryItems = [
+            URLQueryItem(name: "redirect", value: "zcode://oauth/callback"),
+            URLQueryItem(name: "app_version", value: zcodeAppVersion),
+        ]
+        return comps.url!
+    }
     /// Business-login endpoint: exchanges the OAuth access token for the biz
     /// bearer the provisioning APIs require.
     public static let businessLoginURL = URL(string: "https://api.z.ai/api/auth/z/login")!
     /// Name of the provisioned key — kwwk-owned, so sign-in never mutates
     /// ZCode's own `zcode-api-key` entry.
     public static let keyName = "kwwk"
-    /// Fixed port matching the redirect URI ZCode's client id expects.
-    public static let callbackPort: UInt16 = 54548
 }
 
 // MARK: - Helpers
