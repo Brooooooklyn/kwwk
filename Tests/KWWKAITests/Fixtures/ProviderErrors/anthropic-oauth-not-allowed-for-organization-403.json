@@ -1,0 +1,20 @@
+{
+  "capturedAt": "unknown",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": false
+  },
+  "parser": "http",
+  "provider": "anthropic",
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages"
+  },
+  "response": {
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"permission_error\",\"message\":\"OAuth authentication is currently not allowed for this organization.\",\"details\":{\"error_code\":\"oauth_not_allowed_for_organization\"}},\"request_id\":\"req_011CfDQosvzzsyor4jWjLsz8\"}",
+    "bodyTruncated": false,
+    "headers": {},
+    "status": 403
+  },
+  "source": "oh-my-pi corpus, packages/ai/test/auth-storage-force-refresh-rotate.test.ts (body verbatim, status 403; headers and capture time not recorded there)"
+}

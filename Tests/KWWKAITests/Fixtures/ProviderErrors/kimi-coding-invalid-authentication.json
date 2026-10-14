@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-14T10:54:55.348Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "http",
+  "provider": "kimi-coding",
+  "request": {
+    "method": "POST",
+    "url": "https://api.kimi.com/coding/v1/messages"
+  },
+  "response": {
+    "body": "{\"error\":{\"message\":\"The API Key appears to be invalid or may have expired. Please verify your credentials and try again.\",\"type\":\"invalid_authentication_error\"}}",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

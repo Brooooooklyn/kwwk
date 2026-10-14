@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-10-14T10:54:44.849Z",
+  "expect": {
+    "category": "invalidRequest",
+    "credentialRejection": false
+  },
+  "parser": "http",
+  "provider": "github-copilot",
+  "request": {
+    "method": "POST",
+    "url": "https://api.individual.githubcopilot.com/responses"
+  },
+  "response": {
+    "body": "{\"error\":{\"message\":\"The requested model is not supported.\",\"code\":\"model_not_supported\",\"param\":\"model\",\"type\":\"invalid_request_error\"}}\n",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8",
+      "x-request-id": "00000-8b6dcf11-a4a2-4fe8-b091-25438a5cb450"
+    },
+    "status": 400
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): the real login, sent right after the refused one"
+}

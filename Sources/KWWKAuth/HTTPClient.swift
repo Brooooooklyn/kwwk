@@ -99,6 +99,9 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
 
         do {
             let http = try await delegate.awaitHeader(for: id)
+            if http.statusCode >= 400 {
+                return (http, await ProviderErrorCapture.tee(method: method, url: url, response: http, body: stream))
+            }
             return (http, stream)
         } catch {
             task.cancel()

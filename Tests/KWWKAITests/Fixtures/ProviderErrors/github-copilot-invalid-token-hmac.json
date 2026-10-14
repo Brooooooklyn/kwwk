@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-14T10:54:44.287Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "http",
+  "provider": "github-copilot",
+  "request": {
+    "method": "POST",
+    "url": "https://api.individual.githubcopilot.com/responses"
+  },
+  "response": {
+    "body": "IDE authentication failed: unauthorized: invalid token: cannot validate HMAC\n",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

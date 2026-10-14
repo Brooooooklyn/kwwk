@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-14T10:55:15.431Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "qoder",
+  "provider": "qoder-cn",
+  "request": {
+    "method": "GET",
+    "url": "https://gateway.qoder.com.cn/algo/api/v2/model/list?Encode=REDACTED"
+  },
+  "response": {
+    "body": "{\"code\":\"105\",\"message\":\"Login expired\"}",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "application/json;charset=ISO-8859-1"
+    },
+    "status": 403
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

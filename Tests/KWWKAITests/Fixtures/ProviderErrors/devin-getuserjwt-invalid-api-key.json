@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-14T10:54:52.200Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "devin:GetUserJwt",
+  "provider": "devin",
+  "request": {
+    "method": "POST",
+    "url": "https://server.codeium.com/exa.auth_pb.AuthService/GetUserJwt"
+  },
+  "response": {
+    "body": "{\"code\":\"unauthenticated\",\"message\":\"invalid api key\"}",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

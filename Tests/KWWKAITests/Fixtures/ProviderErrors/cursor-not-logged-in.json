@@ -1,0 +1,21 @@
+{
+  "capturedAt": "2026-10-14T10:54:46.187Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "cursor-end-stream",
+  "provider": "cursor",
+  "request": {
+    "method": "POST",
+    "url": "https://api2.cursor.sh/agent.v1.AgentService/Run"
+  },
+  "response": {
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Error\",\"details\":[{\"type\":\"aiserver.v1.ErrorDetails\",\"debug\":{\"error\":\"ERROR_NOT_LOGGED_IN\",\"details\":{\"title\":\"Authentication error\",\"detail\":\"If you are logged in, try logging out and back in.\",\"isRetryable\":false,\"analyticsMetadata\":{\"actionRequired\":\"login\"}},\"isExpected\":true},\"value\":\"CAISVQoUQXV0aGVudGljYXRpb24gZXJyb3ISMklmIHlvdSBhcmUgbG9nZ2VkIGluLCB0cnkgbG9nZ2luZyBvdXQgYW5kIGJhY2sgaW4uIABSBwoFbG9naW4YAQ\"}]}}",
+    "bodyTruncated": false,
+    "frame": "connect-end-stream",
+    "headers": {},
+    "status": 200
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

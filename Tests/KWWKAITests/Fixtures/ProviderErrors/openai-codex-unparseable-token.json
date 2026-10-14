@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-10-14T10:59:50.638Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true
+  },
+  "parser": "http",
+  "provider": "openai-codex",
+  "request": {
+    "method": "POST",
+    "url": "https://chatgpt.com/backend-api/codex/responses"
+  },
+  "response": {
+    "body": "{\n  \"error\": {\n    \"message\": \"Could not parse your authentication token. Please try signing in again.\",\n    \"type\": null,\n    \"code\": \"unauthorized_unknown\",\n    \"param\": null\n  },\n  \"status\": 401\n}",
+    "bodyTruncated": false,
+    "headers": {
+      "cf-ray": "a4a613b0dc12e37b-NRT",
+      "content-type": "text/plain"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched; sent over HTTP because the WebSocket handshake drops the body"
+}
