@@ -956,8 +956,13 @@ private func oauthResolver(
 ) -> @Sendable (Model, String?) async throws -> ResolvedProviderAuth? {
     { _, _ in
         do {
-            let token = try await manager.apiKey(for: providerId)
-            return ResolvedProviderAuth(token: token, scheme: scheme, baseURL: baseURL)
+            let authorization = try await manager.authorization(for: providerId)
+            return ResolvedProviderAuth(
+                token: authorization.apiKey,
+                scheme: scheme,
+                baseURL: baseURL,
+                onRejected: authorization.onRejected
+            )
         } catch OAuthError.missing, OAuthError.unknownProvider {
             // Not logged in for this provider ⇒ anonymous. Any other failure
             // (refresh/exchange error, or an unrefreshable entry served

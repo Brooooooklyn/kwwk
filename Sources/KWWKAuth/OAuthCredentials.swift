@@ -152,6 +152,31 @@ public protocol OAuthCredentialSource: Sendable {
     /// Current credentials for `providerId`, or nil when the source holds none
     /// (the caller reports that as `OAuthError.missing`).
     func credentials(for providerId: String) async throws -> OAuthCredentials?
+
+    /// The provider refused `rejectedAccess` — an access token this source
+    /// served for `providerId` — at request time, before its recorded expiry
+    /// (revoked upstream, signed out elsewhere). Return the credentials a
+    /// request should carry now, after whatever renewal the authority can do:
+    /// a different `access` means "try once more with this"; the same one, or
+    /// nil, means the source has nothing newer. Throw when only the user can
+    /// fix it (the login is dead and needs signing in again) — the caller
+    /// surfaces that error instead of the provider's refusal.
+    ///
+    /// Sources that cannot renew on demand keep the default, which answers
+    /// nil: the refusal then surfaces as it is.
+    func credentialsAfterRejection(
+        of rejectedAccess: String,
+        for providerId: String
+    ) async throws -> OAuthCredentials?
+}
+
+extension OAuthCredentialSource {
+    public func credentialsAfterRejection(
+        of rejectedAccess: String,
+        for providerId: String
+    ) async throws -> OAuthCredentials? {
+        nil
+    }
 }
 
 // MARK: - Credential store

@@ -5,6 +5,15 @@ import FoundationNetworking
 
 // MARK: - Manager
 
+/// What `OAuthManager.authorization(for:)` resolved: the api-key to send, the
+/// stored access token it came from (the two differ only where a provider
+/// exchanges the token, e.g. Copilot), and the hook that reports it refused.
+public struct OAuthAuthorization: Sendable {
+    public let apiKey: String
+    public let access: String
+    public let onRejected: CredentialRejection
+}
+
 /// Refresh-on-demand front end. Wrap a credential source with a set of
 /// `OAuthProvider`s. Call `apiKey(for:)` (or the `resolver()` closure) to
 /// fetch a fresh api-key — `OAuthManager` checks `.isExpired`, refreshes
@@ -105,6 +114,13 @@ public actor OAuthManager {
     /// with no refresh token — that entry's authority failed to serve a
     /// fresh one.
     public func apiKey(for providerId: String) async throws -> String {
+        try await authorization(for: providerId).apiKey
+    }
+
+    /// `apiKey(for:)` together with the access token it was derived from and
+    /// a `CredentialRejection` that reports that token refused. Resolvers
+    /// hand the rejection to the agent loop on `ResolvedProviderAuth`.
+    public func authorization(for providerId: String) async throws -> OAuthAuthorization {
         guard let provider = providers[providerId] else {
             throw OAuthError.unknownProvider(providerId)
         }
@@ -117,7 +133,36 @@ public actor OAuthManager {
             }
             credentials = try await refresh(providerId, provider: provider, stale: credentials)
         }
-        return try await provider.apiKey(from: credentials, using: client)
+        let apiKey = try await provider.apiKey(from: credentials, using: client)
+        let access = credentials.access
+        return OAuthAuthorization(
+            apiKey: apiKey,
+            access: access,
+            onRejected: CredentialRejection(providerId: providerId) { [self] in
+                try await self.reportRejected(access, for: providerId)
+            }
+        )
+    }
+
+    /// The provider refused `access` for `providerId` at request time. Asks
+    /// the source for something newer (`credentialsAfterRejection`); true
+    /// when it served a different access token, so one more attempt is worth
+    /// making, false when it has nothing newer. A source that says the login
+    /// is dead throws, wrapped as `OAuthCredentialSourceError` like every
+    /// other source refusal so the agent loop ends the run with its copy.
+    public func reportRejected(_ access: String, for providerId: String) async throws -> Bool {
+        let renewed: OAuthCredentials?
+        do {
+            renewed = try await source.credentialsAfterRejection(of: access, for: providerId)
+        } catch let error as OAuthCredentialSourceError {
+            throw error
+        } catch {
+            throw OAuthCredentialSourceError(providerId: providerId, underlying: error)
+        }
+        guard let renewed, renewed.access != access else { return false }
+        // A rotation held for an older answer must not shadow the renewal.
+        refreshedOverlay[providerId] = nil
+        return true
     }
 
     /// Refresh (or join an in-flight refresh for) `providerId`. The first
@@ -202,12 +247,13 @@ public actor OAuthManager {
     }
 
     private func resolvedAuth(for providerId: String) async throws -> ResolvedProviderAuth {
-        let token = try await apiKey(for: providerId)
+        let authorization = try await authorization(for: providerId)
         let credentials = try await source.credentials(for: providerId)
         return ResolvedProviderAuth(
-            token: token,
+            token: authorization.apiKey,
             scheme: .bearer,
-            baseURL: Self.baseURL(forOAuthId: providerId, credentials: credentials)
+            baseURL: Self.baseURL(forOAuthId: providerId, credentials: credentials),
+            onRejected: authorization.onRejected
         )
     }
 

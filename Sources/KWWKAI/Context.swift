@@ -90,19 +90,56 @@ public struct ResolvedProviderAuth: Sendable, Hashable {
     public var headers: [String: String]
     public var baseURL: String?
     public var metadata: [String: JSONValue]
+    /// Set when the token came from an OAuth credential source that can be
+    /// told the provider refused it. The agent loop calls it once on an
+    /// authentication failure and, when it answers true, resolves again and
+    /// replays the request with the newer token.
+    public var onRejected: CredentialRejection?
 
     public init(
         token: String? = nil,
         scheme: AuthScheme = .none,
         headers: [String: String] = [:],
         baseURL: String? = nil,
-        metadata: [String: JSONValue] = [:]
+        metadata: [String: JSONValue] = [:],
+        onRejected: CredentialRejection? = nil
     ) {
         self.token = token
         self.scheme = scheme
         self.headers = headers
         self.baseURL = baseURL
         self.metadata = metadata
+        self.onRejected = onRejected
+    }
+}
+
+/// Reports a refused OAuth token back to where it came from. `report()`
+/// answers true when a different token is now available (resolve again and
+/// retry), false when there is nothing newer (surface the refusal as is),
+/// and throws `OAuthCredentialSourceError` when the login needs the user —
+/// that error, not the provider's refusal, is what the run should end with.
+///
+/// Equality is the provider id only: the closure carries no identity worth
+/// comparing, and two resolutions for the same login are the same auth.
+public struct CredentialRejection: Sendable, Hashable {
+    public let providerId: String
+    private let action: @Sendable () async throws -> Bool
+
+    public init(providerId: String, action: @escaping @Sendable () async throws -> Bool) {
+        self.providerId = providerId
+        self.action = action
+    }
+
+    public func report() async throws -> Bool {
+        try await action()
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.providerId == rhs.providerId
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(providerId)
     }
 }
 
