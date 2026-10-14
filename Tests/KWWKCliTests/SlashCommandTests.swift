@@ -350,6 +350,29 @@ struct SlashInputParseTests {
         #expect(busy.contains("Esc to cancel"))
     }
 
+    @Test("a busy state line keeps the spinner and cancel hint ahead of a notice")
+    func stateLineBusyNoticeTrails() {
+        func line(_ mode: CodingFrameMode, streaming: Bool) -> String {
+            ANSI.stripEscapes(codingFrameStateLine(
+                mode: mode,
+                isStreaming: streaming,
+                hasDraft: false,
+                runningBackgroundTasks: 0,
+                queuedPrompts: 0,
+                spinner: "*",
+                notice: "/goal: no active goal — /goal <objective> to start one"
+            ))
+        }
+        let generating = line(.idle, streaming: true)
+        #expect(generating.hasPrefix("* generating  ·  Esc to cancel"))
+        #expect(ANSI.truncate(generating, to: 78).contains("Esc to cancel"))
+        let compacting = line(.compacting(messageCount: 3), streaming: false)
+        #expect(compacting.hasPrefix("* compacting 3 messages"))
+        #expect(compacting.hasSuffix("/goal <objective> to start one"))
+        let retrying = line(.retrying(attempt: 0, until: Date(), reason: ""), streaming: true)
+        #expect(retrying.hasPrefix("* retry 2/5 in now  ·  Esc to cancel"))
+    }
+
     @MainActor
     @Test("slash menu footer offers Esc close like the @ menu")
     func slashFooterEscClose() {

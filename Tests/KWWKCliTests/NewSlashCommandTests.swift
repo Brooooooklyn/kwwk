@@ -83,6 +83,18 @@ struct NewSlashCommandTests {
     }
 
     @MainActor
+    @Test("/hotkeys rows fit an 80-column terminal without wrapping")
+    func hotkeysFitEightyColumns() async {
+        let (ctx, notifier) = await makeContext()
+        await runCommand("hotkeys", ctx: ctx)
+        let rows = notifier.joined.split(separator: "\n").map { ANSI.stripEscapes(String($0)) }
+        #expect(rows.count > 1)
+        for row in rows {
+            #expect(ANSI.visibleWidth(row) <= 79, "\(row)")
+        }
+    }
+
+    @MainActor
     @Test("notifyTransient goes to the state line when wired, else the transcript")
     func notifyTransientRouting() async {
         let (ctx, notifier) = await makeContext()

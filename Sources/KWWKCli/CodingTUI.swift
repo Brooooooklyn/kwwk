@@ -1778,8 +1778,9 @@ let transientNoticeSeconds: TimeInterval = 4
 
 /// The state line under the prompt box. `hasDraft` reflects text in the
 /// editor: Esc clears that first, so the cancel hint asks for two presses.
-/// `notice` is a short-lived one-liner (see `SlashContext.notifyTransient`)
-/// shown first; while idle it takes the place of the key hint.
+/// `notice` is a short-lived one-liner (see `SlashContext.notifyTransient`):
+/// while idle it takes the place of the key hint; while busy it goes after
+/// the spinner and cancel hint so truncation never cuts those.
 func codingFrameStateLine(
     mode: CodingFrameMode,
     isStreaming: Bool,
@@ -1790,9 +1791,7 @@ func codingFrameStateLine(
     notice: String? = nil
 ) -> String {
     var parts: [String] = []
-    if let notice, !notice.isEmpty {
-        parts.append(Theme.paint(notice, Theme.accentDim))
-    }
+    let noticePart = notice.flatMap { $0.isEmpty ? nil : Theme.paint($0, Theme.accentDim) }
     let cancelHint = hasDraft ? "Esc twice to cancel" : "Esc to cancel"
 
     switch mode {
@@ -1819,9 +1818,12 @@ func codingFrameStateLine(
         if isStreaming {
             parts.append(Theme.paint("\(spinner) generating", Theme.accent, bold: true))
             parts.append(Theme.faintText(cancelHint))
-        } else if parts.isEmpty {
-            parts.append(Theme.faintText(idlePromptHint))
+        } else {
+            parts.append(noticePart ?? Theme.faintText(idlePromptHint))
         }
+    }
+    if let noticePart, mode.isActive || isStreaming {
+        parts.append(noticePart)
     }
 
     if queuedPrompts > 0 {
