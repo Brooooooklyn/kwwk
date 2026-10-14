@@ -23,12 +23,19 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
     /// Bounded provider-owned diagnostic (e.g. OpenRouter metadata.raw), kept
     /// separate from display copy so a wrapper cannot hide the actual cause.
     public var upstreamMessage: String?
+    /// When a spent plan/subscription window opens again, in unix seconds.
+    /// Optional so values encoded before it existed still decode.
+    public var resetsAt: Double?
+    /// The provider's name for the spent window (Anthropic's
+    /// representative claim, e.g. `five_hour`, `seven_day`).
+    public var limitWindow: String?
     public var errorDescription: String? { message }
 
     public init(message: String, httpStatus: Int? = nil, providerCode: String? = nil,
                 transportDomain: String? = nil, transportCode: Int? = nil,
                 requestId: String? = nil, retryAfterMs: Double? = nil, shouldRetry: Bool? = nil,
-                rawStopReason: String? = nil, stopDetails: JSONValue? = nil, upstreamMessage: String? = nil) {
+                rawStopReason: String? = nil, stopDetails: JSONValue? = nil, upstreamMessage: String? = nil,
+                resetsAt: Double? = nil, limitWindow: String? = nil) {
         self.message = message
         self.httpStatus = httpStatus
         self.providerCode = providerCode
@@ -40,6 +47,8 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         self.rawStopReason = rawStopReason
         self.stopDetails = stopDetails
         self.upstreamMessage = upstreamMessage.map(Self.boundedDiagnostic)
+        self.resetsAt = resetsAt
+        self.limitWindow = limitWindow
     }
 
     public static func capture(_ error: any Error) -> Self {
@@ -86,7 +95,7 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
 
     /// Parse only recognized fields; never persist headers, credentials or an
     /// unrestricted response dump. A body's code/type is not the HTTP status.
-    public static func payload(_ value: JSONValue, fallback: String = "Provider error") -> Self {
+    public static func payload(_ value: JSONValue, fallback: String = "Provider error", now: Date = Date()) -> Self {
         guard case .object(let root) = value else { return Self(message: fallback) }
         let error: [String: JSONValue]
         if case .object(let nested) = root["error"] { error = nested } else { error = root }
@@ -107,12 +116,25 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             else if let data = try? JSONEncoder().encode(raw) { upstream = String(decoding: data, as: UTF8.self) }
             else { upstream = nil }
         } else { upstream = nil }
+        // Codex usage_limit_reached carries when the plan window opens again,
+        // as an absolute `resets_at` or a relative `resets_in_seconds`.
+        func number(_ value: JSONValue?) -> Double? {
+            switch value {
+            case .int(let number): return Double(number)
+            case .double(let number) where number.isFinite: return number
+            case .string(let text): return Double(text).flatMap { $0.isFinite ? $0 : nil }
+            default: return nil
+            }
+        }
+        let resetsAt = number(error["resets_at"]).flatMap { $0 > 0 ? $0 : nil }
+            ?? number(error["resets_in_seconds"]).flatMap { $0 >= 0 ? now.timeIntervalSince1970 + $0 : nil }
         return Self(message: String((string(root["error"]) ?? string(error["message"]) ?? string(root["message"]) ?? fallback).prefix(4096)),
                     httpStatus: status, providerCode: code,
-                    requestId: string(root["request_id"]) ?? string(error["request_id"]), upstreamMessage: upstream)
+                    requestId: string(root["request_id"]) ?? string(error["request_id"]), upstreamMessage: upstream,
+                    resetsAt: resetsAt)
     }
 
-    static func http(_ response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>) async -> Self {
+    static func http(_ response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>, now: Date = Date()) async -> Self {
         var bytes = Data()
         // A truncated/broken error body must never erase an already received status.
         do {
@@ -122,7 +144,7 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             }
         } catch { /* status and headers remain authoritative */ }
         let text = String(decoding: bytes, as: UTF8.self)
-        var failure = parseJSONObject(text).map { payload($0, fallback: text) }
+        var failure = parseJSONObject(text).map { payload($0, fallback: text, now: now) }
             ?? Self(message: text.isEmpty ? "HTTP \(response.statusCode)" : text)
         failure.httpStatus = response.statusCode
         failure.requestId = response.value(forHTTPHeaderField: "x-request-id")
@@ -135,7 +157,32 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         case "false": failure.shouldRetry = false
         default: break
         }
+        failure.applyAnthropicUnifiedLimit(response)
         return failure
+    }
+
+    /// A Claude subscription (OAuth) whose plan window is spent answers 429
+    /// with the generic "would exceed your account's rate limit" body; only
+    /// the unified rate-limit headers tell it apart from a momentary burst.
+    /// Read just these named headers; never keep the header set.
+    private mutating func applyAnthropicUnifiedLimit(_ response: HTTPURLResponse) {
+        func header(_ name: String) -> String? {
+            response.value(forHTTPHeaderField: name)?.trimmingCharacters(in: .whitespaces)
+        }
+        guard response.statusCode == 429,
+              header("anthropic-ratelimit-unified-status")?.lowercased() == "rejected" else { return }
+        // Paid overage still available means the request can go through
+        // again; it is not a spent subscription.
+        if let overage = header("anthropic-ratelimit-unified-overage-status")?.lowercased(),
+           overage == "allowed" || overage == "allowed_warning" { return }
+        providerCode = "usage_limit_reached"
+        shouldRetry = false
+        if let reset = header("anthropic-ratelimit-unified-reset").flatMap(Double.init), reset.isFinite, reset > 0 {
+            resetsAt = reset
+        }
+        if let claim = header("anthropic-ratelimit-unified-representative-claim"), !claim.isEmpty {
+            limitWindow = String(claim.prefix(64))
+        }
     }
 
     public static func retryDelay(headers: [String: String], now: Date = Date()) -> Double? {
@@ -196,6 +243,8 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         if ["refusal", "content_filter", "sensitive", "safety", "guardrail_intervened", "prohibited_content", "blocklist", "recitation", "spii"].contains(where: text.contains) { return .refusal }
         if ["insufficient_quota", "out of budget", "available balance", "billing", "monthly quota", "daily quota", "insufficient credits", "credits exhausted",
             "monthly usage limit", "usage limit reached", "usage_limit_reached", "gousagelimiterror", "freeusagelimiterror",
+            // Moonshot / Kimi Open Platform 429: account suspended for insufficient balance.
+            "exceeded_current_quota_error",
             // Z.ai / Zhipu 429 code 1113: no balance or no plan behind the key.
             "insufficient balance", "no resource package", "余额不足", "请充值"].contains(where: text.contains) { return .quota }
         // Cursor's plan refusals arrive as `resource_exhausted` marked not
