@@ -820,6 +820,7 @@ public enum OAuthLogin {
     // `zai` registration consumes it exactly like a hand-entered key.
 
     public static func loginZai(
+        site: ZaiSite = .global,
         callbacks: Callbacks,
         client: HTTPClient = URLSessionHTTPClient(),
         // Waits the given seconds before a poll; tests pass their own.
@@ -834,7 +835,7 @@ public enum OAuthLogin {
 
         callbacks.onProgress("starting the Z.AI sign-in…")
         let flow = try zaiUnwrap(
-            try await zcodeJSON(url: ZaiOAuth.cliInitURL, method: "POST", body: ["provider": "zai"],
+            try await zcodeJSON(url: ZaiOAuth.cliInitURL, method: "POST", body: ["provider": site.flowProvider],
                                 poll: poll, device: device, client: client),
             operation: "sign-in start"
         ) as? [String: Any]
@@ -846,37 +847,44 @@ public enum OAuthLogin {
         let interval = max((flow?["poll_interval_sec"] as? NSNumber)?.intValue ?? 2, 1)
         let expiresAt = (flow?["expires_at"] as? NSNumber)?.doubleValue ?? 0
         let deadline = expiresAt > 0 ? Date(timeIntervalSince1970: expiresAt) : Date().addingTimeInterval(5 * 60)
-        let page = zcodeAuthorizeURL(authorize)
+        let page = zcodeAuthorizeURL(authorize, parameter: site.redirectParameter)
 
-        callbacks.onProgress("sign in to Z.AI in your browser; this finishes on its own")
+        callbacks.onProgress("sign in to \(site.name) in your browser; this finishes on its own")
         let oauthToken = try await present(page, callbacks: callbacks) {
             try await pollZCodeFlow(
-                flowID: flowID, poll: poll, device: device, interval: interval, deadline: deadline,
+                site: site, flowID: flowID, poll: poll, device: device, interval: interval, deadline: deadline,
                 client: client, pollSleep: pollSleep
             )
         }
 
-        // Business login: the biz APIs reject the raw OAuth token; exchange
-        // it for a biz bearer first.
-        callbacks.onProgress("provisioning Z.AI API key…")
-        let login = try zaiUnwrap(
-            try await zaiJSON(
-                url: ZaiOAuth.businessLoginURL, method: "POST",
-                body: ["token": oauthToken], bearer: nil, client: client
-            ),
-            operation: "business login"
-        )
-        let loginObj = login as? [String: Any]
-        guard let bizToken = zaiString(loginObj?["access_token"]) ?? zaiString(loginObj?["accessToken"]) else {
-            throw OAuthError.invalidResponse("zai business login returned no access token")
+        // Business login: Z.ai's business API rejects the raw OAuth token, so
+        // it is traded for a business bearer first; BigModel's takes its
+        // token as it is, bare (magpie's zcode plugin, `bizAuth`).
+        callbacks.onProgress("provisioning \(site.name) API key…")
+        let business: String
+        if site.tradesForBusinessToken {
+            let login = try zaiUnwrap(
+                try await zaiJSON(
+                    url: ZaiOAuth.businessLoginURL, method: "POST",
+                    body: ["token": oauthToken], bearer: nil, client: client
+                ),
+                operation: "business login"
+            )
+            let loginObj = login as? [String: Any]
+            guard let bizToken = zaiString(loginObj?["access_token"]) ?? zaiString(loginObj?["accessToken"]) else {
+                throw OAuthError.invalidResponse("zai business login returned no access token")
+            }
+            business = "Bearer \(bizToken)"
+        } else {
+            business = oauthToken
         }
 
         // Resolve the default organization/project, then find-or-create the
         // kwwk-named key under it.
         let customer = try zaiUnwrap(
             try await zaiJSON(
-                url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/customer/getCustomerInfo"),
-                method: "GET", body: nil, bearer: bizToken, client: client
+                url: site.businessAPI.appendingPathComponent("api/biz/customer/getCustomerInfo"),
+                method: "GET", body: nil, bearer: nil, authorization: business, client: client
             ),
             operation: "customer lookup"
         )
@@ -885,10 +893,10 @@ public enum OAuthLogin {
             throw OAuthError.invalidResponse("zai key provisioning: no organization/project on account")
         }
 
-        let keysURL = ZaiOAuth.bizBaseURL
+        let keysURL = site.businessAPI
             .appendingPathComponent("api/biz/v1/organization/\(organizationId)/projects/\(projectId)/api_keys")
         let listed = try zaiUnwrap(
-            try await zaiJSON(url: keysURL, method: "GET", body: nil, bearer: bizToken, client: client),
+            try await zaiJSON(url: keysURL, method: "GET", body: nil, bearer: nil, authorization: business, client: client),
             operation: "api key list"
         )
         let record: [String: Any]?
@@ -903,7 +911,7 @@ public enum OAuthLogin {
             record = try zaiUnwrap(
                 try await zaiJSON(
                     url: keysURL, method: "POST",
-                    body: ["name": ZaiOAuth.keyName], bearer: bizToken, client: client
+                    body: ["name": ZaiOAuth.keyName], bearer: nil, authorization: business, client: client
                 ),
                 operation: "api key create"
             ) as? [String: Any]
@@ -918,7 +926,7 @@ public enum OAuthLogin {
         let copied = try zaiUnwrap(
             try await zaiJSON(
                 url: keysURL.appendingPathComponent("copy/\(apiKey)"),
-                method: "GET", body: nil, bearer: bizToken, client: client
+                method: "GET", body: nil, bearer: nil, authorization: business, client: client
             ),
             operation: "api key copy"
         )
@@ -937,10 +945,10 @@ public enum OAuthLogin {
         // "GLM Coding Lite","status":"VALID",…}]}`. Only a list that was
         // read and holds no valid subscription refuses the sign-in: a read
         // that fails leaves the key, which is good either way.
-        if let plan = await zaiCodingPlan(key: key, client: client) {
+        if let plan = await zaiCodingPlan(key: key, site: site, client: client) {
             guard !plan.isEmpty else {
                 throw OAuthError.invalidResponse(
-                    "this Z.ai account has no GLM Coding Plan of its own (a seat on a team's plan can't be used here) — subscribe at z.ai/subscribe, then sign in again"
+                    "this \(site.name) account has no GLM Coding Plan of its own (a seat on a team's plan can't be used here) — subscribe at \(site.subscribe), then sign in again"
                 )
             }
             callbacks.onProgress("signed in to \(plan)")
@@ -988,10 +996,10 @@ public enum OAuthLogin {
 
     /// The name of the account's valid GLM Coding Plan, "" when the list was
     /// read and holds none, nil when it could not be read.
-    private static func zaiCodingPlan(key: String, client: HTTPClient) async -> String? {
+    private static func zaiCodingPlan(key: String, site: ZaiSite, client: HTTPClient) async -> String? {
         guard let listed = try? zaiUnwrap(
             try await zaiJSON(
-                url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/subscription/list"),
+                url: site.planAPI.appendingPathComponent("api/biz/subscription/list"),
                 method: "GET", body: nil, bearer: nil, authorization: key, client: client
             ),
             operation: "subscription list"
@@ -1001,14 +1009,12 @@ public enum OAuthLogin {
         return zaiString(valid["productName"]) ?? "GLM Coding Plan"
     }
 
-    /// One JSON round-trip: optional JSON body, optional bearer, ≥400 throws
-    /// with the response text, empty bodies come back nil.
-    /// Where Z.ai sends the browser back: ZCode's own page, as ZCode and
+    /// Where the site sends the browser back: ZCode's own page, as ZCode and
     /// magpie set it, in place of the flow's default.
-    static func zcodeAuthorizeURL(_ authorize: URL) -> URL {
+    static func zcodeAuthorizeURL(_ authorize: URL, parameter: String) -> URL {
         guard var comps = URLComponents(url: authorize, resolvingAgainstBaseURL: false) else { return authorize }
-        var items = (comps.queryItems ?? []).filter { $0.name != "redirect_uri" }
-        items.append(URLQueryItem(name: "redirect_uri", value: ZaiOAuth.webLoginURL.absoluteString))
+        var items = (comps.queryItems ?? []).filter { $0.name != parameter }
+        items.append(URLQueryItem(name: parameter, value: ZaiOAuth.webLoginURL.absoluteString))
         comps.queryItems = items
         return comps.url ?? authorize
     }
@@ -1017,7 +1023,7 @@ public enum OAuthLogin {
     /// token. A hiccup (a thrown request, 408, 429, 5xx) asks again; any
     /// other 4xx, a declined sign-in or the deadline ends it.
     static func pollZCodeFlow(
-        flowID: String, poll: String, device: String, interval: Int, deadline: Date,
+        site: ZaiSite, flowID: String, poll: String, device: String, interval: Int, deadline: Date,
         client: HTTPClient, pollSleep: @escaping @Sendable (Int) async throws -> Void
     ) async throws -> String {
         let url = ZaiOAuth.cliPollURL(flowID: flowID)
@@ -1046,9 +1052,12 @@ public enum OAuthLogin {
             case "pending":
                 continue
             case "failed":
-                throw OAuthLoginError.denied("zai: the sign-in was declined on Z.ai")
+                throw OAuthLoginError.denied("zai: the sign-in was declined on \(site.name)")
             case "ready":
-                guard let token = zaiString((got?["zai"] as? [String: Any])?["access_token"]) else {
+                // The site's own token rides under its flow name; BigModel's
+                // has been seen spelled both ways (magpie's zcode plugin).
+                let tokens = got?[site.flowProvider] as? [String: Any]
+                guard let token = zaiString(tokens?["access_token"]) ?? zaiString(tokens?["accessToken"]) else {
                     throw OAuthError.invalidResponse("zai sign-in finished without an access token")
                 }
                 return token
@@ -1082,6 +1091,8 @@ public enum OAuthLogin {
         return try? JSONSerialization.jsonObject(with: responseBody)
     }
 
+    /// One JSON round-trip: optional JSON body, optional bearer, ≥400 throws
+    /// with the response text, empty bodies come back nil.
     private static func zaiJSON(
         url: URL,
         method: String,

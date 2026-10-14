@@ -186,19 +186,8 @@ let loginProviders: [LoginEntry] = [
     ),
     LoginEntry(
         id: "zai-coding-cn",
-        display: "Z.AI GLM Coding Plan — China (open.bigmodel.cn)",
-        flow: .apiKey(
-            fields: [
-                APIKeyFormField(
-                    key: "apiKey",
-                    label: "API key",
-                    hint: "from bigmodel.cn API-keys console",
-                    placeholder: "…",
-                    required: true
-                ),
-            ],
-            extrasKeys: []
-        )
+        display: "BigModel (智谱) GLM Coding Plan (bigmodel.cn sign-in)",
+        flow: .oauth
     ),
     LoginEntry(
         id: "openai-compatible",

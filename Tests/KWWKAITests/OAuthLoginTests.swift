@@ -681,6 +681,68 @@ struct OAuthLoginShapeTests {
         #expect(plan.headers["authorization"] == "ak-123.sk-456")
     }
 
+    @Test("BigModel (智谱) signs in through the same flow, on its own page and business API")
+    func zaiChinaLoginFlow() async throws {
+        let client = SequentialStubClient()
+        // The flow as zcode.z.ai opened it for BigModel on 2026-10-15.
+        client.queue.append((200, #"{"code":0,"data":{"flow_id":"f2","authorize_url":"https://bigmodel.cn/login?appId=zcode&redirect=https://zcode.z.ai/api/v1/oauth/cli/callback/bigmodel&state=s2","expires_at":4102444800,"poll_interval_sec":2}}"#))
+        // BigModel's token spelled the camel way.
+        client.queue.append((200, #"{"code":0,"data":{"status":"ready","bigmodel":{"accessToken":"bm-tok"}}}"#))
+        client.queue.append((200, #"{"code":200,"data":{"organizations":[{"organizationId":"org-1","projects":[{"projectId":"proj-1"}]}]}}"#))
+        client.queue.append((200, #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak-cn"}]}"#))
+        client.queue.append((200, #"{"code":200,"data":{"secretKey":"sk-cn"}}"#))
+        client.queue.append((200, Self.zaiLitePlan))
+
+        let opened = CapturedURL()
+        let creds = try await OAuthLogin.loginZai(
+            site: .china, callbacks: zaiCallbacks(opened: opened), client: client, pollSleep: { _ in }
+        )
+        #expect(creds.access == "ak-cn.sk-cn")
+        #expect(creds.refresh == "")
+
+        let startBody = try JSONSerialization.jsonObject(with: client.recorded[0].body ?? Data()) as? [String: Any]
+        #expect(startBody?["provider"] as? String == "bigmodel")
+
+        // BigModel's login page names the way back `redirect`.
+        let page = try #require(opened.get())
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: page, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        #expect(page.host == "bigmodel.cn")
+        #expect(query["appId"] == "zcode")
+        #expect(query["state"] == "s2")
+        #expect(query["redirect"] == "https://zcode.z.ai/app/oauth/login?redirect=zcode://oauth/callback&app_version=3.14.3")
+        #expect(query["redirect_uri"] == nil)
+
+        // No business login: BigModel's token goes to its business API bare.
+        #expect(client.recorded.count == 6)
+        let customer = client.recorded[2]
+        #expect(customer.url.absoluteString == "https://bigmodel.cn/api/biz/customer/getCustomerInfo")
+        #expect(customer.headers["authorization"] == "bm-tok")
+        #expect(client.recorded[3].url.absoluteString == "https://bigmodel.cn/api/biz/v1/organization/org-1/projects/proj-1/api_keys")
+        #expect(client.recorded[4].url.absoluteString.hasSuffix("api_keys/copy/ak-cn"))
+        // The plan is asked where BigModel serves it, with the key bare.
+        let plan = client.recorded[5]
+        #expect(plan.url.absoluteString == "https://open.bigmodel.cn/api/biz/subscription/list")
+        #expect(plan.headers["authorization"] == "ak-cn.sk-cn")
+    }
+
+    @Test("a BigModel account with no plan is sent to BigModel to subscribe")
+    func zaiChinaNoPlan() async throws {
+        let client = SequentialStubClient()
+        client.queue.append((200, #"{"code":0,"data":{"flow_id":"f2","authorize_url":"https://bigmodel.cn/login?appId=zcode&redirect=x&state=s2"}}"#))
+        client.queue.append((200, #"{"code":0,"data":{"status":"ready","bigmodel":{"access_token":"bm-tok"}}}"#))
+        client.queue.append((200, #"{"code":200,"data":{"organizations":[{"organizationId":"o","projects":[{"projectId":"p"}]}]}}"#))
+        client.queue.append((200, #"{"code":200,"data":[{"name":"kwwk","apiKey":"ak"}]}"#))
+        client.queue.append((200, #"{"code":200,"data":{"secretKey":"sk"}}"#))
+        client.queue.append((200, #"{"code":200,"data":[]}"#))
+        do {
+            _ = try await OAuthLogin.loginZai(site: .china, callbacks: zaiCallbacks(), client: client, pollSleep: { _ in })
+            Issue.record("a planless account signed in")
+        } catch {
+            #expect(error.localizedDescription.contains("BigModel account has no GLM Coding Plan"))
+            #expect(error.localizedDescription.contains("bigmodel.cn/glm-coding"))
+        }
+    }
+
     @Test("zai poll rides out a hiccup, and a declined sign-in or a refused flow ends it", arguments: [
         ([(status: 503, body: "busy"), (200, #"{"code":0,"data":{"status":"failed"}}"#)], "declined"),
         ([(status: 404, body: #"{"code":404,"msg":"flow not found"}"#)], "404"),
