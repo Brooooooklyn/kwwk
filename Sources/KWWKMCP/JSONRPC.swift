@@ -86,7 +86,7 @@ public enum JSONRPCMessage: Sendable, Hashable {
             let code: Int
             switch errorObject["code"] {
             case .int(let value)?: code = value
-            case .double(let value)?: code = Int(value)
+            case .double(let value)?: code = Int(exactly: value.rounded(.towardZero)) ?? JSONRPCErrorObject.internalError
             default: code = JSONRPCErrorObject.internalError
             }
             var message = "Unknown error"
