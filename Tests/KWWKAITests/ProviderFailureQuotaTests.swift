@@ -113,4 +113,12 @@ struct ProviderFailureQuotaTests {
         #expect(decoded.resetsAt == 1_790_000_000)
         #expect(decoded.limitWindow == "seven_day")
     }
+
+    @Test func moonshotEmptyBalanceOn403IsQuotaNotLogin() {
+        let failure = ProviderFailure(
+            message: #"{"error":{"message":"Your account is suspended due to insufficient balance, please recharge your account","type":"exceeded_current_quota_error"}}"#,
+            httpStatus: 403
+        )
+        #expect(failure.category == .quota)
+    }
 }

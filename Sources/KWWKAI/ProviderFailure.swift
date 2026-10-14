@@ -324,6 +324,9 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         return Self.match(#"\b(reached your [a-z0-9() -]{0,40}usage limit)\b"#, in: text) != nil
             || text.contains("quota will reset")
             || text.contains("quota will be refreshed")
+            // Moonshot open platform: an empty balance can arrive as 403.
+            || text.contains("exceeded_current_quota_error")
+            || text.contains("insufficient balance")
     }
 
     private static func isTransientLimit(_ text: String) -> Bool {
