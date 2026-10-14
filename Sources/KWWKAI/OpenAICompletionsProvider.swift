@@ -897,6 +897,11 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             }
             i += 1
         }
+        if DeepSeekToolTurnReasoning.appliesToChat(model) {
+            // DeepSeek refuses a tool turn without reasoning_content, on
+            // any host that serves its models (magpie #1462, #1822).
+            out = DeepSeekToolTurnReasoning.chatMessages(out)
+        }
         return out
     }
 
