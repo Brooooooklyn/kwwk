@@ -207,6 +207,36 @@ struct TranscriptCommitTests {
     }
 
     @MainActor
+    @Test("unsupported-model error names the model and provider and points at /model")
+    func unsupportedModelErrorHint() {
+        func failed(_ error: String) -> AssistantMessage {
+            AssistantMessage(
+                content: [],
+                api: "openai-completions",
+                provider: "github-copilot",
+                model: "gpt-5.5",
+                stopReason: .error,
+                errorMessage: error
+            )
+        }
+        let r = TranscriptRenderer()
+        r.apply(.messageStart(message: .assistant(stubAssistant(""))))
+        r.apply(.messageEnd(message: .assistant(failed("The requested model is not supported."))))
+        let commits = r.drainCommits().map(ANSI.stripEscapes)
+        #expect(commits.contains("✗ The requested model is not supported."))
+        #expect(commits.contains("↳ gpt-5.5 is not available on GitHub Copilot — /model to switch"))
+
+        // Other errors keep the single ✗ line — including parameter
+        // rejections that merely mention the model.
+        for other in ["HTTP 500: internal error", "thinking.type.enabled is not supported for this model"] {
+            #expect(modelUnavailableHint(for: failed(other)) == nil)
+        }
+        var stopped = failed("The requested model is not supported.")
+        stopped.stopReason = .stop
+        #expect(modelUnavailableHint(for: stopped) == nil)
+    }
+
+    @MainActor
     @Test("streamRetry commits a dimmed retry line immediately")
     func streamRetryCommits() {
         let r = TranscriptRenderer()

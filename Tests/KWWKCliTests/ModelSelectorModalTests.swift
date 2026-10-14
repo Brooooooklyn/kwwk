@@ -137,6 +137,47 @@ struct ModelSelectorModalTests {
         #expect(modal.render(maxRows: 12, width: 80).contains(where: { $0.contains("/50") }))
     }
 
+    @MainActor
+    @Test("windowed footer reports rows above and below the window")
+    func footerScrollExtent() {
+        let models = (0..<28).map { model("m\($0)") }
+        let modal = ModelSelectorModal(
+            title: "Pick one",
+            models: models,
+            currentModelId: "m15",
+            onSelect: { _ in },
+            onCancel: {}
+        )
+        let lines = modal.render(maxRows: 16, width: 100).map(strip)
+        let footer = lines.last ?? ""
+        #expect(footer.contains("16/28"))
+        #expect(footer.contains("above"))
+        #expect(footer.contains("below"))
+        #expect(footer.contains("Esc: cancel"))
+        // The listed rows plus the above/below counts account for all 28.
+        let shown = lines.filter { $0.hasPrefix("    m") || $0.hasPrefix("  ❯ m") }.count
+        let numbers = footer.components(separatedBy: " ").compactMap(Int.init)
+        #expect(numbers.count == 2)
+        #expect(shown + numbers.reduce(0, +) == 28)
+
+        // At the top there is nothing above; too narrow for the counts, the
+        // key hint wins and the plain position remains.
+        let top = ModelSelectorModal(
+            title: "Pick one",
+            models: models,
+            currentModelId: "m0",
+            onSelect: { _ in },
+            onCancel: {}
+        )
+        let topFooter = top.render(maxRows: 16, width: 100).map(strip).last ?? ""
+        #expect(!topFooter.contains("above"))
+        #expect(topFooter.contains("below"))
+        let narrow = modal.render(maxRows: 16, width: 60).map(strip).last ?? ""
+        #expect(narrow.contains("16/28"))
+        #expect(!narrow.contains("below"))
+        #expect(narrow.contains("Esc: cancel"))
+    }
+
     // MARK: - Provider tab bar
 
     /// Two providers sharing one model id, plus a provider-unique model each.

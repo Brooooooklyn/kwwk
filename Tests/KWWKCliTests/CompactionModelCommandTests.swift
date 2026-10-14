@@ -84,6 +84,29 @@ struct CompactionModelCommandTests {
     }
 
     @MainActor
+    @Test("single-provider /model picker names the provider in its title")
+    func singleProviderTitleNamesProvider() async {
+        let main = testModel(id: "main", provider: "main-provider")
+        let providers = SessionProviders([
+            ProviderSlot(
+                storeId: "main-login",
+                catalogProvider: "test-main-catalog",
+                displayName: "Main Provider",
+                template: main
+            ),
+        ])
+        let (ctx, harness) = makeContext(main: main, providers: providers)
+        let registry = SlashCommandRegistry()
+        registerBuiltinSlashCommands(registry)
+
+        await registry.find("model")?.handler(ctx, "")
+        #expect(ctx.modal.isOpen)
+        let rendered = ANSI.stripEscapes((harness.modalLines ?? []).joined(separator: "\n"))
+        #expect(rendered.contains("Select a model · Main Provider"))
+        ctx.modal.routeCancel()
+    }
+
+    @MainActor
     @Test("logged-out picker points to login")
     func loggedOutPicker() async {
         let (ctx, harness) = makeContext(main: loggedOutModel)

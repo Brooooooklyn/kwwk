@@ -94,11 +94,11 @@ final class ModalListCore {
     /// soft-wrap — a wrapped row would break the `maxRows` height contract
     /// and let the terminal push the title/header chrome off-screen.
     func render(title: String, headerLines: [String] = [], maxRows: Int, width: Int) -> [String] {
-        renderUnfitted(title: title, headerLines: headerLines, maxRows: maxRows)
+        renderUnfitted(title: title, headerLines: headerLines, maxRows: maxRows, width: width)
             .map { ANSI.fit($0, to: width) }
     }
 
-    private func renderUnfitted(title: String, headerLines: [String], maxRows: Int) -> [String] {
+    private func renderUnfitted(title: String, headerLines: [String], maxRows: Int, width: Int) -> [String] {
         // Cosmetic blank spacers (above the list and above the footer) are
         // dropped on short terminals so the render stays within `maxRows` —
         // title + headers + body + footer is the irreducible minimum.
@@ -172,7 +172,25 @@ final class ModalListCore {
         for line in visible { out.append(line.text) }
         if roomy { out.append("") }
         let move = "↑/↓: move   Enter: confirm   Esc: cancel"
-        out.append(Style.dimmed(windowed ? "  \(selectedIndex + 1)/\(rows.count)   \(move)" : "  \(move)"))
+        guard windowed else {
+            out.append(Style.dimmed("  \(move)"))
+            return out
+        }
+        // Scroll position: how many rows sit above / below the window. Only
+        // shown when the whole footer still fits, so the key hint is never
+        // truncated to make room for it.
+        let windowEnd = min(lines.count, scroll + windowRows)
+        let above = lines[..<scroll].filter { !$0.isHeader }.count
+        let below = lines[windowEnd...].filter { !$0.isHeader }.count
+        var position = "\(selectedIndex + 1)/\(rows.count)"
+        var extent: [String] = []
+        if above > 0 { extent.append("\(above) above") }
+        if below > 0 { extent.append("\(below) below") }
+        let withExtent = position + " · " + extent.joined(separator: " · ")
+        if !extent.isEmpty, ANSI.visibleWidth("  \(withExtent)   \(move)") <= width {
+            position = withExtent
+        }
+        out.append(Style.dimmed("  \(position)   \(move)"))
         return out
     }
 }

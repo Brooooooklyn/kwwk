@@ -335,6 +335,9 @@ final class TranscriptRenderer {
                 }
                 if let err = a.errorMessage, a.stopReason == .error {
                     tail.append(Style.error("✗ \(err)"))
+                    if let hint = modelUnavailableHint(for: a) {
+                        tail.append(Style.dimmed(hint))
+                    }
                 }
                 if !tail.isEmpty {
                     flushCollapsedThinking()
@@ -1145,4 +1148,33 @@ final class TranscriptRenderer {
     private func truncate(_ s: String, to max: Int) -> String {
         s.count <= max ? s : String(s.prefix(max)) + "…"
     }
+}
+
+/// Follow-up line for a provider error that rejects the requested model
+/// itself (e.g. Copilot's bare "The requested model is not supported."), which
+/// names neither the model nor the provider. Returns nil for every other
+/// error so ordinary failures keep their single `✗` line. Internal for tests.
+func modelUnavailableHint(for message: AssistantMessage) -> String? {
+    guard message.stopReason == .error,
+          let error = message.errorMessage?.lowercased(),
+          isModelUnavailableError(error)
+    else { return nil }
+    let provider = ProviderAttribution.getProviderDisplayName(message.provider)
+    let onProvider = provider.isEmpty ? "" : " on \(provider)"
+    return "↳ \(message.model) is not available\(onProvider) — /model to switch"
+}
+
+/// Phrases providers use when the requested model id is unknown or not
+/// enabled for the account. Kept specific: a generic "not supported" also
+/// covers parameter rejections ("thinking.type.enabled is not supported"),
+/// where pointing at /model would mislead.
+private func isModelUnavailableError(_ lowered: String) -> Bool {
+    let phrases = [
+        "model is not supported", "model not supported", "model_not_supported",
+        "unsupported model", "model_not_found", "model not found",
+        "no such model", "unknown model", "invalid model", "is not a valid model",
+    ]
+    if phrases.contains(where: lowered.contains) { return true }
+    // OpenAI: "The model `x` does not exist or you do not have access to it."
+    return lowered.contains("the model") && lowered.contains("does not exist")
 }

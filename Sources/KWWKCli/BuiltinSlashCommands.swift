@@ -135,7 +135,7 @@ private func handleModelCommand(_ ctx: SlashContext, _ args: String) async {
     }
 
     let multi = choices.providerCount > 1
-    let title = multi ? "Select a model  (\(choices.providerCount) providers)" : "Select a model"
+    let title = modelSelectorTitle("Select a model", choices)
     let modal = ModelSelectorModal(
         title: title,
         models: choices.models,
@@ -223,9 +223,7 @@ private func handleCompactionModelCommand(_ ctx: SlashContext, _ args: String) a
     }
 
     let multi = choices.providerCount > 1
-    let title = multi
-        ? "Select a compaction model  (\(choices.providerCount) providers)"
-        : "Select a compaction model"
+    let title = modelSelectorTitle("Select a compaction model", choices)
     let modal = ModelSelectorModal(
         title: title,
         models: choices.models,
@@ -308,6 +306,18 @@ private func modelChoices(
         currentIndex: currentIndex,
         providerCount: slotList.count
     )
+}
+
+/// Selector title. Several providers get a count (the tab bar names them);
+/// a single provider has no tab bar or group headers, so its name goes in the
+/// title — otherwise nothing on screen says whose catalog is listed.
+@MainActor
+private func modelSelectorTitle(_ base: String, _ choices: ModelChoices) -> String {
+    if choices.providerCount > 1 {
+        return "\(base)  (\(choices.providerCount) providers)"
+    }
+    guard let provider = choices.groups.first, !provider.isEmpty else { return base }
+    return "\(base) · \(provider)"
 }
 
 private func modelDisplay(_ model: Model) -> String {
@@ -922,7 +932,8 @@ private func handleHotkeysCommand(_ ctx: SlashContext, _ args: String) async {
     let rows: [(String, String)] = [
         ("Enter", "submit prompt / run highlighted slash command"),
         ("Tab", "complete the slash command under the cursor"),
-        ("Tab / ← / →", "switch the provider tab in /model"),
+        ("Tab / ← / →", "switch the provider tab in /model (2+ providers signed in)"),
+        ("typing", "filter the /model list by model id (Esc clears the filter)"),
         ("↑ / ↓", "move by line · recall history when empty · move in popups"),
         ("Alt/Option+↑", "pop a queued prompt back into the input to edit"),
         ("Esc", "close a popup/modal · clear the input · then stop the agent"),
