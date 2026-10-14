@@ -806,59 +806,54 @@ public enum OAuthLogin {
 
     // MARK: - Z.AI GLM Coding Plan (browser sign-in)
     //
-    // Ported from oh-my-pi's `zai.ts` (ZCode's desktop "Individual Plan"
-    // flow): an authorization-code grant (no PKCE) against chat.z.ai, a JSON
-    // token exchange on zcode.z.ai that yields a short-lived OAuth access
-    // token, then a business-API sequence on api.z.ai that provisions a
-    // durable `id.secret` API key. The minted key persists in the sentinel
-    // credentials shape (refresh "", expires .max) so the stored `zai`
-    // registration consumes it exactly like a hand-entered key.
+    // ZCode's own polling sign-in, as magpie runs it (internal/provider
+    // zcode.go startZCodeSignIn; its zcode plugin's authorize): zcode.z.ai
+    // opens a flow, the browser signs in to Z.ai and lands on ZCode's own
+    // page, and the flow is polled until it hands over Z.ai's access token.
+    // No loopback and no custom scheme: Z.ai refuses every loopback redirect
+    // for ZCode's client id now (AirBuild's sheet answered "Redirect URI not
+    // registered for this client", 2026-10-14), and ZCode's server receives
+    // the redirect instead. So it finishes the same in a terminal, a phone's
+    // sign-in sheet or a remote session. Then a business-API sequence on
+    // api.z.ai provisions a durable `id.secret` API key, persisted in the
+    // sentinel credentials shape (refresh "", expires .max) so the stored
+    // `zai` registration consumes it exactly like a hand-entered key.
 
     public static func loginZai(
-        clientID: String = ZaiOAuth.clientID,
-        port: UInt16 = ZaiOAuth.callbackPort,
         callbacks: Callbacks,
-        client: HTTPClient = URLSessionHTTPClient()
+        client: HTTPClient = URLSessionHTTPClient(),
+        // Waits the given seconds before a poll; tests pass their own.
+        pollSleep: @escaping @Sendable (Int) async throws -> Void = { seconds in
+            try await Task.sleep(nanoseconds: UInt64(max(seconds, 0)) * 1_000_000_000)
+        }
     ) async throws -> OAuthCredentials {
-        let state = PKCE.randomHex()
-        let server = try await openLoopback(callbacks, port: port)
-        defer { server.stop() }
-        let redirect = server.redirectURI
+        // The flow is the poller's alone: a bearer only it knows, and the
+        // machine id ZCode names itself with (X-Device-Mid).
+        let poll = "Bearer " + PKCE.randomHex(bytes: 32)
+        let device = UUID().uuidString.lowercased()
 
-        var comps = URLComponents(url: ZaiOAuth.authorizeURL, resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "redirect_uri", value: redirect),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "state", value: state),
-        ]
-        callbacks.onProgress("waiting for Z.AI callback on \(redirect)…")
+        callbacks.onProgress("starting the Z.AI sign-in…")
+        let flow = try zaiUnwrap(
+            try await zcodeJSON(url: ZaiOAuth.cliInitURL, method: "POST", body: ["provider": "zai"],
+                                poll: poll, device: device, client: client),
+            operation: "sign-in start"
+        ) as? [String: Any]
+        guard let flowID = zaiString(flow?["flow_id"]),
+              let authorize = zaiString(flow?["authorize_url"]).flatMap(URL.init(string:)),
+              authorize.scheme == "https" else {
+            throw OAuthError.invalidResponse("ZCode gave no sign-in page")
+        }
+        let interval = max((flow?["poll_interval_sec"] as? NSNumber)?.intValue ?? 2, 1)
+        let expiresAt = (flow?["expires_at"] as? NSNumber)?.doubleValue ?? 0
+        let deadline = expiresAt > 0 ? Date(timeIntervalSince1970: expiresAt) : Date().addingTimeInterval(5 * 60)
+        let page = zcodeAuthorizeURL(authorize)
 
-        let params = try await present(comps.url!, callbacks: callbacks) {
-            try await server.waitForCallback()
-        }
-        try checkCallbackError(params, provider: "zai")
-        guard let code = params["code"], !code.isEmpty else {
-            throw OAuthError.invalidResponse("zai callback had no code")
-        }
-        if let callbackState = params["state"], callbackState != state {
-            throw OAuthError.invalidResponse("zai OAuth state mismatch")
-        }
-
-        // Token exchange — non-standard JSON body (no grant_type or PKCE);
-        // matches ZCode verbatim.
-        callbacks.onProgress("exchanging authorization code…")
-        let exchange = try zaiUnwrap(
-            try await zaiJSON(
-                url: ZaiOAuth.tokenURL, method: "POST",
-                body: ["provider": "zai", "code": code, "redirect_uri": redirect, "state": state],
-                bearer: nil, client: client
-            ),
-            operation: "token exchange"
-        )
-        guard let zaiObj = (exchange as? [String: Any])?["zai"] as? [String: Any],
-              let oauthToken = zaiString(zaiObj["access_token"]) else {
-            throw OAuthError.invalidResponse("zai token response missing access token")
+        callbacks.onProgress("sign in to Z.AI in your browser; this finishes on its own")
+        let oauthToken = try await present(page, callbacks: callbacks) {
+            try await pollZCodeFlow(
+                flowID: flowID, poll: poll, device: device, interval: interval, deadline: deadline,
+                client: client, pollSleep: pollSleep
+            )
         }
 
         // Business login: the biz APIs reject the raw OAuth token; exchange
@@ -1008,6 +1003,85 @@ public enum OAuthLogin {
 
     /// One JSON round-trip: optional JSON body, optional bearer, ≥400 throws
     /// with the response text, empty bodies come back nil.
+    /// Where Z.ai sends the browser back: ZCode's own page, as ZCode and
+    /// magpie set it, in place of the flow's default.
+    static func zcodeAuthorizeURL(_ authorize: URL) -> URL {
+        guard var comps = URLComponents(url: authorize, resolvingAgainstBaseURL: false) else { return authorize }
+        var items = (comps.queryItems ?? []).filter { $0.name != "redirect_uri" }
+        items.append(URLQueryItem(name: "redirect_uri", value: ZaiOAuth.webLoginURL.absoluteString))
+        comps.queryItems = items
+        return comps.url ?? authorize
+    }
+
+    /// Polls ZCode's flow until the browser sign-in hands over Z.ai's access
+    /// token. A hiccup (a thrown request, 408, 429, 5xx) asks again; any
+    /// other 4xx, a declined sign-in or the deadline ends it.
+    static func pollZCodeFlow(
+        flowID: String, poll: String, device: String, interval: Int, deadline: Date,
+        client: HTTPClient, pollSleep: @escaping @Sendable (Int) async throws -> Void
+    ) async throws -> String {
+        let url = ZaiOAuth.cliPollURL(flowID: flowID)
+        while true {
+            try await pollSleep(interval)
+            try Task.checkCancellation()
+            if Date() > deadline { throw OAuthLoginError.timedOut }
+            let response: HTTPURLResponse
+            let body: Data
+            do {
+                (response, body) = try await client.request(
+                    url: url, method: "GET", headers: zcodeHeaders(poll: poll, device: device), body: nil
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+            let status = response.statusCode
+            if status == 408 || status == 429 || status >= 500 { continue }
+            if status >= 400 {
+                throw OAuthError.refreshFailed("zai sign-in poll \(status): \(String(data: body, encoding: .utf8) ?? "")")
+            }
+            let got = try zaiUnwrap(try? JSONSerialization.jsonObject(with: body), operation: "sign-in poll") as? [String: Any]
+            switch zaiString(got?["status"]) ?? "pending" {
+            case "pending":
+                continue
+            case "failed":
+                throw OAuthLoginError.denied("zai: the sign-in was declined on Z.ai")
+            case "ready":
+                guard let token = zaiString((got?["zai"] as? [String: Any])?["access_token"]) else {
+                    throw OAuthError.invalidResponse("zai sign-in finished without an access token")
+                }
+                return token
+            case let other:
+                throw OAuthError.invalidResponse("zai sign-in: unexpected answer \(other)")
+            }
+        }
+    }
+
+    static func zcodeHeaders(poll: String, device: String) -> [String: String] {
+        [
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": poll,
+            "user-agent": "ZCode/\(ZaiOAuth.zcodeAppVersion)",
+            "x-device-mid": device,
+        ]
+    }
+
+    private static func zcodeJSON(
+        url: URL, method: String, body: [String: Any]?, poll: String, device: String, client: HTTPClient
+    ) async throws -> Any? {
+        let data = try body.map { try JSONSerialization.data(withJSONObject: $0) }
+        let (response, responseBody) = try await client.request(
+            url: url, method: method, headers: zcodeHeaders(poll: poll, device: device), body: data
+        )
+        if response.statusCode >= 400 {
+            throw OAuthError.refreshFailed("zai \(url.lastPathComponent) \(response.statusCode): \(String(data: responseBody, encoding: .utf8) ?? "")")
+        }
+        guard !responseBody.isEmpty else { return nil }
+        return try? JSONSerialization.jsonObject(with: responseBody)
+    }
+
     private static func zaiJSON(
         url: URL,
         method: String,

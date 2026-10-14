@@ -505,9 +505,23 @@ public enum DevinOAuth {
 /// flow provisions a durable `id.secret` API key, so there is no refresh
 /// provider here either.
 public enum ZaiOAuth {
-    public static let clientID = "client_P8X5CMWmlaRO9gyO-KSqtg"
-    public static let authorizeURL = URL(string: "https://chat.z.ai/api/oauth/authorize")!
-    public static let tokenURL = URL(string: "https://zcode.z.ai/api/v1/oauth/token")!
+    /// ZCode's polling sign-in: opens a flow and names the page to sign in on.
+    public static let cliInitURL = URL(string: "https://zcode.z.ai/api/v1/oauth/cli/init")!
+    /// The flow's state, until it hands over Z.ai's access token.
+    public static func cliPollURL(flowID: String) -> URL {
+        URL(string: "https://zcode.z.ai/api/v1/oauth/cli/poll/")!.appendingPathComponent(flowID)
+    }
+    /// The ZCode version this sign-in presents as (magpie pins the same).
+    public static let zcodeAppVersion = "3.14.3"
+    /// Where Z.ai sends the browser back: ZCode's own sign-in page.
+    public static var webLoginURL: URL {
+        var comps = URLComponents(string: "https://zcode.z.ai/app/oauth/login")!
+        comps.queryItems = [
+            URLQueryItem(name: "redirect", value: "zcode://oauth/callback"),
+            URLQueryItem(name: "app_version", value: zcodeAppVersion),
+        ]
+        return comps.url!
+    }
     public static let bizBaseURL = URL(string: "https://api.z.ai")!
     /// Business-login endpoint: exchanges the OAuth access token for the biz
     /// bearer the provisioning APIs require.
@@ -515,8 +529,6 @@ public enum ZaiOAuth {
     /// Name of the provisioned key — kwwk-owned, so sign-in never mutates
     /// ZCode's own `zcode-api-key` entry.
     public static let keyName = "kwwk"
-    /// Fixed port matching the redirect URI ZCode's client id expects.
-    public static let callbackPort: UInt16 = 54548
 }
 
 // MARK: - Helpers
