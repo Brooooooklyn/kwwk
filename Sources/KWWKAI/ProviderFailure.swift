@@ -299,8 +299,23 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         case unknown
     }
 
+    /// Conservative on purpose, since a host turns it into a sentence the
+    /// user acts on: prose alone (no status, code, stop reason or transport
+    /// code) names no cause; a 5xx is the provider's outage whatever code
+    /// rides along (504 a timeout); and transport evidence alone only says
+    /// network, timeout or cancelled. `category` stays the retry signal.
     public var outcome: Outcome {
-        switch category {
+        if httpStatus == nil, providerCode == nil, rawStopReason == nil, transportCode == nil { return .unknown }
+        if let status = httpStatus, (500...599).contains(status) { return status == 504 ? .timeout : .serviceUnavailable }
+        if httpStatus == nil, providerCode == nil, rawStopReason == nil {
+            switch category {
+            case .transport: return .network
+            case .timeout: return .timeout
+            case .cancelled: return .cancelled
+            default: return .unknown
+            }
+        }
+        return switch category {
         case .authentication: isCredentialRejection ? .signInRequired : .accessDenied
         case .contextOverflow: .contextTooLong
         case .quota: .quotaExhausted

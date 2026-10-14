@@ -25,6 +25,31 @@ struct ProviderFailureOutcomeTests {
         #expect(failure.outcome == outcome, "\(failure)")
     }
 
+    /// The AirBuild Environment's rules for what a user is told, now kwwk's:
+    /// prose names no cause, the outer 5xx governs, and transport evidence
+    /// alone says only network, timeout or cancelled.
+    @Test("prose alone names no cause", arguments: [
+        "HTTP 402 insufficient_quota", "model not found", "quota exceeded", "authentication_error",
+        "Error Domain=NSURLErrorDomain Code=-1001", "connection failed", "usage_limit_reached",
+    ])
+    func proseIsUnknown(text: String) {
+        #expect(ProviderFailure(message: text).outcome == .unknown)
+    }
+
+    @Test("a 5xx governs whatever code rides along")
+    func serverStatusGoverns() {
+        #expect(ProviderFailure(message: "x", httpStatus: 503, providerCode: "insufficient_quota").outcome == .serviceUnavailable)
+        #expect(ProviderFailure(message: "x", httpStatus: 504).outcome == .timeout)
+    }
+
+    @Test("transport evidence alone says only network, timeout or cancelled")
+    func transportOnly() {
+        #expect(ProviderFailure(message: "x", transportDomain: NSURLErrorDomain, transportCode: -1001).outcome == .timeout)
+        #expect(ProviderFailure(message: "x", transportDomain: NSURLErrorDomain, transportCode: -1005).outcome == .network)
+        #expect(ProviderFailure(message: "x", transportDomain: NSURLErrorDomain, transportCode: -999).outcome == .cancelled)
+        #expect(ProviderFailure(message: "x", transportDomain: NSPOSIXErrorDomain, transportCode: Int.max).outcome == .unknown)
+    }
+
     @Test("every subscription carries the brand a sentence names it by")
     func brands() {
         for provider in OAuthSubscriptions.providers {
