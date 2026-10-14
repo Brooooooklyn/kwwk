@@ -230,6 +230,50 @@ struct SlashInputParseTests {
     }
 
     @MainActor
+    @Test("Enter on a lone / keeps the popup open until a row is picked")
+    func bareSlashSubmitKeepsMenuOpen() {
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.slashCommands = Self.catalog
+
+        frame.input.value = "/"
+        #expect(frame.slashMenuActive)
+        #expect(frame.slashSubmitKeepsMenuOpen())
+        #expect(frame.slashCommandNameForSubmit() == nil)
+        // An ↑/↓ pick makes Enter run the highlighted row.
+        frame.menuMove(1)
+        #expect(!frame.slashSubmitKeepsMenuOpen())
+        #expect(frame.slashCommandNameForSubmit() == "compact-model")
+
+        frame.input.value = "/mod"
+        #expect(!frame.slashSubmitKeepsMenuOpen())
+        frame.input.value = "/Users/me/file"
+        #expect(!frame.slashSubmitKeepsMenuOpen())
+    }
+
+    @MainActor
+    @Test("slash menu footer offers ↵ run only when Enter would run the row")
+    func footerRunHintFollowsEnterRule() {
+        let frame = CodingFrame(viewportHeight: 20)
+        frame.slashCommands = Self.catalog
+        func footer() -> String { frame.render(width: 100).joined(separator: "\n") }
+
+        frame.input.value = "/mod"
+        #expect(footer().contains("↵ run"))
+        // Loose match: highlighted but not runnable until picked.
+        frame.input.value = "/cpt"
+        #expect(!footer().contains("↵ run"))
+        #expect(footer().contains("Tab complete"))
+        frame.menuMove(1)
+        frame.menuMove(-1)
+        #expect(footer().contains("↵ run"))
+        // A lone `/` waits for a pick too.
+        frame.input.value = "/"
+        #expect(!footer().contains("↵ run"))
+        frame.menuMove(1)
+        #expect(footer().contains("↵ run"))
+    }
+
+    @MainActor
     @Test("a bare unknown /name is reported; paths and args still prompt")
     func unknownBareCommand() {
         let registry = SlashCommandRegistry()
@@ -256,6 +300,10 @@ struct SlashInputParseTests {
         #expect(escapeClearsSlashMenu("/nope") == true)
         #expect(escapeClearsSlashMenu("fix the test") == false)
         #expect(escapeClearsSlashMenu("/model gpt") == false)
+        // A path-like draft is an ordinary draft, so Esc keeps it in history.
+        #expect(escapeClearsSlashMenu("/Users/me/some/long/path") == false)
+        #expect(escapeClearsSlashMenu("/notes.md") == false)
+        #expect(escapeClearsSlashMenu("/") == true)
         #expect(escapeClearsSlashMenu("") == nil)
     }
 

@@ -1007,6 +1007,9 @@ func runCodingTUIInternal(
             // `/comp` runs `/compact` rather than failing on the partial name.
             // A loose (non-prefix) match runs only once the user picked it
             // with ↑/↓; otherwise a bare unknown `/name` is reported below.
+            // A lone `/` with nothing picked yet keeps the popup open rather
+            // than sending `/` to the model.
+            if frame.slashSubmitKeepsMenuOpen() { return }
             var text = frame.input.value
             if frame.slashMenuActive, let name = frame.slashCommandNameForSubmit() {
                 text = "/\(name)"
@@ -1610,10 +1613,18 @@ func abortInteractiveAgentWork(
 /// What an Esc press clears before it may touch the agent: nil for an empty
 /// editor (Esc falls through to abort / double-Esc); otherwise whether the
 /// clear dismisses the slash popup (the draft is a bare `/query`) rather
-/// than dropping an ordinary draft.
+/// than dropping an ordinary draft. A path-like bare draft (`/Users/me/file`)
+/// counts as an ordinary draft, so Esc keeps it in ↑ history.
 func escapeClearsSlashMenu(_ input: String) -> Bool? {
     guard !input.isEmpty else { return nil }
-    return bareSlashQuery(input) != nil
+    guard let name = bareSlashQuery(input) else { return false }
+    return !slashQueryLooksLikePath(name)
+}
+
+/// Whether a bare slash query reads as a file path rather than a command
+/// name, so it is treated as prompt text instead of a command.
+func slashQueryLooksLikePath(_ name: String) -> Bool {
+    name.contains(where: { $0 == "/" || $0 == "." || $0 == "\\" })
 }
 
 /// The command name when Enter on `text` should report an unknown command
@@ -1623,7 +1634,7 @@ func escapeClearsSlashMenu(_ input: String) -> Bool? {
 @MainActor
 func unknownBareSlashCommand(_ text: String, registry: SlashCommandRegistry) -> String? {
     guard let name = bareSlashQuery(text), !name.isEmpty else { return nil }
-    guard !name.contains(where: { $0 == "/" || $0 == "." || $0 == "\\" }) else { return nil }
+    guard !slashQueryLooksLikePath(name) else { return nil }
     return registry.find(name) == nil ? name : nil
 }
 

@@ -144,8 +144,21 @@ final class CodingFrame: Component, @unchecked Sendable {
         guard !matches.isEmpty else { return nil }
         syncSelection(matches)
         let selected = matches[min(menuSelection, matches.count - 1)]
-        guard menuNavigated || slashQueryIsPrefix(query, of: selected) else { return nil }
+        guard enterRuns(selected, query: query) else { return nil }
         return selected.name
+    }
+
+    /// Whether Enter on the open popup should do nothing and keep it open: a
+    /// lone `/` the user hasn't navigated yet. Without this the `/` would fall
+    /// through to the prompt path and be sent to the model.
+    func slashSubmitKeepsMenuOpen() -> Bool {
+        guard slashMenuActive, slashQuery() == "" else { return false }
+        return slashCommandNameForSubmit() == nil
+    }
+
+    /// The Enter rule shared by submission and the footer's "↵ run" hint.
+    private func enterRuns(_ selected: SlashCommandInfo, query: String) -> Bool {
+        menuNavigated || slashQueryIsPrefix(query, of: selected)
     }
 
     private func syncSelection(_ matches: [SlashCommandInfo]) {
@@ -293,12 +306,15 @@ final class CodingFrame: Component, @unchecked Sendable {
             out.append("  " + marker + Box.pad(name, to: nameW) + "  " + desc)
         }
         // Enter is rejected while the agent is busy (slash commands are
-        // idle-only), so don't advertise "↵ run" mid-stream — only Tab.
-        let runHint = isBusy ? "commands run when idle" : "↵ run"
+        // idle-only), so don't advertise "↵ run" mid-stream — only Tab. Idle,
+        // "↵ run" shows only when Enter would run the highlighted row (a
+        // prefix match or an ↑/↓ pick), not for a loose match or a lone `/`.
+        let selectedRunnable = enterRuns(matches[menuSelection], query: slashQuery() ?? "")
+        let runHint = isBusy ? " · commands run when idle" : (selectedRunnable ? " · ↵ run" : "")
         if matches.count > maxRows {
-            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete · \(runHint)"))
+            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete\(runHint)"))
         } else {
-            out.append("  " + Theme.faintText("↑↓ move · Tab complete · \(runHint)"))
+            out.append("  " + Theme.faintText("↑↓ move · Tab complete\(runHint)"))
         }
         return out
     }
