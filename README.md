@@ -317,7 +317,7 @@ let runner = SubagentRunner(
 )
 let result = try await runner.run(
     type: "Plan",
-    prompt: "Plan how to simplify Sources/KWWKAgent/SubagentTool.swift."
+    prompt: "Plan how to simplify Sources/KWWKAgent/Subagents/SubagentTool.swift."
 )
 ```
 
