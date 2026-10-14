@@ -774,11 +774,12 @@ public enum AgentLoop {
         // source once per response: the source renews it (or says the login
         // is dead, which throws `OAuthCredentialSourceError`), and the
         // request is replayed once with the new token. That replay does not
-        // spend the transient-retry budget. Kimi's over-plan 401 and Cursor's
-        // region refusal are not `.authentication`, so they never get here.
+        // spend the transient-retry budget. Only a refusal of the credential
+        // itself is reported (`isCredentialRejection`): Kimi's over-plan 401,
+        // Cursor's region refusal and a 403 naming a plan or policy are not.
         var credentialRetried = false
         func rejectedCredential(_ failure: ProviderFailure) -> CredentialRejection? {
-            guard !credentialRetried, failure.category == .authentication else { return nil }
+            guard !credentialRetried, failure.isCredentialRejection else { return nil }
             return resolvedAuth?.onRejected
         }
         func renewRejectedCredential(_ rejection: CredentialRejection) async throws -> Bool {

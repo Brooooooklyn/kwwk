@@ -61,6 +61,13 @@ struct CredentialRejectionRetryTests {
         func record(_ key: String?) { keys.append(key) }
     }
 
+    /// xAI's answer to a bad OAuth token, captured live (2026-10-14): a 403,
+    /// which is why a 403 with token evidence still counts as a refusal of
+    /// the credential.
+    private static func xaiBadToken() -> AssistantMessage {
+        failure("The OAuth2 access token could not be validated.", status: 403, code: "unauthenticated:bad-credentials")
+    }
+
     private static func failure(_ message: String, status: Int?, code: String? = nil) -> AssistantMessage {
         var msg = fauxAssistantMessage("", stopReason: .error, errorMessage: message)
         msg.failure = ProviderFailure(message: message, httpStatus: status, providerCode: code)
@@ -142,7 +149,7 @@ struct CredentialRejectionRetryTests {
         defer { registration.unregister() }
         let log = KeyLog()
         registration.setResponses([
-            Self.step(log, Self.failure("Access denied", status: 403)),
+            Self.step(log, Self.xaiBadToken()),
             Self.step(log, fauxAssistantMessage("never reached")),
         ])
         let source = RenewingSource(access: "stale", renewal: .needsRelogin)
@@ -163,7 +170,7 @@ struct CredentialRejectionRetryTests {
         let registration = await registerFauxProvider()
         defer { registration.unregister() }
         let log = KeyLog()
-        let denied = Self.failure("Your plan does not include this model", status: 403)
+        let denied = Self.xaiBadToken()
         registration.setResponses([
             Self.step(log, denied),
             Self.step(log, denied),
@@ -179,7 +186,7 @@ struct CredentialRejectionRetryTests {
         #expect(lastAssistant(agent)?.failure?.httpStatus == 403)
     }
 
-    @Test("Kimi's over-plan 401, Kimi's spent plan window and Cursor's region refusal are not reported")
+    @Test("refusals about the plan, policy or region, not the token, are not reported")
     func nonLoginRefusalsAreNotReported() async throws {
         let refusals = [
             Self.failure(
@@ -190,6 +197,15 @@ struct CredentialRejectionRetryTests {
                 "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
                 status: 403
             ),
+            // A 403 that names the account's plan or policy, not the token.
+            Self.failure("Your plan does not include this model", status: 403),
+            // Anthropic, verbatim from omp's corpus (auth-storage-force-refresh-rotate.test.ts).
+            Self.failure(
+                #"{"type":"error","error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization.","details":{"error_code":"oauth_not_allowed_for_organization"}},"request_id":"req_011CfDQosvzzsyor4jWjLsz8"}"#,
+                status: 403
+            ),
+            // Codex model entitlement, wording from omp (flags.ts).
+            Self.failure("The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.", status: 403),
             Self.failure("This region is not yet available for your team", status: nil, code: "permission_denied"),
             Self.failure("This region is not yet available for your team", status: nil, code: "unauthenticated"),
         ]
@@ -236,6 +252,39 @@ struct CredentialRejectionRetryTests {
 
         #expect(await log.keys == ["stale", "fresh"])
         #expect(source.rejections == ["stale"])
+        #expect(lastAssistant(agent)?.stopReason == .stop)
+    }
+
+    struct RotatingLogin: OAuthProvider {
+        let id = "faux"
+        let name = "faux"
+        func refresh(_ c: OAuthCredentials, using client: HTTPClient) async throws -> OAuthCredentials {
+            OAuthCredentials(access: "fresh", refresh: "r2", expires: .max)
+        }
+    }
+
+    @Test("over the file store, a refused token is refreshed by kwwk itself and replayed")
+    func fileStoreRefreshesRefusedToken() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+        let log = KeyLog()
+        // Verbatim ChatGPT answer to a stored Codex token 118h before its
+        // recorded expiry (live, 2026-10-14).
+        registration.setResponses([
+            Self.step(log, Self.failure("Your authentication token has expired. Please try refreshing it.", status: 401, code: "token_expired")),
+            Self.step(log, fauxAssistantMessage("done")),
+        ])
+        let store = OAuthStore()
+        try await store.set(OAuthCredentials(access: "stale", refresh: "r1", expires: .max), for: "faux")
+        let manager = OAuthManager(store: store, providers: [RotatingLogin()])
+        let agent = Agent(initialState: AgentInitialState(model: registration.getModel()))
+        agent.retryBaseDelayMs = 5
+        agent.authResolver = manager.resolver()
+
+        try await agent.prompt("hi")
+
+        #expect(await log.keys == ["stale", "fresh"])
+        #expect(await store.get("faux")?.refresh == "r2")
         #expect(lastAssistant(agent)?.stopReason == .stop)
     }
 

@@ -267,6 +267,33 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             .contains(where: text.contains)
     }
 
+    /// Whether this failure says the credential itself was refused, so that
+    /// renewing the login could help. Narrower than `.authentication`: a 401
+    /// or a gRPC `unauthenticated` is a refused credential, but a 403 (or
+    /// `permission_denied`, or an auth word in bare text) is believed only
+    /// with evidence about the token, and never when it names a policy. A
+    /// 403 for a model the plan lacks, an organization that disallows OAuth,
+    /// or a region is about the account, and renewing the login there would
+    /// only spend a refresh, or tell the user to sign in for nothing.
+    /// xAI and Kiro do refuse a bad token with 403, hence the evidence check
+    /// instead of excluding 403 outright.
+    public var isCredentialRejection: Bool {
+        guard category == .authentication else { return false }
+        let status = httpStatus ?? Self.legacyStatus(message)
+        let code = providerCode?.lowercased()
+        if status == 401 || (status == nil && code == "unauthenticated") { return true }
+        let text = [providerCode, rawStopReason, message, upstreamMessage].compactMap { $0 }.joined(separator: " ").lowercased()
+        let policy = ["not allowed", "not supported", "not available", "not enabled", "does not have access", "do not have access",
+                      "doesn't have access", "your plan", "upgrade", "region", "country", "subscription"]
+        if policy.contains(where: text.contains) { return false }
+        let credential = ["unauthenticated", "unauthorized", "bad-credentials", "bad credentials", "invalid_token", "invalid token",
+                          "token is invalid", "token_expired", "token expired", "token has expired", "expired token", "expiredtoken",
+                          "could not be validated", "invalid api key", "invalid_api_key", "invalid authentication",
+                          "invalid_authentication", "authentication_error", "authentication failed", "authentication token",
+                          "access token", "bearer token", "security token", "revoked", "unrecognizedclient"]
+        return credential.contains(where: text.contains)
+    }
+
     /// Plan-window exhaustion wording delivered on 401/403 (Kimi Code:
     /// https://www.kimi.com/code/docs/en/kimi-code/error-reference.html).
     /// Concurrency caps on 403 are not included: they are not spent quota.
