@@ -195,6 +195,25 @@ struct LoginSeamTests {
         #expect(credentials.refresh == "xr")
     }
 
+    @Test("A device flow says whether its page holds the code", arguments: [
+        // xAI and Kimi name a page carrying the code (live answers, 2026-10-14).
+        (#"{"device_code":"DC","user_code":"89N3-B9FT","verification_uri":"https://accounts.x.ai/oauth2/device","verification_uri_complete":"https://accounts.x.ai/oauth2/device?user_code=89N3-B9FT","interval":0,"expires_in":900}"#, true),
+        (#"{"device_code":"DC","user_code":"89N3-B9FT","verification_uri":"https://accounts.x.ai/oauth2/device","interval":0,"expires_in":900}"#, false),
+    ])
+    func deviceCodePageHoldsCode(answer: String, holds: Bool) async throws {
+        let client = QueuedHTTPClient([
+            .response(status: 200, body: answer),
+            .response(status: 200, body: #"{"access_token":"xa","refresh_token":"xr","expires_in":3600}"#),
+        ])
+        let events = EventLog()
+        var callbacks = quietCallbacksBase
+        callbacks.browser = RecordingPresenter()
+        callbacks.onUserCode = { code, _ in events.append("user \(code)") }
+        callbacks.onDeviceCode = { code in events.append("device \(code.code) \(code.pageHoldsCode)") }
+        _ = try await OAuthLogin.loginXai(callbacks: callbacks, client: client)
+        #expect(events.entries == ["user 89N3-B9FT", "device 89N3-B9FT \(holds)"])
+    }
+
     @Test("An expired device code times the sign-in out")
     func deviceCodeExpired() async throws {
         let client = QueuedHTTPClient([

@@ -98,7 +98,7 @@ struct OAuthLoginShapeTests {
         #expect(server.redirectURI == "http://localhost:53982/callback")
     }
 
-    @Test("GitHub's verification page opens with the code filled in")
+    @Test("GitHub's page is opened with the code in the link, and reported as not holding it")
     func copilotVerificationURLCarriesCode() async throws {
         let client = SequentialStubClient()
         client.queue.append((
@@ -111,13 +111,21 @@ struct OAuthLoginShapeTests {
             body: #"{"token":"session-xyz","expires_at":1900000000,"endpoints":{"api":"https://api.githubcopilot.com"}}"#
         ))
         let opened = LockedBox<[URL]>([])
+        let announced = LockedBox<[OAuthLogin.DeviceCode]>([])
         _ = try await OAuthLogin.loginGitHubCopilot(
             clientID: "test-client",
-            callbacks: OAuthLogin.Callbacks(onAuthURL: { url in opened.set(opened.get() + [url]) }, onProgress: { _ in }),
+            callbacks: OAuthLogin.Callbacks(
+                onAuthURL: { url in opened.set(opened.get() + [url]) }, onProgress: { _ in },
+                onDeviceCode: { code in announced.set(announced.get() + [code]) }
+            ),
             client: client,
             pollSleep: { _ in }
         )
         #expect(opened.get().map(\.absoluteString) == ["https://github.com/login/device?user_code=AB12-CD34"])
+        // GitHub's page ignores the code in the link: the host must show or
+        // copy it.
+        #expect(announced.get().map(\.code) == ["AB12-CD34"])
+        #expect(announced.get().map(\.pageHoldsCode) == [false])
     }
 
     @Test("device-flow keeps the longer interval GitHub asks for after slow_down")
