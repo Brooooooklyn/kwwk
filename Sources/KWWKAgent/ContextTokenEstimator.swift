@@ -21,7 +21,8 @@ enum ContextTokenEstimator {
         ContextTokenEstimate(
             providerReported: latestValidProviderUsage(in: messages, model: model),
             locallyEstimated: model.map { model in
-                TransformMessages.expandNativeCompaction(messages, model: model).reduce(0) { $0 + estimate(message: $1) }
+                TransformMessages.expandNativeCompaction(messages, model: model)
+                    .reduce(0) { $0 + estimate(message: $1) }
             } ?? messages.reduce(0) { $0 + estimate(message: $1) }
         )
     }

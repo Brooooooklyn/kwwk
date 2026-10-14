@@ -21,7 +21,8 @@ struct BashOutputBoundingTests {
         let result = try await tool.execute(
             "call-1",
             ["command": .string("seq 1 100000")],
-            nil, nil
+            nil,
+            nil
         )
         let text = textOutput(result)
         // Completed (didn't hang), tail preserved, and bounded well under the
@@ -43,7 +44,8 @@ struct BashOutputBoundingTests {
         let result = try await tool.execute(
             "call-2",
             ["command": .string("seq 1 100000 1>&2")],
-            nil, nil
+            nil,
+            nil
         )
         let text = textOutput(result)
         #expect(text.hasSuffix("100000"))

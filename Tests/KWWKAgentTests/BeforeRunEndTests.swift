@@ -19,11 +19,16 @@ struct BeforeRunEndTests {
         let calls = RetryAttemptCounter()
         let starts = RetryAttemptCounter()
         let ends = RetryAttemptCounter()
-        let agent = Agent(options: AgentOptions(initialState: AgentInitialState(model: faux.getModel()),
+        let agent = Agent(options: AgentOptions(
+            initialState: AgentInitialState(model: faux.getModel()),
             beforeRunEnd: { _, _ in
                 guard await calls.next() == 1 else { return [] }
-                return [.user(UserMessage(content: [.text(TextContent(text: "Wait for unfinished work."))], source: .runtime))]
-            }))
+                return [.user(UserMessage(
+                    content: [.text(TextContent(text: "Wait for unfinished work."))],
+                    source: .runtime
+                ))]
+            }
+        ))
         _ = agent.subscribe { event, _ in
             if case .agentStart = event { _ = await starts.next() }
             if case .agentEnd = event { _ = await ends.next() }
@@ -52,8 +57,10 @@ struct BeforeRunEndTests {
         defer { faux.unregister() }
         faux.setResponses([.message(fauxAssistantMessage("failed", stopReason: .aborted))])
         let calls = RetryAttemptCounter()
-        let agent = Agent(options: AgentOptions(initialState: AgentInitialState(model: faux.getModel()),
-            beforeRunEnd: { _, _ in _ = await calls.next(); return [] }))
+        let agent = Agent(options: AgentOptions(
+            initialState: AgentInitialState(model: faux.getModel()),
+            beforeRunEnd: { _, _ in _ = await calls.next(); return [] }
+        ))
         try await agent.prompt("work")
         #expect(await calls.snapshot() == 0)
     }
@@ -64,8 +71,11 @@ struct BeforeRunEndTests {
         defer { faux.unregister() }
         faux.setResponses([.message(fauxAssistantMessage("finished"))])
         let calls = RetryAttemptCounter()
-        let agent = Agent(options: AgentOptions(initialState: AgentInitialState(model: faux.getModel()),
-            maxTurns: 1, beforeRunEnd: { _, _ in _ = await calls.next(); return [.user(UserMessage(text: "continue"))] }))
+        let agent = Agent(options: AgentOptions(
+            initialState: AgentInitialState(model: faux.getModel()),
+            maxTurns: 1,
+            beforeRunEnd: { _, _ in _ = await calls.next(); return [.user(UserMessage(text: "continue"))] }
+        ))
         try await agent.prompt("work")
         #expect(await calls.snapshot() == 0)
     }

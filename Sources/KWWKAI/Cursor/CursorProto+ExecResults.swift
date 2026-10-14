@@ -13,8 +13,12 @@ extension CursorProto {
     /// Cursor's harness builds its own system prompt and only reliably
     /// surfaces client instructions through rules (as omp does).
     static func encodeRequestContextResult(
-        toolDefs: [Data], systemPrompt: String? = nil, workspacePath: String?,
-        osVersion: String, shell: String, timeZone: String
+        toolDefs: [Data],
+        systemPrompt: String? = nil,
+        workspacePath: String?,
+        osVersion: String,
+        shell: String,
+        timeZone: String
     ) -> Data {
         var requestContext = ProtoWriter()
         if let systemPrompt, !systemPrompt.isEmpty {
@@ -52,7 +56,9 @@ extension CursorProto {
     /// success case is set even when nothing matches, since an unset oneof
     /// reads as a malformed reply.
     static func encodeMcpStateResult(
-        toolDefs: [Data], providerIdentifier: String, serverIdentifiers: [String]
+        toolDefs: [Data],
+        providerIdentifier: String,
+        serverIdentifiers: [String]
     ) -> Data {
         var success = ProtoWriter()
         let wanted = serverIdentifiers.isEmpty || serverIdentifiers.contains(providerIdentifier)
@@ -131,7 +137,9 @@ extension CursorProto {
     /// give the field numbers inside the specific Rejected message, and
     /// `resultField` gives the `rejected` case number inside the *Result oneof.
     static func encodeRejectedPathResult(
-        resultField: Int, path: String, reason: String
+        resultField: Int,
+        path: String,
+        reason: String
     ) -> Data {
         var rejected = ProtoWriter()
         rejected.stringField(1, path)
@@ -180,7 +188,10 @@ extension CursorProto {
         var success = ProtoWriter()
         success.stringField(1, path)
         success.stringField(2, content)
-        success.int32Field(3, Int32(content.isEmpty ? 0 : content.split(separator: "\n", omittingEmptySubsequences: false).count))
+        success.int32Field(
+            3,
+            Int32(content.isEmpty ? 0 : content.split(separator: "\n", omittingEmptySubsequences: false).count)
+        )
         success.varintField(4, UInt64(content.utf8.count))
         var result = ProtoWriter()
         result.bytesField(1, success.data)
@@ -204,7 +215,10 @@ extension CursorProto {
     static func encodeWriteSuccess(path: String, fileText: String, byteCount: Int) -> Data {
         var success = ProtoWriter()
         success.stringField(1, path)
-        success.int32Field(2, Int32(fileText.isEmpty ? 0 : fileText.split(separator: "\n", omittingEmptySubsequences: false).count))
+        success.int32Field(
+            2,
+            Int32(fileText.isEmpty ? 0 : fileText.split(separator: "\n", omittingEmptySubsequences: false).count)
+        )
         success.int32Field(3, Int32(byteCount))
         var result = ProtoWriter()
         result.bytesField(1, success.data)

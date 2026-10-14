@@ -10,7 +10,12 @@ import Testing
 @Suite("Provider failure parity — pi / omp")
 struct ProviderFailureParityTests {
     // omp error-transient-status-boundary.test.ts
-    @Test(arguments: ["503 Service Unavailable", "upstream returned 502", "HTTP 429 from provider", "auth-gateway 524: <none>"])
+    @Test(arguments: [
+        "503 Service Unavailable",
+        "upstream returned 502",
+        "HTTP 429 from provider",
+        "auth-gateway 524: <none>"
+    ])
     func realStatuses(text: String) {
         #expect(ProviderFailure(message: text).isRetryable)
     }
@@ -37,7 +42,9 @@ struct ProviderFailureParityTests {
     @Test(arguments: [false, true])
     func paymentRequiredIsAlwaysTerminal(legacy: Bool) async throws {
         let failure = ProviderFailure(
-            message: legacy ? "HTTP 402: connection timed out; Error Domain=NSURLErrorDomain Code=-1001" : "overloaded; retry this request",
+            message: legacy
+                ? "HTTP 402: connection timed out; Error Domain=NSURLErrorDomain Code=-1001"
+                : "overloaded; retry this request",
             httpStatus: legacy ? nil : 402,
             transportDomain: legacy ? nil : NSURLErrorDomain,
             transportCode: legacy ? nil : -1001,
@@ -68,7 +75,14 @@ struct ProviderFailureParityTests {
     ])
     func transientFallback(text: String) { #expect(ProviderFailure(message: text).isRetryable) }
 
-    @Test(arguments: ["429 quota exceeded", "insufficient_quota", "monthly usage limit reached", "available balance is insufficient", "out of budget", "billing error"])
+    @Test(arguments: [
+        "429 quota exceeded",
+        "insufficient_quota",
+        "monthly usage limit reached",
+        "available balance is insufficient",
+        "out of budget",
+        "billing error"
+    ])
     func permanentLimits(text: String) {
         #expect(!ProviderFailure(message: text, httpStatus: 429).isRetryable)
     }
@@ -88,11 +102,18 @@ struct ProviderFailureParityTests {
     // Codex over Linux URLSession: chatgpt.com dropped the SSE body mid-turn.
     @Test func curlTransferClosedIsTransport() {
         let curl = "transfer closed with outstanding read data remaining"
-        let inner = NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: [NSLocalizedDescriptionKey: curl])
+        let inner = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorUnknown,
+            userInfo: [NSLocalizedDescriptionKey: curl]
+        )
         let outer = NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: [NSUnderlyingErrorKey: inner])
         #expect(ProviderFailure.capture(outer).category == .transport)
-        let described = NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown,
-                                userInfo: [NSUnderlyingErrorKey: inner, NSLocalizedDescriptionKey: curl])
+        let described = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorUnknown,
+            userInfo: [NSUnderlyingErrorKey: inner, NSLocalizedDescriptionKey: curl]
+        )
         #expect(ProviderFailure.capture(described).isRetryable)
         let logged = #"Error Domain=NSURLErrorDomain Code=-1 "(null)"UserInfo={NSUnderlyingError=Error Domain=NSURLErrorDomain Code=-1 "(null)"UserInfo={NSLocalizedDescription=transfer closed with outstanding read data remaining}, NSErrorFailingURLStringKey=https://chatgpt.com/backend-api/codex/responses, NSErrorFailingURLKey=https://chatgpt.com/backend-api/codex/responses, NSLocalizedDescription=transfer closed with outstanding read data remaining}"#
         #expect(ProviderFailure(message: logged).isRetryable)
@@ -137,7 +158,13 @@ struct ProviderFailureParityTests {
 
     @Test func persistenceCompatibility() throws {
         var message = fauxAssistantMessage("", stopReason: .error, errorMessage: "opaque")
-        message.failure = .init(message: "opaque", httpStatus: 503, providerCode: "overloaded_error", requestId: "req-example", retryAfterMs: 5)
+        message.failure = .init(
+            message: "opaque",
+            httpStatus: 503,
+            providerCode: "overloaded_error",
+            requestId: "req-example",
+            retryAfterMs: 5
+        )
         let decoded = try JSONDecoder().decode(AssistantMessage.self, from: JSONEncoder().encode(message))
         #expect(decoded.failure == message.failure)
         #expect(decoded.providerFailure?.isRetryable == true)

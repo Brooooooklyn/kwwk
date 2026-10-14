@@ -29,7 +29,8 @@ struct FuzzyEditTests {
         let result = try await tool.execute(
             "call-1",
             .object(["path": .string(file.path), "edits": edits]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result).contains("Successfully replaced"))
         let after = try String(contentsOf: file, encoding: .utf8)
@@ -58,7 +59,10 @@ struct FuzzyEditTests {
             .object(["oldText": .string("\"free\""), "newText": .string("\"$0.00\"")])
         ])
         _ = try await tool.execute(
-            "call-2", .object(["path": .string(file.path), "edits": edits]), nil, nil
+            "call-2",
+            .object(["path": .string(file.path), "edits": edits]),
+            nil,
+            nil
         )
 
         let after = try String(contentsOf: file, encoding: .utf8)

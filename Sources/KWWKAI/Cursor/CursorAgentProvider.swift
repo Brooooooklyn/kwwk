@@ -87,7 +87,10 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
     // MARK: - Run
 
     private func run(
-        out: AssistantMessageStream, model: Model, context: Context, options: StreamOptions?
+        out: AssistantMessageStream,
+        model: Model,
+        context: Context,
+        options: StreamOptions?
     ) async {
         let apiKey = options?.resolvedAuth?.token ?? options?.apiKey ?? defaultAPIKey
         guard let apiKey, !apiKey.isEmpty else {
@@ -119,9 +122,17 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             let state = CursorStreamState(api: api, model: model)
             do {
                 try await runOnce(
-                    endpoint: endpoint, apiKey: apiKey, requestBody: requestBody, toolDefs: toolDefs,
-                    conversation: conversation, conversationId: conversationId,
-                    state: state, started: &started, out: out, context: context, options: options
+                    endpoint: endpoint,
+                    apiKey: apiKey,
+                    requestBody: requestBody,
+                    toolDefs: toolDefs,
+                    conversation: conversation,
+                    conversationId: conversationId,
+                    state: state,
+                    started: &started,
+                    out: out,
+                    context: context,
+                    options: options
                 )
                 return
             } catch {
@@ -175,10 +186,17 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
     /// Run that did not get that far, for the caller to end the stream on or
     /// to try elsewhere.
     private func runOnce(
-        endpoint: CursorAgentEndpoint, apiKey: String, requestBody: Data, toolDefs: [Data],
-        conversation: ConversationRegistry.Entry, conversationId: String,
-        state: CursorStreamState, started: inout Bool,
-        out: AssistantMessageStream, context: Context, options: StreamOptions?
+        endpoint: CursorAgentEndpoint,
+        apiKey: String,
+        requestBody: Data,
+        toolDefs: [Data],
+        conversation: ConversationRegistry.Entry,
+        conversationId: String,
+        state: CursorStreamState,
+        started: inout Bool,
+        out: AssistantMessageStream,
+        context: Context,
+        options: StreamOptions?
     ) async throws {
         let headers: [(String, String)] = [
             ("content-type", "application/connect+proto"),
@@ -233,7 +251,9 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             switch frame {
             case .message(let data):
                 let ended = handleServerMessage(
-                    data, session: session, conversationId: conversationId
+                    data,
+                    session: session,
+                    conversationId: conversationId
                 )
                 if ended {
                     if let empty = state.emptyReplyFailure(how: "Cursor ended the turn") { throw empty }
@@ -286,8 +306,14 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
 
     private func errorMessage(model: Model, text: String) -> AssistantMessage {
         AssistantMessage(
-            content: [], api: api, provider: model.provider, model: model.id,
-            usage: Usage(), stopReason: .error, errorMessage: text, timestamp: Timestamp.now()
+            content: [],
+            api: api,
+            provider: model.provider,
+            model: model.id,
+            usage: Usage(),
+            stopReason: .error,
+            errorMessage: text,
+            timestamp: Timestamp.now()
         )
     }
 
@@ -328,7 +354,9 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
     /// Handle one decoded `AgentServerMessage`. Returns true when the turn ended
     /// (the caller should finalize and stop reading).
     private func handleServerMessage(
-        _ data: Data, session: ExecSession, conversationId: String
+        _ data: Data,
+        session: ExecSession,
+        conversationId: String
     ) -> Bool {
         var reader = ProtoReader(data)
         while let field = reader.next() {
@@ -411,8 +439,11 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                     if case .varint(let v) = f.value { counts[f.number] = Int(clamping: v) }
                 }
                 state.applyTurnEnded(
-                    input: counts[1] ?? 0, output: counts[2] ?? 0,
-                    cacheRead: counts[3] ?? 0, cacheWrite: counts[4] ?? 0, reasoning: counts[5] ?? 0
+                    input: counts[1] ?? 0,
+                    output: counts[2] ?? 0,
+                    cacheRead: counts[3] ?? 0,
+                    cacheWrite: counts[4] ?? 0,
+                    reasoning: counts[5] ?? 0
                 )
             }
             return true
@@ -489,7 +520,10 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
 
         let reply: @Sendable (Int, Data) -> Void = { resultField, payload in
             stream.send(CursorProto.encodeExecClientMessage(
-                id: msg.id, execId: msg.execId, resultField: resultField, payload: payload
+                id: msg.id,
+                execId: msg.execId,
+                resultField: resultField,
+                payload: payload
             ))
         }
 
@@ -565,17 +599,23 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                 arguments: Self.bashArguments(args),
                 rejected: {
                     CursorProto.encodeShellRejected(
-                        command: args.command, workingDirectory: args.workingDirectory, reason: $0
+                        command: args.command,
+                        workingDirectory: args.workingDirectory,
+                        reason: $0
                     )
                 },
                 success: {
                     CursorProto.encodeShellSuccess(
-                        command: args.command, workingDirectory: args.workingDirectory, stdout: $0
+                        command: args.command,
+                        workingDirectory: args.workingDirectory,
+                        stdout: $0
                     )
                 },
                 failure: {
                     CursorProto.encodeShellFailure(
-                        command: args.command, workingDirectory: args.workingDirectory, error: $0
+                        command: args.command,
+                        workingDirectory: args.workingDirectory,
+                        error: $0
                     )
                 },
                 send: { reply(2, $0) }
@@ -627,7 +667,9 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             // kwwk has no LSP tool; reject so the model falls back to grep/read.
             let args = CursorProto.decodePathArgs(msg.payload)
             reply(9, CursorProto.encodeRejectedPathResult(
-                resultField: 3, path: args.path, reason: "Diagnostics not available"
+                resultField: 3,
+                path: args.path,
+                reason: "Diagnostics not available"
             ))
 
         case .mcp:
@@ -647,14 +689,18 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                 // streamed block, synthesize one so the transcript stays paired.
                 if !session.state.markToolCallResolved(id: callId) {
                     session.state.synthesizeResolvedToolCall(
-                        id: callId, name: name, arguments: args.arguments, emit: session.emit
+                        id: callId,
+                        name: name,
+                        arguments: args.arguments,
+                        emit: session.emit
                     )
                 }
                 if result.isError {
                     reply(11, CursorProto.encodeMcpError(CursorRequestBuilder.toolResultText(result)))
                 } else {
                     reply(11, CursorProto.encodeMcpSuccess(
-                        content: Self.mcpContent(result), isError: false
+                        content: Self.mcpContent(result),
+                        isError: false
                     ))
                 }
             }
@@ -702,7 +748,9 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             // An exec kwwk does not model. Fail it in band so the server hands
             // the error to the model instead of waiting on a reply forever.
             stream.send(CursorProto.encodeExecThrow(
-                id: msg.id, error: "Unsupported exec message", errorCode: "unknown_exec_variant"
+                id: msg.id,
+                error: "Unsupported exec message",
+                errorCode: "unknown_exec_variant"
             ))
             stream.send(CursorProto.encodeExecStreamClose(id: msg.id))
         }
@@ -737,7 +785,10 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
         }
         let callId = toolCallId.isEmpty ? UUID().uuidString : toolCallId
         session.state.synthesizeResolvedToolCall(
-            id: callId, name: toolName, arguments: arguments, emit: session.emit
+            id: callId,
+            name: toolName,
+            arguments: arguments,
+            emit: session.emit
         )
         Task {
             let result = await bridge.execute(
@@ -761,7 +812,10 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             var event = ProtoWriter()
             body(&event)
             stream.send(CursorProto.encodeExecClientMessage(
-                id: msg.id, execId: msg.execId, resultField: 14, payload: event.data
+                id: msg.id,
+                execId: msg.execId,
+                resultField: 14,
+                payload: event.data
             ))
         }
 
@@ -780,7 +834,10 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
 
         let callId = args.toolCallId.isEmpty ? UUID().uuidString : args.toolCallId
         session.state.synthesizeResolvedToolCall(
-            id: callId, name: "bash", arguments: Self.bashArguments(args), emit: session.emit
+            id: callId,
+            name: "bash",
+            arguments: Self.bashArguments(args),
+            emit: session.emit
         )
         Task {
             sendEvent { w in w.messageField(4) { _ in } } // start

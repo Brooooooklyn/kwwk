@@ -28,7 +28,8 @@ public struct KimiCodingOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         // Kimi binds the grant to the device id it was approved on, so the
         // id the login recorded wins over this provider's default; a login
@@ -47,7 +48,11 @@ public struct KimiCodingOAuthProvider: OAuthProvider {
         headers["content-type"] = "application/x-www-form-urlencoded"
         headers["accept"] = "application/json"
         let json = try await OAuthRefreshError.postForToken(
-            provider: id, url: tokenURL, headers: headers, body: Data(form.utf8), client: client
+            provider: id,
+            url: tokenURL,
+            headers: headers,
+            body: Data(form.utf8),
+            client: client
         )
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var extras = credentials.extras

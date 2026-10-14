@@ -58,8 +58,10 @@ extension OAuthLogin {
             let body: Data
             do {
                 (response, body) = try await client.request(
-                    url: poll.url!, method: "GET",
-                    headers: ["accept": "application/json"], body: nil
+                    url: poll.url!,
+                    method: "GET",
+                    headers: ["accept": "application/json"],
+                    body: nil
                 )
             } catch is CancellationError {
                 throw CancellationError()

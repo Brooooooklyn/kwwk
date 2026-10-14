@@ -69,7 +69,10 @@ enum MCPConfigFile {
         var order: [String] = []
         for path in paths where FileManager.default.fileExists(atPath: path) {
             do {
-                let document = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+                let document = try JSONDecoder().decode(
+                    JSONValue.self,
+                    from: Data(contentsOf: URL(fileURLWithPath: path))
+                )
                 guard case .object(let root) = document, case .object(let servers)? = root["mcpServers"] else {
                     loaded.warnings.append("\(path): expected an object with an \"mcpServers\" object")
                     continue
@@ -127,7 +130,10 @@ enum MCPConfigFile {
 
     /// Parse one entry; nil for `"enabled": false`.
     private static func parse(
-        name: String, raw: JSONValue, cwd sessionDirectory: String, expander: inout Expander
+        name: String,
+        raw: JSONValue,
+        cwd sessionDirectory: String,
+        expander: inout Expander
     ) throws -> MCPConfigEntry? {
         guard !name.isEmpty, name.unicodeScalars.allSatisfy({
             ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "_" || $0 == "-"
@@ -172,12 +178,16 @@ enum MCPConfigFile {
         }
         if case .object(let map)? = fields["toolExposure"] {
             server.toolExposure = try map.mapValues { value in
-                guard case .string(let text) = value else { throw ConfigError(message: "toolExposure values must be strings") }
+                guard case .string(let text) = value else {
+                    throw ConfigError(message: "toolExposure values must be strings")
+                }
                 return try parseExposure(text)
             }
         }
         if let seconds = try seconds(fields, "startupTimeout") { server.startupTimeoutSeconds = seconds }
-        if let seconds = try seconds(fields, "toolTimeout") ?? seconds(fields, "timeout") { server.toolTimeoutSeconds = seconds }
+        if let seconds = try seconds(fields, "toolTimeout") ?? seconds(fields, "timeout") {
+            server.toolTimeoutSeconds = seconds
+        }
         if let seconds = try seconds(fields, "toolMaxTotalTimeout") { server.toolMaxTotalTimeoutSeconds = seconds }
         server.description = try string(fields["description"], "description")
         var oauth: MCPOAuthSettings?
@@ -189,7 +199,9 @@ enum MCPConfigFile {
 
     /// OAuth settings of an HTTP server, or nil when it opts out.
     private static func parseOAuth(
-        _ value: JSONValue?, headers: [String: String], expander: inout Expander
+        _ value: JSONValue?,
+        headers: [String: String],
+        expander: inout Expander
     ) throws -> MCPOAuthSettings? {
         switch value {
         case .bool(false)?:
@@ -201,7 +213,9 @@ enum MCPConfigFile {
             var settings = MCPOAuthSettings()
             if let name = try string(fields["clientName"], "oauth.clientName") { settings.clientName = name }
             settings.scope = try string(fields["scope"], "oauth.scope")
-            settings.clientID = try string(fields["clientId"], "oauth.clientId").map { expander.expand($0, field: "oauth.clientId") }
+            settings.clientID = try string(fields["clientId"], "oauth.clientId").map {
+                expander.expand($0, field: "oauth.clientId")
+            }
             settings.clientSecret = try string(fields["clientSecret"], "oauth.clientSecret").map {
                 expander.expand($0, field: "oauth.clientSecret")
             }
@@ -244,7 +258,9 @@ enum MCPConfigFile {
         guard let value else { return [] }
         guard case .array(let items) = value else { throw ConfigError(message: "\(field) must be an array of strings") }
         return try items.map { item in
-            guard case .string(let text) = item else { throw ConfigError(message: "\(field) must be an array of strings") }
+            guard case .string(let text) = item else {
+                throw ConfigError(message: "\(field) must be an array of strings")
+            }
             return text
         }
     }
@@ -253,7 +269,9 @@ enum MCPConfigFile {
         guard let value else { return [:] }
         guard case .object(let map) = value else { throw ConfigError(message: "\(field) must map names to strings") }
         return try map.mapValues { item in
-            guard case .string(let text) = item else { throw ConfigError(message: "\(field) must map names to strings") }
+            guard case .string(let text) = item else {
+                throw ConfigError(message: "\(field) must map names to strings")
+            }
             return text
         }
     }

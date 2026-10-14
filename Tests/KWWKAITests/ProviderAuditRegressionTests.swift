@@ -9,7 +9,16 @@ import Testing
 
 @Suite("Provider audit regressions")
 struct ProviderAuditRegressionTests {
-    @Test(arguments: [Int(ECONNRESET), Int(ECONNABORTED), Int(ENOTCONN), Int(EPIPE), Int(ETIMEDOUT), Int(ECONNREFUSED), Int(ENETUNREACH), Int(EHOSTUNREACH)])
+    @Test(arguments: [
+        Int(ECONNRESET),
+        Int(ECONNABORTED),
+        Int(ENOTCONN),
+        Int(EPIPE),
+        Int(ETIMEDOUT),
+        Int(ECONNREFUSED),
+        Int(ENETUNREACH),
+        Int(EHOSTUNREACH)
+    ])
     func nativePOSIXUsesPlatformConstants(code: Int) {
         #expect(ProviderFailure.capture(NSError(domain: NSPOSIXErrorDomain, code: code)).isRetryable)
     }
@@ -91,10 +100,17 @@ struct ProviderAuditRegressionTests {
         #expect(result.providerFailure?.isRetryable == false)
     }
 
-    @Test(arguments: ["", "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n", "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"m\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"partial summary\"}\n\n"])
+    @Test(arguments: [
+        "",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"m\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"partial summary\"}\n\n"
+    ])
     func responsesPrematureEOFIsFailure(body: String) async {
         let result = await OpenAIResponsesProvider(client: StubSSEClient(body: body)).stream(
-            model: OpenAIResponsesTests.model, context: Context(messages: []), options: StreamOptions(transport: .sse)).result()
+            model: OpenAIResponsesTests.model,
+            context: Context(messages: []),
+            options: StreamOptions(transport: .sse)
+        ).result()
         #expect(result.stopReason == .error)
         #expect(result.providerFailure?.isRetryable == true)
         if body.contains("partial summary") {
@@ -122,8 +138,12 @@ struct ProviderAuditRegressionTests {
 
     @Test(arguments: [400, 402, 429, 503])
     func rejectedUpgradeKeepsActualHTTPResponse(status: Int) {
-        let response = HTTPURLResponse(url: URL(string: "https://example.test")!, statusCode: status,
-                                       httpVersion: nil, headerFields: ["Retry-After": "3", "X-Request-ID": "handshake-id"])!
+        let response = HTTPURLResponse(
+            url: URL(string: "https://example.test")!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Retry-After": "3", "X-Request-ID": "handshake-id"]
+        )!
         let failure = URLSessionWebSocketClient.captureFailure(URLError(.badServerResponse), response: response)
         #expect(failure.httpStatus == status)
         #expect(failure.requestId == "handshake-id")
@@ -154,7 +174,15 @@ struct ProviderAuditRegressionTests {
         #expect(!ProviderFailure(message: "concurrent invocation is not supported").isRetryable)
     }
 
-    @Test(arguments: ["socket hang up", "other side closed", "reset before headers", "http2 request did not get a response", "please retry your request", "internal_error", "service_unavailable"])
+    @Test(arguments: [
+        "socket hang up",
+        "other side closed",
+        "reset before headers",
+        "http2 request did not get a response",
+        "please retry your request",
+        "internal_error",
+        "service_unavailable"
+    ])
     func piTransientFallbacks(message: String) {
         #expect(ProviderFailure(message: message).isRetryable)
         #expect(!ProviderFailure(message: message, httpStatus: 400).isRetryable)

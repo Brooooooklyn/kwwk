@@ -136,7 +136,8 @@ final class SlashContext {
         sessionProviders: SessionProviders = SessionProviders(),
         authResolvers: SessionAuthResolvers? = nil,
         context1m: Bool = false,
-        withSuspendedTUI: @MainActor @escaping (_ body: @escaping @MainActor () async -> Void) async -> Void = { body in await body() },
+        withSuspendedTUI: @MainActor @escaping (_ body: @escaping @MainActor () async -> Void) async -> Void
+            = { body in await body() },
         setCompacting: @MainActor @escaping (_ active: Bool) -> Void = { _ in },
         setShaking: @MainActor @escaping (_ active: Bool) -> Void = { _ in }
     ) {
@@ -176,7 +177,8 @@ final class SlashContext {
         sessionProviders: SessionProviders = SessionProviders(),
         authResolvers: SessionAuthResolvers? = nil,
         context1m: Bool = false,
-        withSuspendedTUI: @MainActor @escaping (_ body: @escaping @MainActor () async -> Void) async -> Void = { body in await body() },
+        withSuspendedTUI: @MainActor @escaping (_ body: @escaping @MainActor () async -> Void) async -> Void
+            = { body in await body() },
         setCompacting: @MainActor @escaping (_ active: Bool) -> Void = { _ in },
         setShaking: @MainActor @escaping (_ active: Bool) -> Void = { _ in }
     ) {

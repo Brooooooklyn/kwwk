@@ -68,8 +68,12 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
         return out
     }
 
-    public func compact(model: Model, context: Context, instructions: String,
-                        options: StreamOptions?) async throws -> NativeCompactionResult? {
+    public func compact(
+        model: Model,
+        context: Context,
+        instructions: String,
+        options: StreamOptions?
+    ) async throws -> NativeCompactionResult? {
         let base = model.baseURL.isEmpty ? defaultBaseURL.absoluteString : model.baseURL
         let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1/messages")!
         guard Self.supportsNativeCompaction(model: model, baseURL: base) else { return nil }
@@ -78,11 +82,18 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
         if case .assistant? = nativeContext.messages.last {
             // Do not let an assistant-final transcript become an unsupported
             // prefill. This synthetic control message is not persisted.
-            nativeContext.messages.append(.user(UserMessage(text: "Compact the preceding conversation; do not continue the task.")))
+            nativeContext.messages.append(.user(UserMessage(
+                text: "Compact the preceding conversation; do not continue the task."
+            )))
         }
-        let encoded = try Self.encodeBody(model: model, context: nativeContext, options: options,
-            systemPromptPrefix: systemPromptPrefix, maximumOutputTokens: maximumOutputTokens,
-            fallbackEnabled: fallbackEnabled)
+        let encoded = try Self.encodeBody(
+            model: model,
+            context: nativeContext,
+            options: options,
+            systemPromptPrefix: systemPromptPrefix,
+            maximumOutputTokens: maximumOutputTokens,
+            fallbackEnabled: fallbackEnabled
+        )
         var body = try JSONDecoder().decode([String: JSONValue].self, from: encoded)
         body["stream"] = false
         body["context_management"] = ["edits": [[
@@ -93,13 +104,19 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
         headers["accept"] = "application/json"
         let beta = headers["anthropic-beta"].map { $0 + "," } ?? ""
         headers["anthropic-beta"] = beta + "compact-2026-01-12"
-        let json = try await client.compactionJSON(url: url, headers: headers,
-            body: JSONEncoder().encode(body), cancellation: options?.cancellation)
+        let json = try await client.compactionJSON(
+            url: url,
+            headers: headers,
+            body: JSONEncoder().encode(body),
+            cancellation: options?.cancellation
+        )
         guard json["stop_reason"] == "compaction" else {
-            throw ProviderFailure(message: "Invalid Anthropic compaction completion: expected compaction stop reason",
-                                  rawStopReason: json["stop_reason"].flatMap { value in
-                                      if case .string(let reason) = value { return reason }; return nil
-                                  })
+            throw ProviderFailure(
+                message: "Invalid Anthropic compaction completion: expected compaction stop reason",
+                rawStopReason: json["stop_reason"].flatMap { value in
+                    if case .string(let reason) = value { return reason }; return nil
+                }
+            )
         }
         guard case .array(let content) = json["content"],
               let block = content.first(where: {
@@ -110,8 +127,10 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProviderFailure(message: "Anthropic compaction returned no summary")
         }
-        return NativeCompactionResult(summary: summary,
-            payload: NativeCompactionPayload(model: model, items: [block]))
+        return NativeCompactionResult(
+            summary: summary,
+            payload: NativeCompactionPayload(model: model, items: [block])
+        )
     }
 
     static func supportsNativeCompaction(model: Model, baseURL: String? = nil) -> Bool {
@@ -122,7 +141,12 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             options: .regularExpression) != nil
     }
 
-    private func makeHeaders(model: Model, context: Context, options: StreamOptions?, fallbackEnabled: Bool = false) -> [String: String] {
+    private func makeHeaders(
+        model: Model,
+        context: Context,
+        options: StreamOptions?,
+        fallbackEnabled: Bool = false
+    ) -> [String: String] {
         var headers: [String: String] = [
             "content-type": "application/json",
             "accept": "text/event-stream",
@@ -228,7 +252,9 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             )
         } catch {
             out.push(.error(reason: .error, error: AssistantMessage.makeError(
-                api: api, model: model, text: "Failed to encode request: \(error)"
+                api: api,
+                model: model,
+                text: "Failed to encode request: \(error)"
             )))
             out.end(AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)"))
             return
@@ -238,7 +264,10 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
 
         do {
             let (response, stream) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: body,
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: body,
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
@@ -396,8 +425,11 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                     // completion — record it so `message_stop` surfaces `.error`.
                     if mapped == .error {
                         state.errorMessage = "Anthropic stop reason: \(reason)"
-                        state.failure = ProviderFailure(message: state.errorMessage!, rawStopReason: reason,
-                                                        stopDetails: delta["stop_details"] ?? obj["stop_details"])
+                        state.failure = ProviderFailure(
+                            message: state.errorMessage!,
+                            rawStopReason: reason,
+                            stopDetails: delta["stop_details"] ?? obj["stop_details"]
+                        )
                     }
                 }
                 if case .object(let usage) = obj["usage"] ?? .null {

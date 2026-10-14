@@ -13,8 +13,12 @@ struct SubagentReviewTests {
     func bugSteerBetweenDetachAndFinishIsLost() {
         let store = SubagentHistoryStore()
         store.begin(
-            childSessionId: "c1", parentSessionId: "p", agentId: "mini-1",
-            subagentType: "mini", prompt: "task", model: "m"
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "mini-1",
+            subagentType: "mini",
+            prompt: "task",
+            model: "m"
         )
         // runChild's final `detachLiveIfSettled` has returned true (live == nil)
         // but `run()` has not yet called `finish`: the entry is still running.
@@ -49,8 +53,12 @@ struct SubagentReviewTests {
         defer { faux.unregister() }
         let store = SubagentHistoryStore()
         store.begin(
-            childSessionId: "c1", parentSessionId: "p", agentId: "mini-1",
-            subagentType: "mini", prompt: "task", model: "m"
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "mini-1",
+            subagentType: "mini",
+            prompt: "task",
+            model: "m"
         )
         store.finish(childSessionId: "c1", status: .completed)
 
@@ -87,8 +95,13 @@ struct SubagentReviewTests {
         let oldRun = UUID()
         let newRun = UUID()
         store.begin(
-            childSessionId: "c1", parentSessionId: "p", agentId: "mini-1",
-            subagentType: "mini", prompt: "task", model: "m", runToken: oldRun
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "mini-1",
+            subagentType: "mini",
+            prompt: "task",
+            model: "m",
+            runToken: oldRun
         )
         // run() finishes the entry...
         store.finish(childSessionId: "c1", runToken: oldRun, status: .failed, errorMessage: "boom")
@@ -97,7 +110,14 @@ struct SubagentReviewTests {
             Issue.record("expected resume")
             return
         }
-        store.begin(childSessionId: "c1", parentSessionId: "p", subagentType: "mini", prompt: "retry", model: "m", runToken: newRun)
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            subagentType: "mini",
+            prompt: "retry",
+            model: "m",
+            runToken: newRun
+        )
         let agent = Agent(options: AgentOptions(initialState: AgentInitialState(model: faux.getModel())))
         defer { agent.retire() }
         store.attachLive(childSessionId: "c1", runToken: newRun, live: SubagentLiveChild(agent: agent))
@@ -119,8 +139,12 @@ struct SubagentReviewTests {
     func resumeClaimIsExclusive() {
         let store = SubagentHistoryStore()
         store.begin(
-            childSessionId: "c1", parentSessionId: "p", agentId: "mini-1",
-            subagentType: "mini", prompt: "task", model: "m"
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "mini-1",
+            subagentType: "mini",
+            prompt: "task",
+            model: "m"
         )
         store.finish(childSessionId: "c1", status: .completed)
         let results = ReviewBox<[String]>([])
@@ -145,7 +169,14 @@ struct SubagentReviewTests {
     func evictionAndReservedIds() throws {
         let store = SubagentHistoryStore(maxTerminalEntries: 1)
         let firstId = try store.reserveAgentId(parentSessionId: "p", requested: "keep", subagentType: "mini")
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: firstId, subagentType: "mini", prompt: "a", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: firstId,
+            subagentType: "mini",
+            prompt: "a",
+            model: "m"
+        )
         store.finish(childSessionId: "c1", status: .completed)
         // Claim a resume: the entry is queued and must survive pruning.
         guard case .resume = store.claimFollowUp(agentId: "keep", parentSessionId: "p", message: "go") else {
@@ -155,7 +186,14 @@ struct SubagentReviewTests {
         for index in 0..<3 {
             let id = try store.reserveAgentId(parentSessionId: "p", requested: nil, subagentType: "mini")
             #expect(id == "mini-\(index + 1)")
-            store.begin(childSessionId: "x\(index)", parentSessionId: "p", agentId: id, subagentType: "mini", prompt: "b", model: "m")
+            store.begin(
+                childSessionId: "x\(index)",
+                parentSessionId: "p",
+                agentId: id,
+                subagentType: "mini",
+                prompt: "b",
+                model: "m"
+            )
             store.finish(childSessionId: "x\(index)", status: .completed)
         }
         #expect(store.snapshot(agentId: "keep", parentSessionId: "p")?.status == .queued)
@@ -225,7 +263,8 @@ struct SubagentReviewTests {
             try await reviewTool(toolset, "agent_send").execute(
                 "resume",
                 .object(["agent_id": .string("mini-1"), "message": .string("try again")]),
-                nil, nil
+                nil,
+                nil
             )
         }
         await newEntered.wait()
@@ -238,7 +277,8 @@ struct SubagentReviewTests {
         let delivered = try await reviewTool(toolset, "agent_send").execute(
             "steer",
             .object(["agent_id": .string("mini-1"), "message": .string("steer-after-stale")]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(reviewDetail(delivered, "status") == "delivered")
         newRelease.open()
@@ -274,7 +314,8 @@ struct SubagentReviewTests {
         let delivered = try await reviewTool(toolset, "agent_send").execute(
             "steer",
             .object(["agent_id": .string("mini-1"), "message": .string("also do X")]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(reviewDetail(delivered, "status") == "delivered")
         release.open()
@@ -322,7 +363,10 @@ struct SubagentReviewTests {
         )
         _ = try await reviewTool(toolset, "agent").execute("first", reviewLaunchArgs(name: "target"), nil, nil)
         let holder = try await reviewTool(toolset, "agent").execute(
-            "holder", reviewLaunchArgs(name: "holder", background: true), nil, nil
+            "holder",
+            reviewLaunchArgs(name: "holder", background: true),
+            nil,
+            nil
         )
         await holderEntered.wait()
 
@@ -333,13 +377,15 @@ struct SubagentReviewTests {
                 "message": .string("follow-up one"),
                 "run_in_background": .bool(true),
             ]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(reviewDetail(resumed, "runner_state") == "queued")
         let steered = try await reviewTool(toolset, "agent_send").execute(
             "steer",
             .object(["agent_id": .string("target"), "message": .string("follow-up two")]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(reviewDetail(steered, "status") == "delivered")
         #expect(reviewDetail(steered, "child_status") == "queued")
@@ -373,7 +419,8 @@ struct SubagentReviewTests {
         let resumed = try await reviewTool(toolset, "agent_send").execute(
             "resume",
             .object(["agent_id": .string("mini-1"), "message": .string("please retry")]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(reviewText(resumed).contains("recovered"))
         // The provider never sees the aborted turn.
@@ -384,7 +431,10 @@ struct SubagentReviewTests {
         })
 
         let history = reviewText(try await reviewTool(toolset, "agent_history").execute(
-            "history", .object(["agent_id": .string("mini-1")]), nil, nil
+            "history",
+            .object(["agent_id": .string("mini-1")]),
+            nil,
+            nil
         ))
         #expect(history.contains("run foreground · agent_send\n\nplease retry"),
                 "run.firstMessageIndex counts the trimmed aborted turn, so the resumed prompt is rendered as a plain user message")
@@ -412,7 +462,10 @@ struct SubagentReviewTests {
         let manager = BackgroundTaskManager(outputDir: outputDir)
         let toolset = reviewToolset(model: faux.getModel(), sessionId: "taskid-parent", manager: manager)
         let started = try await reviewTool(toolset, "agent").execute(
-            "bg", reviewLaunchArgs(background: true), nil, nil
+            "bg",
+            reviewLaunchArgs(background: true),
+            nil,
+            nil
         )
         let firstTask = try #require(reviewDetail(started, "task_id"))
         #expect(await awaitUntil(5_000) { await manager.get(firstTask)?.status == .completed })
@@ -421,14 +474,16 @@ struct SubagentReviewTests {
             try await reviewTool(toolset, "agent_send").execute(
                 "fg-resume",
                 .object(["agent_id": .string("mini-1"), "message": .string("again, in the foreground")]),
-                nil, nil
+                nil,
+                nil
             )
         }
         await entered.wait()
         let delivered = try await reviewTool(toolset, "agent_send").execute(
             "steer",
             .object(["agent_id": .string("mini-1"), "message": .string("note")]),
-            nil, nil
+            nil,
+            nil
         )
         release.open()
         _ = try? await resume.value
@@ -463,7 +518,8 @@ struct SubagentReviewTests {
             _ = try await reviewTool(toolset, "agent_send").execute(
                 "steer",
                 .object(["agent_id": .string("mini-1"), "message": .string("one more thing")]),
-                nil, nil
+                nil,
+                nil
             )
             release.open()
             do {
@@ -486,7 +542,14 @@ struct SubagentReviewTests {
     @Test("regression: agent_history pages count invisible tool results, and one wide message exceeds the 64 KiB cap")
     func bugHistoryCapWithManyToolCalls() async throws {
         let store = SubagentHistoryStore()
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: "wide", subagentType: "mini", prompt: "p", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "wide",
+            subagentType: "mini",
+            prompt: "p",
+            model: "m"
+        )
         var blocks: [AssistantBlock] = []
         var messages: [Message] = [.user(UserMessage(text: "go"))]
         for index in 0..<800 {
@@ -496,7 +559,9 @@ struct SubagentReviewTests {
         messages.append(.assistant(fauxAssistantMessage(blocks: blocks, stopReason: .toolUse)))
         for index in 0..<800 {
             messages.append(.toolResult(ToolResultMessage(
-                toolCallId: "call-\(index)", toolName: "read", content: [.text(TextContent(text: "x"))]
+                toolCallId: "call-\(index)",
+                toolName: "read",
+                content: [.text(TextContent(text: "x"))]
             )))
         }
         store.finish(childSessionId: "c1", status: .completed, messages: messages)
@@ -507,7 +572,10 @@ struct SubagentReviewTests {
         #expect(defaultView.contains("## ["), "the default page rendered no message at all:\n\(defaultView)")
         // The wide assistant message itself.
         let result = try await tool.execute(
-            "h2", .object(["agent_id": .string("wide"), "offset": .int(1), "limit": .int(1)]), nil, nil
+            "h2",
+            .object(["agent_id": .string("wide"), "offset": .int(1), "limit": .int(1)]),
+            nil,
+            nil
         )
         let body = reviewText(result)
         #expect(body.utf8.count <= 64 * 1_024 + 512, "agent_history returned \(body.utf8.count) bytes")
@@ -516,20 +584,34 @@ struct SubagentReviewTests {
     @Test("regression: tool_call detail exceeds the 64 KiB cap when the result is one long line")
     func bugToolCallDetailSingleHugeLine() async throws {
         let store = SubagentHistoryStore()
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: "json", subagentType: "mini", prompt: "p", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "json",
+            subagentType: "mini",
+            prompt: "p",
+            model: "m"
+        )
         store.finish(childSessionId: "c1", status: .completed, messages: [
             .user(UserMessage(text: "go")),
-            .assistant(fauxAssistantMessage(blocks: [
-                fauxToolCall(name: "bash", arguments: .object(["command": .string("cat big.json")]), id: "b1"),
-            ], stopReason: .toolUse)),
+            .assistant(fauxAssistantMessage(
+                blocks: [
+                    fauxToolCall(name: "bash", arguments: .object(["command": .string("cat big.json")]), id: "b1"),
+                ],
+                stopReason: .toolUse
+            )),
             .toolResult(ToolResultMessage(
-                toolCallId: "b1", toolName: "bash",
+                toolCallId: "b1",
+                toolName: "bash",
                 content: [.text(TextContent(text: String(repeating: "{\"k\":1},", count: 30_000)))]
             )),
         ])
         let tool = createSubagentHistoryTool(store: store, sessionId: "p")
         let body = reviewText(try await tool.execute(
-            "d", .object(["agent_id": .string("json"), "tool_call": .string("2.1")]), nil, nil
+            "d",
+            .object(["agent_id": .string("json"), "tool_call": .string("2.1")]),
+            nil,
+            nil
         ))
         #expect(body.utf8.count <= 64 * 1_024 + 512, "tool_call detail returned \(body.utf8.count) bytes")
     }
@@ -537,22 +619,56 @@ struct SubagentReviewTests {
     @Test("tool_call numbering skips thinking and text, counts yield calls, and matches detail addressing")
     func historyToolCallNumbering() async throws {
         let store = SubagentHistoryStore()
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: "num", subagentType: "mini", prompt: "p", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "num",
+            subagentType: "mini",
+            prompt: "p",
+            model: "m"
+        )
         let messages: [Message] = [
             .user(UserMessage(text: "go")),
-            .assistant(fauxAssistantMessage(blocks: [
-                fauxThinking("private reasoning"),
-                fauxText("Looking."),
-                fauxToolCall(name: "read", arguments: .object(["path": .string("a.txt")]), id: "r1"),
-                fauxToolCall(name: "grep", arguments: .object(["pattern": .string("<tag>&"), "path": .string("src")]), id: "g1"),
-            ], stopReason: .toolUse)),
-            .toolResult(ToolResultMessage(toolCallId: "r1", toolName: "read", content: [.text(TextContent(text: "one\ntwo"))])),
-            .toolResult(ToolResultMessage(toolCallId: "g1", toolName: "grep", content: [.text(TextContent(text: "bad things\nmore"))], isError: true)),
+            .assistant(fauxAssistantMessage(
+                blocks: [
+                    fauxThinking("private reasoning"),
+                    fauxText("Looking."),
+                    fauxToolCall(name: "read", arguments: .object(["path": .string("a.txt")]), id: "r1"),
+                    fauxToolCall(
+                        name: "grep",
+                        arguments: .object(["pattern": .string("<tag>&"), "path": .string("src")]),
+                        id: "g1"
+                    ),
+                ],
+                stopReason: .toolUse
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "r1",
+                toolName: "read",
+                content: [.text(TextContent(text: "one\ntwo"))]
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "g1",
+                toolName: "grep",
+                content: [.text(TextContent(text: "bad things\nmore"))],
+                isError: true
+            )),
             .assistant(fauxAssistantMessage(blocks: [fauxThinking("only thinking")], stopReason: .stop)),
-            .assistant(fauxAssistantMessage(blocks: [
-                fauxToolCall(name: "subagent_yield", arguments: .object(["status": .string("complete"), "result": .string("done")]), id: "y1"),
-            ], stopReason: .toolUse)),
-            .toolResult(ToolResultMessage(toolCallId: "y1", toolName: "subagent_yield", content: [.text(TextContent(text: "ok"))])),
+            .assistant(fauxAssistantMessage(
+                blocks: [
+                    fauxToolCall(
+                        name: "subagent_yield",
+                        arguments: .object(["status": .string("complete"), "result": .string("done")]),
+                        id: "y1"
+                    ),
+                ],
+                stopReason: .toolUse
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "y1",
+                toolName: "subagent_yield",
+                content: [.text(TextContent(text: "ok"))]
+            )),
         ]
         store.finish(childSessionId: "c1", status: .completed, messages: messages)
         let tool = createSubagentHistoryTool(store: store, sessionId: "p")
@@ -564,32 +680,58 @@ struct SubagentReviewTests {
         #expect(body.contains("## [6] result · complete\n\ndone"))
 
         let detail = reviewText(try await tool.execute(
-            "d", .object(["agent_id": .string("num"), "tool_call": .string("[2.2]")]), nil, nil
+            "d",
+            .object(["agent_id": .string("num"), "tool_call": .string("[2.2]")]),
+            nil,
+            nil
         ))
         #expect(detail.contains("[2.2] grep · error"))
         let yieldDetail = reviewText(try await tool.execute(
-            "y", .object(["agent_id": .string("num"), "tool_call": .string("6.1")]), nil, nil
+            "y",
+            .object(["agent_id": .string("num"), "tool_call": .string("6.1")]),
+            nil,
+            nil
         ))
         #expect(yieldDetail.contains("[6.1] subagent_yield · ok"))
         await #expect(throws: CodingToolError.self) {
-            _ = try await tool.execute("x", .object(["agent_id": .string("num"), "tool_call": .string("2.3")]), nil, nil)
+            _ = try await tool.execute(
+                "x",
+                .object(["agent_id": .string("num"), "tool_call": .string("2.3")]),
+                nil,
+                nil
+            )
         }
         await #expect(throws: CodingToolError.self) {
-            _ = try await tool.execute("x", .object(["agent_id": .string("num"), "tool_call": .string("99.1")]), nil, nil)
+            _ = try await tool.execute(
+                "x",
+                .object(["agent_id": .string("num"), "tool_call": .string("99.1")]),
+                nil,
+                nil
+            )
         }
     }
 
     @Test("regression: an offset past the end renders an inverted range")
     func bugHistoryOffsetPastEnd() async throws {
         let store = SubagentHistoryStore()
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: "short", subagentType: "mini", prompt: "p", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "short",
+            subagentType: "mini",
+            prompt: "p",
+            model: "m"
+        )
         store.finish(childSessionId: "c1", status: .completed, messages: [
             .user(UserMessage(text: "a")),
             .assistant(fauxAssistantMessage("b")),
         ])
         let tool = createSubagentHistoryTool(store: store, sessionId: "p")
         let body = reviewText(try await tool.execute(
-            "h", .object(["agent_id": .string("short"), "offset": .int(10)]), nil, nil
+            "h",
+            .object(["agent_id": .string("short"), "offset": .int(10)]),
+            nil,
+            nil
         ))
         #expect(!body.contains("messages 3–2 of 2"))
     }
@@ -597,18 +739,40 @@ struct SubagentReviewTests {
     @Test("tail with offset 0 is the tail; tail with a real offset is rejected; blank ids list children")
     func historyArgumentSemantics() async throws {
         let store = SubagentHistoryStore()
-        store.begin(childSessionId: "c1", parentSessionId: "p", agentId: "sem", subagentType: "mini", prompt: "p", model: "m")
+        store.begin(
+            childSessionId: "c1",
+            parentSessionId: "p",
+            agentId: "sem",
+            subagentType: "mini",
+            prompt: "p",
+            model: "m"
+        )
         let messages: [Message] = (0..<30).map { index in
             index % 2 == 0 ? .user(UserMessage(text: "u\(index)")) : .assistant(fauxAssistantMessage("a\(index)"))
         }
         store.finish(childSessionId: "c1", status: .completed, messages: messages)
         let tool = createSubagentHistoryTool(store: store, sessionId: "p")
-        let tail = try await tool.execute("t", .object(["agent_id": .string("sem"), "tail": .int(3), "offset": .int(0)]), nil, nil)
+        let tail = try await tool.execute(
+            "t",
+            .object(["agent_id": .string("sem"), "tail": .int(3), "offset": .int(0)]),
+            nil,
+            nil
+        )
         #expect(reviewText(tail).contains("messages 28–30 of 30"))
         await #expect(throws: CodingToolError.self) {
-            _ = try await tool.execute("t", .object(["agent_id": .string("sem"), "tail": .int(3), "offset": .int(2)]), nil, nil)
+            _ = try await tool.execute(
+                "t",
+                .object(["agent_id": .string("sem"), "tail": .int(3), "offset": .int(2)]),
+                nil,
+                nil
+            )
         }
-        let index = reviewText(try await tool.execute("i", .object(["agent_id": .string("  "), "task_id": .null]), nil, nil))
+        let index = reviewText(try await tool.execute(
+            "i",
+            .object(["agent_id": .string("  "), "task_id": .null]),
+            nil,
+            nil
+        ))
         #expect(index.contains("| sem | mini | completed | 1 |"))
     }
 
@@ -671,7 +835,10 @@ struct SubagentReviewTests {
         }
         // The failed send must not leave the child claimed as queued.
         let snapshot = try await reviewTool(toolset, "agent_history").execute(
-            "h", .object(["agent_id": .string("mini-1")]), nil, nil
+            "h",
+            .object(["agent_id": .string("mini-1")]),
+            nil,
+            nil
         )
         #expect(reviewDetail(snapshot, "status") == "completed")
     }

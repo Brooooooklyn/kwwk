@@ -28,7 +28,8 @@ public struct AnthropicUsageReader: OAuthUsageReader {
             return try Self.windows(fromJSON: body)
         } catch {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode,
+                providerId: providerId,
+                status: response.statusCode,
                 detail: "undecodable body: \(error)"
             )
         }
@@ -83,10 +84,13 @@ public struct AnthropicUsageReader: OAuthUsageReader {
         // same numbers rode the `limits` array, so the array is the durable
         // source for the shared windows too. The top-level fields stay as the
         // fallback for as long as they are populated.
-        windows.insert(contentsOf: [
-            sharedFiveHour ?? payload.fiveHour.map { $0.dto(window: .fiveHour, seconds: 5 * 60 * 60) },
-            sharedSevenDay ?? payload.sevenDay.map { $0.dto(window: .sevenDay, seconds: 7 * 24 * 60 * 60) },
-        ].compactMap { $0 }, at: 0)
+        windows.insert(
+            contentsOf: [
+                sharedFiveHour ?? payload.fiveHour.map { $0.dto(window: .fiveHour, seconds: 5 * 60 * 60) },
+                sharedSevenDay ?? payload.sevenDay.map { $0.dto(window: .sevenDay, seconds: 7 * 24 * 60 * 60) },
+            ].compactMap { $0 },
+            at: 0
+        )
         return windows
     }
 

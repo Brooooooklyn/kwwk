@@ -123,7 +123,11 @@ struct ProviderToolChangeEncodingTests {
             content: [.toolCall(ToolCall(id: "toolu_1", name: "tool_search", arguments: ["query": "issues"]))],
             api: "anthropic-messages", provider: "anthropic", model: "claude-test", stopReason: .toolUse
         )),
-        .toolResult(ToolResultMessage(toolCallId: "toolu_1", toolName: "tool_search", content: [.text(TextContent(text: "Loaded 1 tool"))])),
+        .toolResult(ToolResultMessage(
+            toolCallId: "toolu_1",
+            toolName: "tool_search",
+            content: [.text(TextContent(text: "Loaded 1 tool"))]
+        )),
         declare(added: [tool("mcp__gh__issues")]),
     ]
 
@@ -204,7 +208,12 @@ struct ProviderToolChangeEncodingTests {
         let transcript: [Message] = [
             declare(added: [tool("read")]),
             .user(UserMessage(text: "hi")),
-            .assistant(AssistantMessage(content: [.text(TextContent(text: "ok"))], api: model.api, provider: model.provider, model: model.id)),
+            .assistant(AssistantMessage(
+                content: [.text(TextContent(text: "ok"))],
+                api: model.api,
+                provider: model.provider,
+                model: model.id
+            )),
             declare(added: [tool("mcp__gh__issues")]),
         ]
         _ = await provider.stream(

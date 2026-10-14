@@ -23,7 +23,9 @@ struct WorkBuddyRegistrationTests {
             await APIRegistry.shared.unregisterScope(id)
             // Never-expiring credentials so registration skips the token refresh.
             let store = try await store(OAuthCredentials(
-                access: "own-access", refresh: "r", expires: .max,
+                access: "own-access",
+                refresh: "r",
+                expires: .max,
                 extras: ["uid": .string("u1"), "domain": .string("www.codebuddy.cn"), "enterpriseId": .string("ent-1")]
             ), for: id)
 
@@ -57,7 +59,10 @@ struct WorkBuddyRegistrationTests {
     func domainFallback() async throws {
         try await withSharedAPIRegistry {
             let store = try await store(OAuthCredentials(
-                access: "a", refresh: "", expires: .max, extras: ["uid": .string("u1")]
+                access: "a",
+                refresh: "",
+                expires: .max,
+                extras: ["uid": .string("u1")]
             ), for: "workbuddy-ai")
             let resolved = try #require(try await registerStored(storeId: "workbuddy-ai", store: store))
             let auth = try #require(try await resolved.authResolver?(resolved.model, nil))

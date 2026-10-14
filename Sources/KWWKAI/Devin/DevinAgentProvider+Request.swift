@@ -38,9 +38,14 @@ extension DevinAgentProvider {
             if let first = prompts.firstIndex(where: { $0.source == .user }) {
                 prompts[first].prompt = joinNonEmpty(instructions, prompts[first].prompt)
             } else {
-                prompts.insert(DevinProto.ChatMessagePrompt(
-                    messageId: deterministicUUID("\(cascadeId)\0instructions"), source: .user, prompt: instructions
-                ), at: 0)
+                prompts.insert(
+                    DevinProto.ChatMessagePrompt(
+                        messageId: deterministicUUID("\(cascadeId)\0instructions"),
+                        source: .user,
+                        prompt: instructions
+                    ),
+                    at: 0
+                )
             }
         }
         // Devin answers 400 "an internal error occurred" to a temperature
@@ -152,7 +157,9 @@ extension DevinAgentProvider {
     /// channels). Message ids are deterministic in (cascade, index, role) so
     /// they stay stable across history rebuilds.
     static func chatMessagePrompts(
-        _ messages: [Message], cascadeId: String, model: Model
+        _ messages: [Message],
+        cascadeId: String,
+        model: Model
     ) -> [DevinProto.ChatMessagePrompt] {
         var prompts: [DevinProto.ChatMessagePrompt] = []
         for (index, message) in messages.enumerated() {
@@ -186,7 +193,11 @@ extension DevinAgentProvider {
                         prompt.thinking += th.thinking
                         if native, thinkingBlocks == 1, let sig = th.thinkingSignature { prompt.signature = sig }
                     case .toolCall(let call):
-                        prompt.toolCalls.append(.init(id: call.id, name: call.name, argumentsJson: jsonString(call.arguments)))
+                        prompt.toolCalls.append(.init(
+                            id: call.id,
+                            name: call.name,
+                            argumentsJson: jsonString(call.arguments)
+                        ))
                     case .fallback:
                         break
                     }

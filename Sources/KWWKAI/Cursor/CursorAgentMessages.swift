@@ -12,8 +12,11 @@ enum CursorProto {
     /// provider_identifier=4, tool_name=5 }`. `inputSchema` carries the tool's
     /// JSON schema encoded as a `google.protobuf.Value`.
     static func encodeMcpToolDefinition(
-        name: String, description: String, providerIdentifier: String,
-        toolName: String, inputSchema: Data
+        name: String,
+        description: String,
+        providerIdentifier: String,
+        toolName: String,
+        inputSchema: Data
     ) -> Data {
         var w = ProtoWriter()
         w.stringField(1, name)
@@ -78,7 +81,9 @@ enum CursorProto {
     /// fields are always rebuilt fresh — the server's echoed checkpoint replaces
     /// historical user entries with empty placeholders.
     static func encodeConversationState(
-        rootPromptIds: [Data], turns: [Data], preserving checkpoint: Data? = nil
+        rootPromptIds: [Data],
+        turns: [Data],
+        preserving checkpoint: Data? = nil
     ) -> Data {
         var w = ProtoWriter()
         for id in rootPromptIds { w.bytesField(1, id) }
@@ -191,7 +196,10 @@ enum CursorProto {
     /// `AgentClientMessage { exec_client_message=2: ExecClientMessage { id=1,
     /// exec_id=15, <resultField>=payload } }`.
     static func encodeExecClientMessage(
-        id: UInt32, execId: String, resultField: Int, payload: Data
+        id: UInt32,
+        execId: String,
+        resultField: Int,
+        payload: Data
     ) -> Data {
         var exec = ProtoWriter()
         exec.uint32Field(1, id)

@@ -644,8 +644,10 @@ public enum AgentLoop {
             return authMetadata
         }()
         var lastError: Error?
-        let retryPolicy = ProviderRetryPolicy(baseDelayMs: config.retryBaseDelayMs,
-                                              maxRetryDelayMs: config.maxRetryDelayMs)
+        let retryPolicy = ProviderRetryPolicy(
+            baseDelayMs: config.retryBaseDelayMs,
+            maxRetryDelayMs: config.maxRetryDelayMs
+        )
 
         for attemptIndex in 0..<retryPolicy.maxAttempts {
             if cancellation?.isCancelled == true {
@@ -1006,10 +1008,16 @@ public enum AgentLoop {
             switch prep {
             case .immediate(let result, let isError):
                 return await finalize(
-                    call: call, assistantMessage: placeholder, args: call.arguments,
-                    context: context, outcome: ExecutedOutcome(result: result, isError: isError),
-                    config: config, cancellation: cancellation,
-                    turnToolState: turnToolState, emitMessageEvents: false, emit: emit
+                    call: call,
+                    assistantMessage: placeholder,
+                    args: call.arguments,
+                    context: context,
+                    outcome: ExecutedOutcome(result: result, isError: isError),
+                    config: config,
+                    cancellation: cancellation,
+                    turnToolState: turnToolState,
+                    emitMessageEvents: false,
+                    emit: emit
                 )
             case .prepared(let prepared):
                 var executionCancellation = cancellation
@@ -1026,13 +1034,19 @@ public enum AgentLoop {
                     ) else {
                         parentRegistration?.cancel()
                         return await finalize(
-                            call: call, assistantMessage: placeholder, args: prepared.args,
+                            call: call,
+                            assistantMessage: placeholder,
+                            args: prepared.args,
                             context: context,
                             outcome: ExecutedOutcome(
-                                result: multipleTaskPollsError(), isError: true
+                                result: multipleTaskPollsError(),
+                                isError: true
                             ),
-                            config: config, cancellation: cancellation,
-                            turnToolState: turnToolState, emitMessageEvents: false, emit: emit
+                            config: config,
+                            cancellation: cancellation,
+                            turnToolState: turnToolState,
+                            emitMessageEvents: false,
+                            emit: emit
                         )
                     }
                     executionCancellation = pollCancellation
@@ -1040,7 +1054,10 @@ public enum AgentLoop {
                     cursorPollParentRegistration = parentRegistration
                 }
                 let executed = await executePrepared(
-                    prepared, cancellation: executionCancellation, config: config, emit: emit
+                    prepared,
+                    cancellation: executionCancellation,
+                    config: config,
+                    emit: emit
                 )
                 if let cursorPollCancellation {
                     turnToolState.finishCursorPoll(
@@ -1050,10 +1067,16 @@ public enum AgentLoop {
                 }
                 cursorPollParentRegistration?.cancel()
                 return await finalize(
-                    call: call, assistantMessage: placeholder, args: prepared.args,
-                    context: context, outcome: executed,
-                    config: config, cancellation: cancellation,
-                    turnToolState: turnToolState, emitMessageEvents: false, emit: emit
+                    call: call,
+                    assistantMessage: placeholder,
+                    args: prepared.args,
+                    context: context,
+                    outcome: executed,
+                    config: config,
+                    cancellation: cancellation,
+                    turnToolState: turnToolState,
+                    emitMessageEvents: false,
+                    emit: emit
                 )
             }
         }
@@ -1094,8 +1117,10 @@ public enum AgentLoop {
             var blocked: String?
             if let before = config.beforeToolCall {
                 let ctx = BeforeToolCallContext(
-                    assistantMessage: placeholder, toolCall: call,
-                    args: call.arguments, context: context
+                    assistantMessage: placeholder,
+                    toolCall: call,
+                    args: call.arguments,
+                    context: context
                 )
                 if let result = await before(ctx, cancellation) {
                     if result.block {
@@ -1140,14 +1165,21 @@ public enum AgentLoop {
             }
         default:
             outcome = ExecutedOutcome(
-                result: errorToolResult("Tool \(call.name) not found"), isError: true
+                result: errorToolResult("Tool \(call.name) not found"),
+                isError: true
             )
         }
         return await finalize(
-            call: call, assistantMessage: placeholder, args: finalizedArgs,
-            context: context, outcome: outcome,
-            config: config, cancellation: cancellation,
-            turnToolState: turnToolState, emitMessageEvents: false, emit: emit
+            call: call,
+            assistantMessage: placeholder,
+            args: finalizedArgs,
+            context: context,
+            outcome: outcome,
+            config: config,
+            cancellation: cancellation,
+            turnToolState: turnToolState,
+            emitMessageEvents: false,
+            emit: emit
         )
     }
 
@@ -1181,7 +1213,8 @@ public enum AgentLoop {
                     return ExecutedOutcome(result: errorToolResult("write: `content` is required"), isError: true)
                 }
                 try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
                 )
                 try Data(content.utf8).write(to: url)
                 return ExecutedOutcome(
@@ -1386,7 +1419,10 @@ public enum AgentLoop {
                 ))
             case .prepared(let prepared):
                 let executed = await executePrepared(
-                    prepared, cancellation: cancellation, config: config, emit: emit
+                    prepared,
+                    cancellation: cancellation,
+                    config: config,
+                    emit: emit
                 )
                 out.append(await finalize(
                     call: call,
@@ -1646,7 +1682,10 @@ public enum AgentLoop {
 
         do {
             let result = try await prepared.tool.execute(
-                prepared.call.id, prepared.args, effectiveCancellation, onUpdate
+                prepared.call.id,
+                prepared.args,
+                effectiveCancellation,
+                onUpdate
             )
             await emitBox.waitForPending()
             return ExecutedOutcome(result: result, isError: false)

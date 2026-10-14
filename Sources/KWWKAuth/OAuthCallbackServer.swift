@@ -304,7 +304,10 @@ extension OAuthLogin {
     /// through `Callbacks` without changing any provider flow.
     public static let nioLoopback: OAuthLoopbackFactory = { host, port, path in
         try OAuthCallbackServer(
-            port: port, path: path, redirectHost: host, surfacesProviderErrors: true
+            port: port,
+            path: path,
+            redirectHost: host,
+            surfacesProviderErrors: true
         )
     }
 }

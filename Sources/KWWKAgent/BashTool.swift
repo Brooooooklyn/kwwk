@@ -610,7 +610,10 @@ private func runBashForegroundWithFlip(
         }
         let code = status.code
         if code != 0 {
-            throw CodingToolError.commandFailed(stderr: output.text.isEmpty ? "command exited with code \(code)" : output.text, exitCode: code)
+            throw CodingToolError.commandFailed(
+                stderr: output.text.isEmpty ? "command exited with code \(code)" : output.text,
+                exitCode: code
+            )
         }
         let durationMs = Int(Date().timeIntervalSince(start) * 1000)
         var details: [String: JSONValue] = [

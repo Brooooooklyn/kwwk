@@ -31,7 +31,8 @@ struct BashForegroundArtifactTests {
         let result = try await tool.execute(
             "truncated-fg",
             ["command": .string("seq 1 100000")],
-            nil, nil
+            nil,
+            nil
         )
         let text = textOutput(result)
         #expect(text.hasPrefix("[output truncated:"))
@@ -62,7 +63,8 @@ struct BashForegroundArtifactTests {
         let result = try await tool.execute(
             "small-fg",
             ["command": .string("echo small-output")],
-            nil, nil
+            nil,
+            nil
         )
         let text = textOutput(result)
         #expect(text.contains("small-output"))
@@ -88,7 +90,8 @@ struct BashForegroundArtifactTests {
             _ = try await tool.execute(
                 "failing-fg",
                 ["command": .string("seq 1 100000; exit 3")],
-                nil, nil
+                nil,
+                nil
             )
             Issue.record("expected commandFailed for exit 3")
         } catch CodingToolError.commandFailed(let stderr, let exitCode) {

@@ -4,7 +4,9 @@ extension OpenAICompletionsProvider {
     // MARK: - Encoding
 
     static func encodeBodyDict(
-        model: Model, context: Context, options: StreamOptions?
+        model: Model,
+        context: Context,
+        options: StreamOptions?
     ) throws -> [String: Any] {
         let compat = resolveCompat(model)
         var context = context
@@ -133,10 +135,12 @@ extension OpenAICompletionsProvider {
         let isNonStandard = isNvidia || isCerebras || isGrok || isTogether || isChutes
             || isDeepSeek || isZai || isMoonshot || isOpencode || isCloudflareWorkers
             || isCfGateway || isAntLing
-        let openRouterDeveloperRole = isOpenRouter && (model.id.hasPrefix("anthropic/") || model.id.hasPrefix("openai/"))
+        let openRouterDeveloperRole = isOpenRouter
+            && (model.id.hasPrefix("anthropic/") || model.id.hasPrefix("openai/"))
         let useMaxTokens = isChutes || isMoonshot || isCfGateway || isTogether || isNvidia || isAntLing
 
-        let detectedReasoningEffort = !isGrok && !isZai && !isMoonshot && !isTogether && !isCfGateway && !isNvidia && !isAntLing
+        let detectedReasoningEffort = !isGrok && !isZai && !isMoonshot && !isTogether
+            && !isCfGateway && !isNvidia && !isAntLing
         let detectedFormat: String = isDeepSeek ? "deepseek"
             : isZai ? "zai"
             : isTogether ? "together"
@@ -147,7 +151,8 @@ extension OpenAICompletionsProvider {
         let c = model.compat
         return ResolvedCompletionsCompat(
             supportsStore: c?.supportsStore ?? !isNonStandard,
-            supportsDeveloperRole: c?.supportsDeveloperRole ?? (openRouterDeveloperRole || (!isNonStandard && !isOpenRouter)),
+            supportsDeveloperRole: c?.supportsDeveloperRole
+                ?? (openRouterDeveloperRole || (!isNonStandard && !isOpenRouter)),
             supportsReasoningEffort: c?.supportsReasoningEffort ?? detectedReasoningEffort,
             supportsUsageInStreaming: c?.supportsUsageInStreaming ?? true,
             maxTokensField: c?.maxTokensField ?? (useMaxTokens ? "max_tokens" : "max_completion_tokens"),
@@ -161,14 +166,16 @@ extension OpenAICompletionsProvider {
             vercelGatewayRouting: c?.vercelGatewayRouting,
             zaiToolStream: c?.zaiToolStream ?? false,
             supportsStrictMode: c?.supportsStrictMode ?? (!isMoonshot && !isTogether && !isCfGateway && !isNvidia),
-            cacheControlFormat: c?.cacheControlFormat ?? ((provider == "openrouter" && model.id.hasPrefix("anthropic/")) ? "anthropic" : nil),
+            cacheControlFormat: c?.cacheControlFormat
+                ?? ((provider == "openrouter" && model.id.hasPrefix("anthropic/")) ? "anthropic" : nil),
             // OpenRouter uses the session id to keep provider/model routing
             // sticky across an agent run. Built-in OpenRouter catalog entries
             // do not repeat this flag per model, so enable it from provider /
             // base-URL detection while preserving an explicit opt-out.
             sendSessionAffinityHeaders: c?.sendSessionAffinityHeaders ?? isOpenRouter,
             sessionAffinityFormat: c?.sessionAffinityFormat ?? (isOpenRouter ? "openrouter" : "openai"),
-            supportsLongCacheRetention: c?.supportsLongCacheRetention ?? !(isTogether || isCloudflareWorkers || isCfGateway || isNvidia || isAntLing),
+            supportsLongCacheRetention: c?.supportsLongCacheRetention
+                ?? !(isTogether || isCloudflareWorkers || isCfGateway || isNvidia || isAntLing),
             requiresObjectSchemaRoot: isGrok,
             isXai: isGrok,
             isKimi: isMoonshot || has("api.kimi.com") || has("api.kimi.ai")
@@ -206,7 +213,9 @@ extension OpenAICompletionsProvider {
     }
 
     private static func encodeMessages(
-        model: Model, context: Context, compat: ResolvedCompletionsCompat
+        model: Model,
+        context: Context,
+        compat: ResolvedCompletionsCompat
     ) -> [[String: Any]] {
         var out: [[String: Any]] = []
         if let sys = context.systemPrompt, !sys.isEmpty {
@@ -426,7 +435,8 @@ extension OpenAICompletionsProvider {
     }
 
     private static func compatCacheControl(
-        compat: ResolvedCompletionsCompat, retention: CacheRetention
+        compat: ResolvedCompletionsCompat,
+        retention: CacheRetention
     ) -> [String: Any]? {
         guard compat.cacheControlFormat == "anthropic", retention != .none else { return nil }
         if retention == .long, compat.supportsLongCacheRetention {
@@ -456,7 +466,8 @@ extension OpenAICompletionsProvider {
 
     @discardableResult
     private static func addCacheControl(
-        _ cacheControl: [String: Any], toTextContentOf message: inout [String: Any]
+        _ cacheControl: [String: Any],
+        toTextContentOf message: inout [String: Any]
     ) -> Bool {
         if let text = message["content"] as? String, !text.isEmpty {
             message["content"] = [["type": "text", "text": text, "cache_control": cacheControl]]

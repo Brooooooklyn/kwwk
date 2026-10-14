@@ -37,11 +37,17 @@ public struct WorkBuddySite: Sendable, Hashable {
 
     /// The China build (codebuddy.cn's plan), on copilot.tencent.com.
     public static let china = WorkBuddySite(
-        id: "workbuddy", name: "WorkBuddy", endpoint: "https://copilot.tencent.com", platform: "workbuddy"
+        id: "workbuddy",
+        name: "WorkBuddy",
+        endpoint: "https://copilot.tencent.com",
+        platform: "workbuddy"
     )
     /// WorkBuddy AI, the international build (codebuddy.ai's plan).
     public static let international = WorkBuddySite(
-        id: "workbuddy-ai", name: "WorkBuddy AI", endpoint: "https://www.workbuddy.ai", platform: "workbuddy-ai"
+        id: "workbuddy-ai",
+        name: "WorkBuddy AI",
+        endpoint: "https://www.workbuddy.ai",
+        platform: "workbuddy-ai"
     )
     public static let all: [WorkBuddySite] = [.china, .international]
 
@@ -112,7 +118,9 @@ public enum WorkBuddyOAuth {
     /// refresh that doesn't rotate the refresh token keeps the old one. Nil
     /// when the answer carries no access token.
     static func merge(
-        _ token: [String: Any], into base: OAuthCredentials?, now: Date
+        _ token: [String: Any],
+        into base: OAuthCredentials?,
+        now: Date
     ) -> OAuthCredentials? {
         guard let access = token["accessToken"] as? String, !access.isEmpty else { return nil }
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
@@ -172,12 +180,18 @@ enum WorkBuddyAPI {
     /// The `data` of an answered call; a `Failure` for a non-zero code or an
     /// error status. Transport errors pass through.
     static func call(
-        _ site: WorkBuddySite, method: String, path: String,
-        headers: [String: String] = [:], body: Data? = nil, client: HTTPClient
+        _ site: WorkBuddySite,
+        method: String,
+        path: String,
+        headers: [String: String] = [:],
+        body: Data? = nil,
+        client: HTTPClient
     ) async throws -> Any? {
         let (response, data) = try await client.request(
-            url: site.url(path), method: method,
-            headers: jsonHeaders.merging(headers) { _, given in given }, body: body
+            url: site.url(path),
+            method: method,
+            headers: jsonHeaders.merging(headers) { _, given in given },
+            body: body
         )
         return try unwrap(data, status: response.statusCode)
     }
@@ -220,7 +234,8 @@ extension OAuthLogin {
         let started: [String: Any]?
         do {
             started = try await WorkBuddyAPI.call(
-                site, method: "POST",
+                site,
+                method: "POST",
                 path: "/v2/plugin/auth/state?" + OAuth.urlEncodedForm(["platform": site.platform]),
                 headers: [
                     "X-No-Authorization": "true",
@@ -228,7 +243,8 @@ extension OAuthLogin {
                     "X-No-Enterprise-Id": "true",
                     "X-No-Department-Info": "true",
                 ],
-                body: Data("{}".utf8), client: client
+                body: Data("{}".utf8),
+                client: client
             ) as? [String: Any]
         } catch let failure as WorkBuddyAPI.Failure {
             throw OAuthLoginError.denied("\(site.name): \(failure.message)")
@@ -257,9 +273,14 @@ extension OAuthLogin {
             let deadline = now().addingTimeInterval(WorkBuddyOAuth.signInWindow)
             let query = OAuth.urlEncodedForm(["state": state])
             let token = try await pollWorkBuddy(
-                site, path: "/v2/plugin/auth/token?" + query, headers: [:],
+                site,
+                path: "/v2/plugin/auth/token?" + query,
+                headers: [:],
                 pendingCode: WorkBuddyOAuth.tokenPendingCode,
-                deadline: deadline, client: client, pollSleep: pollSleep, now: now
+                deadline: deadline,
+                client: client,
+                pollSleep: pollSleep,
+                now: now
             )
             guard var credentials = WorkBuddyOAuth.merge(token, into: nil, now: now()) else {
                 throw OAuthError.invalidResponse("\(site.name) gave no token")
@@ -269,10 +290,14 @@ extension OAuthLogin {
                 "X-Domain": WorkBuddyOAuth.domain(credentials.extras, site: site),
             ]
             let account = try await pollWorkBuddy(
-                site, path: "/v2/plugin/login/account?" + query,
+                site,
+                path: "/v2/plugin/login/account?" + query,
                 headers: asAccount.merging(["X-No-User-Id": "true", "X-No-Enterprise-Id": "true"]) { own, _ in own },
                 pendingCode: WorkBuddyOAuth.accountPendingCode,
-                deadline: deadline, client: client, pollSleep: pollSleep, now: now
+                deadline: deadline,
+                client: client,
+                pollSleep: pollSleep,
+                now: now
             )
             guard let uid = account["uid"] as? String, !uid.isEmpty else {
                 throw OAuthError.invalidResponse("\(site.name) gave no account")
@@ -293,9 +318,14 @@ extension OAuthLogin {
     /// other refusal ends the sign-in. A transport failure is a blip unless
     /// three come in a row.
     private static func pollWorkBuddy(
-        _ site: WorkBuddySite, path: String, headers: [String: String], pendingCode: Int,
-        deadline: Date, client: HTTPClient,
-        pollSleep: @Sendable () async throws -> Void, now: @Sendable () -> Date
+        _ site: WorkBuddySite,
+        path: String,
+        headers: [String: String],
+        pendingCode: Int,
+        deadline: Date,
+        client: HTTPClient,
+        pollSleep: @Sendable () async throws -> Void,
+        now: @Sendable () -> Date
     ) async throws -> [String: Any] {
         var consecutiveErrors = 0
         while true {
@@ -303,7 +333,13 @@ extension OAuthLogin {
             try await pollSleep()
             if now() > deadline { throw OAuthLoginError.timedOut }
             do {
-                let data = try await WorkBuddyAPI.call(site, method: "GET", path: path, headers: headers, client: client)
+                let data = try await WorkBuddyAPI.call(
+                    site,
+                    method: "GET",
+                    path: path,
+                    headers: headers,
+                    client: client
+                )
                 consecutiveErrors = 0
                 if let answer = data as? [String: Any], !answer.isEmpty { return answer }
             } catch let failure as WorkBuddyAPI.Failure {
@@ -327,7 +363,10 @@ extension OAuthLogin {
     /// WorkBuddy's own client makes: the uid's only entry of that type, or
     /// the only one it last signed in to.
     private static func workBuddyEnterprise(
-        _ site: WorkBuddySite, account: [String: Any], headers: [String: String], client: HTTPClient
+        _ site: WorkBuddySite,
+        account: [String: Any],
+        headers: [String: String],
+        client: HTTPClient
     ) async -> String {
         func trimmed(_ value: Any?) -> String {
             (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -337,7 +376,11 @@ extension OAuthLogin {
         let type = trimmed(account["type"]).lowercased()
         if type.isEmpty || type == "personal" { return "" }
         let listed = try? await WorkBuddyAPI.call(
-            site, method: "GET", path: "/v2/plugin/accounts", headers: headers, client: client
+            site,
+            method: "GET",
+            path: "/v2/plugin/accounts",
+            headers: headers,
+            client: client
         ) as? [String: Any]
         let mine = (listed?["accounts"] as? [[String: Any]] ?? []).filter {
             $0["uid"] as? String == account["uid"] as? String && !trimmed($0["enterpriseId"]).isEmpty
@@ -374,14 +417,17 @@ public struct WorkBuddyOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         // A refresh token past its own end is not sent: the account is
         // signed out, and only a new sign-in brings it back.
         if case .int(let ends)? = credentials.extras["refreshExpiresAt"], ends > 0,
            Int64(Date().timeIntervalSince1970 * 1000) >= Int64(ends) {
             throw OAuthRefreshError(
-                providerId: id, kind: .rejected, status: nil,
+                providerId: id,
+                kind: .rejected,
+                status: nil,
                 detail: "this \(site.name) account is signed out; sign in again"
             )
         }
@@ -392,8 +438,11 @@ public struct WorkBuddyOAuthProvider: OAuthProvider {
             headers[name] = value
         }
         let (response, body) = try await OAuthRefreshError.post(
-            provider: id, url: site.url("/v2/plugin/auth/token/refresh"),
-            headers: headers, body: Data("{}".utf8), client: client
+            provider: id,
+            url: site.url("/v2/plugin/auth/token/refresh"),
+            headers: headers,
+            body: Data("{}".utf8),
+            client: client
         )
         let token: [String: Any]?
         do {
@@ -402,13 +451,17 @@ public struct WorkBuddyOAuthProvider: OAuthProvider {
             // A business code under a 200. Which of them mean the grant is
             // gone isn't known, so none parks the login.
             throw OAuthRefreshError(
-                providerId: id, kind: .unavailable, status: response.statusCode,
+                providerId: id,
+                kind: .unavailable,
+                status: response.statusCode,
                 detail: "\(failure.message) (code \(failure.code))"
             )
         }
         guard let refreshed = WorkBuddyOAuth.merge(token ?? [:], into: credentials, now: Date()) else {
             throw OAuthRefreshError(
-                providerId: id, kind: .unavailable, status: response.statusCode,
+                providerId: id,
+                kind: .unavailable,
+                status: response.statusCode,
                 detail: "\(site.name) gave no refreshed token"
             )
         }
@@ -442,7 +495,9 @@ public struct WorkBuddyUsageReader: OAuthUsageReader {
         do {
             (response, body) = try await client.request(
                 url: site.url("/billing/meter/get-user-resource-summary"),
-                method: "POST", headers: headers, body: Data("{}".utf8)
+                method: "POST",
+                headers: headers,
+                body: Data("{}".utf8)
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -458,7 +513,11 @@ public struct WorkBuddyUsageReader: OAuthUsageReader {
             let summary = try WorkBuddyAPI.unwrap(body, status: response.statusCode) as? [String: Any]
             return try Self.windows(fromSummary: summary ?? [:])
         } catch let failure as WorkBuddyAPI.Failure {
-            throw OAuthUsageError.unavailable(providerId: providerId, status: response.statusCode, detail: failure.message)
+            throw OAuthUsageError.unavailable(
+                providerId: providerId,
+                status: response.statusCode,
+                detail: failure.message
+            )
         }
     }
 
@@ -487,7 +546,11 @@ public struct WorkBuddyUsageReader: OAuthUsageReader {
             if let number = Double(text) { return number }
             fallthrough
         default:
-            throw WorkBuddyAPI.Failure(code: 0, status: 200, message: "unreadable capacity \(String(describing: value))")
+            throw WorkBuddyAPI.Failure(
+                code: 0,
+                status: 200,
+                message: "unreadable capacity \(String(describing: value))"
+            )
         }
     }
 }

@@ -156,8 +156,10 @@ struct LoginLogoutModalTests {
             // Simulate an already-logged-in session on another provider.
             let incumbent = Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
             ctx.sessionProviders.upsert(ProviderSlot(
-                storeId: "anthropic", catalogProvider: "anthropic",
-                displayName: "Anthropic", template: incumbent
+                storeId: "anthropic",
+                catalogProvider: "anthropic",
+                displayName: "Anthropic",
+                template: incumbent
             ))
             ctx.agent.state.model = incumbent
 
@@ -189,8 +191,10 @@ struct LoginLogoutModalTests {
         // `anthropic` scope the api-key login would also register under.
         let incumbent = Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
         ctx.sessionProviders.upsert(ProviderSlot(
-            storeId: "anthropic", catalogProvider: "anthropic",
-            displayName: "Anthropic", template: incumbent
+            storeId: "anthropic",
+            catalogProvider: "anthropic",
+            displayName: "Anthropic",
+            template: incumbent
         ))
         ctx.agent.state.model = incumbent
 
@@ -232,8 +236,10 @@ struct LoginLogoutModalTests {
         let (ctx, harness) = await makeContext(authResolvers: authResolvers)
         let incumbent = Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
         ctx.sessionProviders.upsert(ProviderSlot(
-            storeId: "anthropic", catalogProvider: "anthropic",
-            displayName: "Anthropic", template: incumbent
+            storeId: "anthropic",
+            catalogProvider: "anthropic",
+            displayName: "Anthropic",
+            template: incumbent
         ))
         ctx.agent.state.model = incumbent
 
@@ -258,8 +264,12 @@ struct LoginLogoutModalTests {
         let authResolvers = SessionAuthResolvers()
         let (ctx, harness) = await makeContext(authResolvers: authResolvers)
         await completeAPIKeyLogin(
-            values: [:], storeId: "openrouter", extrasKeys: [],
-            ctx: ctx, authResolvers: authResolvers, store: store
+            values: [:],
+            storeId: "openrouter",
+            extrasKeys: [],
+            ctx: ctx,
+            authResolvers: authResolvers,
+            store: store
         )
         #expect(await store.get("openrouter") == nil)
         #expect(ctx.sessionProviders.slots.isEmpty)
@@ -282,7 +292,8 @@ struct LoginLogoutModalTests {
 
         // With a provider slot the gate is transparent (no output).
         providers.upsert(ProviderSlot(
-            storeId: "anthropic", catalogProvider: "anthropic",
+            storeId: "anthropic",
+            catalogProvider: "anthropic",
             displayName: "Anthropic",
             template: Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
         ))
@@ -326,13 +337,17 @@ struct LoginLogoutModalTests {
             // catalog value — pin it with a model whose catalog window is NOT
             // already 1M, so the two flag states are distinguishable.
             let with1m = try await registerStored(
-                storeId: "anthropic", store: store,
-                modelOverride: "claude-haiku-4-5", context1m: true
+                storeId: "anthropic",
+                store: store,
+                modelOverride: "claude-haiku-4-5",
+                context1m: true
             )
             #expect(with1m?.model.contextWindow == 1_000_000)
             let without1m = try await registerStored(
-                storeId: "anthropic", store: store,
-                modelOverride: "claude-haiku-4-5", context1m: false
+                storeId: "anthropic",
+                store: store,
+                modelOverride: "claude-haiku-4-5",
+                context1m: false
             )
             #expect(without1m?.model.contextWindow == 200_000)
 
@@ -340,15 +355,19 @@ struct LoginLogoutModalTests {
             // subscription route still needs the explicit beta. Without the
             // flag, both its context and Claude Code output cap stay bounded.
             let opusWithout1m = try await registerStored(
-                storeId: "anthropic", store: store,
-                modelOverride: "claude-opus-4-8", context1m: false
+                storeId: "anthropic",
+                store: store,
+                modelOverride: "claude-opus-4-8",
+                context1m: false
             )
             #expect(opusWithout1m?.model.contextWindow == 200_000)
             #expect(opusWithout1m?.model.maxTokens == 64_000)
 
             let opusWith1m = try await registerStored(
-                storeId: "anthropic", store: store,
-                modelOverride: "claude-opus-4-8", context1m: true
+                storeId: "anthropic",
+                store: store,
+                modelOverride: "claude-opus-4-8",
+                context1m: true
             )
             #expect(opusWith1m?.model.contextWindow == 1_000_000)
             #expect(opusWith1m?.model.maxTokens == 64_000)
@@ -360,13 +379,17 @@ struct LoginLogoutModalTests {
             let authResolvers = SessionAuthResolvers()
             let (ctx, _) = await makeContext(authResolvers: authResolvers, context1m: true)
             await activateFreshLogin(
-                storeId: "anthropic", ctx: ctx, authResolvers: authResolvers, store: store
+                storeId: "anthropic",
+                ctx: ctx,
+                authResolvers: authResolvers,
+                store: store
             )
             let slot = ctx.sessionProviders.slot(forStoreId: "anthropic")
             #expect(slot?.template.provider == "anthropic")
             #expect(slot?.template.contextWindow == 1_000_000)
             let provider = await APIRegistry.shared.provider(
-                scope: "anthropic", api: "anthropic-messages"
+                scope: "anthropic",
+                api: "anthropic-messages"
             ) as? AnthropicProvider
             #expect(provider?.extraHeaders["anthropic-beta"]?.contains("context-1m-2025-08-07") == true)
             await APIRegistry.shared.unregisterScope("anthropic")
@@ -388,12 +411,16 @@ struct LoginLogoutModalTests {
             let authResolvers = SessionAuthResolvers()
             let (ctx, harness) = await makeContext(authResolvers: authResolvers)
             let template = Model(
-                id: "z-ai/glm-5.2", api: "openai-completions", provider: "openrouter",
+                id: "z-ai/glm-5.2",
+                api: "openai-completions",
+                provider: "openrouter",
                 baseURL: "https://openrouter.ai/api/v1"
             )
             ctx.sessionProviders.upsert(ProviderSlot(
-                storeId: "openrouter", catalogProvider: "openrouter",
-                displayName: "OpenRouter", template: template
+                storeId: "openrouter",
+                catalogProvider: "openrouter",
+                displayName: "OpenRouter",
+                template: template
             ))
             ctx.agent.state.model = template
             ctx.agent.compactionModel = template

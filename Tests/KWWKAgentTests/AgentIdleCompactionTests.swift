@@ -90,7 +90,8 @@ struct AgentIdleCompactionTests {
         // Same measure the agent uses: the full prompt, not just messages.
         let snapshot = agent.state.snapshotModelContext()
         let tokens = AgentContextCompactor.currentUsage(
-            context: snapshot.context, model: snapshot.model
+            context: snapshot.context,
+            model: snapshot.model
         ).tokens
         #expect(tokens > 1)
         agent.idleCompact = AgentIdleCompactOptions(threshold: .tokens(tokens + 1), delay: 3600)

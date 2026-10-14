@@ -182,7 +182,9 @@ struct ProtoReader {
 
 extension ProtoReader.Value {
     var asUInt64: UInt64? { if case .varint(let v) = self { return v }; return nil }
-    var asInt32: Int32? { if case .varint(let v) = self { return Int32(truncatingIfNeeded: Int64(bitPattern: v)) }; return nil }
+    var asInt32: Int32? {
+        if case .varint(let v) = self { return Int32(truncatingIfNeeded: Int64(bitPattern: v)) }; return nil
+    }
     var asBool: Bool? { if case .varint(let v) = self { return v != 0 }; return nil }
     var asData: Data? { if case .bytes(let d) = self { return d }; return nil }
     var asString: String? {

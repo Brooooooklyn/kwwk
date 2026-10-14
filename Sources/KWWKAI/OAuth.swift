@@ -168,7 +168,8 @@ public actor OAuthManager {
     /// while the source still serves the entry it rotated, the source's
     /// answer otherwise (dropping any superseded rotation).
     private func reconciled(
-        _ served: OAuthCredentials?, for providerId: String
+        _ served: OAuthCredentials?,
+        for providerId: String
     ) -> OAuthCredentials? {
         guard let served else {
             refreshedOverlay[providerId] = nil

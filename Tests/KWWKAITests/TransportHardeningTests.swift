@@ -158,7 +158,11 @@ struct AnthropicTerminalTests {
 
         """
         let provider = AnthropicProvider(client: ChunkStubClient(text: sse), defaultAPIKey: "k")
-        let s = provider.stream(model: Self.model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
+        let s = provider.stream(
+            model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: nil
+        )
         var terminal: AssistantMessage?
         for await event in s {
             if case .error(_, let err) = event { terminal = err }
@@ -193,7 +197,11 @@ struct AnthropicTerminalTests {
 
         """
         let provider = AnthropicProvider(client: ChunkStubClient(text: sse), defaultAPIKey: "k")
-        let s = provider.stream(model: Self.model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
+        let s = provider.stream(
+            model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: nil
+        )
         var sawError = false
         for await event in s {
             if case .error(_, let err) = event, err.stopReason == .error { sawError = true }
@@ -229,8 +237,16 @@ struct OpenAIResponsesIncompleteTests {
 
 
         """
-        let provider = OpenAIResponsesProvider(client: ChunkStubClient(text: sse), webSocketClient: nil, defaultAPIKey: "k")
-        let s = provider.stream(model: Self.model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
+        let provider = OpenAIResponsesProvider(
+            client: ChunkStubClient(text: sse),
+            webSocketClient: nil,
+            defaultAPIKey: "k"
+        )
+        let s = provider.stream(
+            model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: nil
+        )
         for await _ in s {}
         let result = await s.result()
         #expect(result.stopReason == .length)
@@ -272,7 +288,11 @@ struct BedrockSignatureTests {
             resolveProfileFiles: false,
             credentialsProvider: { AWSSigV4.Credentials(accessKeyId: "k", secretAccessKey: "s") }
         )
-        let s = provider.stream(model: Self.model, context: Context(messages: [.user(UserMessage(text: "hi"))]), options: nil)
+        let s = provider.stream(
+            model: Self.model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: nil
+        )
         for await _ in s {}
         let result = await s.result()
         if case .thinking(let th)? = result.content.first {

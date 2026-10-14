@@ -30,7 +30,10 @@ public struct MCPAuthHTTPResponse: Sendable, Hashable {
 
     public init(status: Int, headers: [String: String] = [:], body: Data = Data(), url: URL) {
         self.status = status
-        self.headers = Dictionary(headers.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { _, last in last })
+        self.headers = Dictionary(
+            headers.map { ($0.key.lowercased(), $0.value) },
+            uniquingKeysWith: { _, last in last }
+        )
         self.body = body
         self.url = url
     }
@@ -57,7 +60,10 @@ public enum MCPAuthHTTP {
     /// (GET, or 307/308) and stays within the request's origin, like the MCP
     /// TypeScript SDK's `fetchWithinOrigin`. Any other redirect is returned
     /// as is.
-    public static func send(_ request: MCPAuthHTTPRequest, using client: any MCPAuthHTTPClient) async throws -> MCPAuthHTTPResponse {
+    public static func send(
+        _ request: MCPAuthHTTPRequest,
+        using client: any MCPAuthHTTPClient
+    ) async throws -> MCPAuthHTTPResponse {
         var current = request
         var followed = 0
         while true {
@@ -194,7 +200,9 @@ public final class URLSessionMCPAuthHTTPClient: MCPAuthHTTPClient, @unchecked Se
                 return
             }
             guard let http = entry.response ?? task.response as? HTTPURLResponse else {
-                entry.continuation.resume(throwing: MCPAuthError.requestFailed("No HTTP response from \(entry.url.absoluteString)"))
+                entry.continuation.resume(
+                    throwing: MCPAuthError.requestFailed("No HTTP response from \(entry.url.absoluteString)")
+                )
                 return
             }
             var headers: [String: String] = [:]

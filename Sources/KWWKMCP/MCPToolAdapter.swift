@@ -242,7 +242,14 @@ public enum MCPToolAdapter {
         var blocks = modelBlocks(result, saved: saved)
         if let maxTokens = options.maxTokens, estimatedTokens(blocks, imageTokens: options.imageTokens) > maxTokens {
             let locations = result.content.indices.compactMap { saved[$0] }
-            blocks = await limit(blocks, server: server, tool: tool, maxTokens: maxTokens, options: options, saved: locations)
+            blocks = await limit(
+                blocks,
+                server: server,
+                tool: tool,
+                maxTokens: maxTokens,
+                options: options,
+                saved: locations
+            )
         }
         return try finish(server: server, tool: tool, result: result, blocks: blocks)
     }
@@ -289,7 +296,10 @@ public enum MCPToolAdapter {
     }
 
     private static func finish(
-        server: String, tool: String, result: MCPCallToolResult, blocks input: [ToolResultBlock]
+        server: String,
+        tool: String,
+        result: MCPCallToolResult,
+        blocks input: [ToolResultBlock]
     ) throws -> AgentToolResult {
         var blocks = input
         var details: [String: JSONValue] = ["server": .string(server), "tool": .string(tool)]
@@ -353,12 +363,16 @@ public enum MCPToolAdapter {
             }
         }
         var note = "[MCP result over the size limit: showing \(shownCharacters) of \(totalCharacters) characters"
-        if !omittedImages.isEmpty { note += ", \(omittedImages.count) image\(omittedImages.count == 1 ? "" : "s") left out" }
+        if !omittedImages.isEmpty {
+            note += ", \(omittedImages.count) image\(omittedImages.count == 1 ? "" : "s") left out"
+        }
         // Images already saved as files need no second copy in the spill;
         // their paths may have been cut with the text, so list them again.
         if let spill = options.spill,
            let location = try? await spill.spill(MCPSpilledResult(
-               server: server, tool: tool, text: allText.joined(separator: "\n\n"),
+               server: server,
+               tool: tool,
+               text: allText.joined(separator: "\n\n"),
                images: saved.isEmpty ? omittedImages : []
            )) {
             note += ". The full result is at \(location)"
@@ -385,7 +399,9 @@ public enum MCPToolAdapter {
         case .image(let data, let mimeType):
             return imageBlocks(data: data, mimeType: mimeType, label: "Image", savedAt: location)
         case .audio(let data, let mimeType):
-            return [.text(TextContent(text: "[Audio content (\(mimeType), \(formatSize(byteCount(data))))\(outcome(location))]"))]
+            return [.text(TextContent(
+                text: "[Audio content (\(mimeType), \(formatSize(byteCount(data))))\(outcome(location))]"
+            ))]
         case .resource(let uri, let mimeType, let text, let blob):
             if let text {
                 return [.text(TextContent(text: text))]
@@ -414,9 +430,16 @@ public enum MCPToolAdapter {
 
     /// An image the model can view, then where it was saved; one it cannot
     /// (SVG, TIFF…) only as a line.
-    private static func imageBlocks(data: String, mimeType: String, label: String, savedAt location: String?) -> [ToolResultBlock] {
+    private static func imageBlocks(
+        data: String,
+        mimeType: String,
+        label: String,
+        savedAt location: String?
+    ) -> [ToolResultBlock] {
         guard isViewableImage(mimeType) else {
-            return [.text(TextContent(text: "[\(label) (\(mimeType), \(formatSize(byteCount(data))))\(outcome(location))]"))]
+            return [.text(TextContent(
+                text: "[\(label) (\(mimeType), \(formatSize(byteCount(data))))\(outcome(location))]"
+            ))]
         }
         var blocks: [ToolResultBlock] = [.image(ImageContent(data: data, mimeType: mimeType))]
         if let location {
@@ -442,7 +465,10 @@ public enum MCPToolAdapter {
     static func isTextMimeType(_ mimeType: String?) -> Bool {
         guard let mimeType else { return false }
         let type = mediaType(mimeType)
-        return type.hasPrefix("text/") || type == "application/json" || type.hasSuffix("+json") || type.hasSuffix("+xml")
+        return type.hasPrefix("text/")
+            || type == "application/json"
+            || type.hasSuffix("+json")
+            || type.hasSuffix("+xml")
     }
 
     static func formatSize(_ bytes: Int) -> String {
@@ -551,7 +577,9 @@ private func mediaType(_ mimeType: String) -> String {
 private func createPrivateDirectory(_ directory: URL) throws {
     if !FileManager.default.fileExists(atPath: directory.path) {
         try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
     }
 }

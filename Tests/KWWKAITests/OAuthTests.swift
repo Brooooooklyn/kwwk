@@ -407,7 +407,8 @@ struct OAuthManagerTests {
         #expect(try await resolver(unknown, nil) == nil)
     }
 
-    @Test("resolver() includes GitHub Copilot endpoint as baseURL") func resolverPreservesCopilotEndpoint() async throws {
+    @Test("resolver() includes GitHub Copilot endpoint as baseURL")
+    func resolverPreservesCopilotEndpoint() async throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("kw-oauth-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }

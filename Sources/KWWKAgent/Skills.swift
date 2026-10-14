@@ -278,7 +278,10 @@ public enum Skills {
     /// recursively for `SKILL.md` files; root-level `.md` files are also loaded
     /// as skills. Missing directories are skipped silently. Duplicate skill
     /// names keep the first occurrence (earlier directories win).
-    public static func load(directories: [String], useIndex: Bool = true) -> (skills: [Skill], diagnostics: [SkillDiagnostic]) {
+    public static func load(
+        directories: [String],
+        useIndex: Bool = true
+    ) -> (skills: [Skill], diagnostics: [SkillDiagnostic]) {
         var skills: [Skill] = []
         var diagnostics: [SkillDiagnostic] = []
         var seenNames: Set<String> = []

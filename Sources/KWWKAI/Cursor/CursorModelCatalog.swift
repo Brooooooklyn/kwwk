@@ -52,7 +52,10 @@ public enum CursorModelCatalog {
         // A picker Cursor cannot give leaves the list as the usable ids and
         // the curated table make it.
         let picker = (try? await fetchPickerFacts(
-            apiKey: apiKey, host: host, clientVersion: clientVersion, client: client
+            apiKey: apiKey,
+            host: host,
+            clientVersion: clientVersion,
+            client: client
         )) ?? [:]
         let models = normalize(
             CursorProto.decodeUsableModels(stripConnectUnaryFrame(body)),
@@ -183,7 +186,14 @@ public enum CursorModelCatalog {
         public var maxTokens: Int
         public var thinkingLevelMap: [String: String?]?
 
-        init(name: String, reasoning: Bool, image: Bool, contextWindow: Int, maxTokens: Int, thinkingLevelMap: [String: String]?) {
+        init(
+            name: String,
+            reasoning: Bool,
+            image: Bool,
+            contextWindow: Int,
+            maxTokens: Int,
+            thinkingLevelMap: [String: String]?
+        ) {
             self.name = name
             self.reasoning = reasoning
             self.image = image
@@ -251,7 +261,9 @@ public enum CursorModelCatalog {
     /// it takes images are the picker's, over the table and the family rule:
     /// those are Cursor's own word on what it serves.
     static func normalize(
-        _ models: [CursorProto.UsableModel], host: String, picker: [String: PickerFacts] = [:]
+        _ models: [CursorProto.UsableModel],
+        host: String,
+        picker: [String: PickerFacts] = [:]
     ) -> [Model] {
         var byId: [String: Model] = [:]
         let fetchedIds = Set(models.map { $0.modelId.trimmingCharacters(in: .whitespaces) })

@@ -320,7 +320,10 @@ struct CompactionSerializationTests {
             .user(UserMessage(text: String(repeating: "a", count: 180))),
             .assistant(AssistantMessage(
                 content: [.toolCall(call)],
-                api: "faux", provider: "faux", model: "faux", stopReason: .toolUse
+                api: "faux",
+                provider: "faux",
+                model: "faux",
+                stopReason: .toolUse
             )),
             .toolResult(ToolResultMessage(
                 toolCallId: call.id,
@@ -329,12 +332,16 @@ struct CompactionSerializationTests {
             )),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: String(repeating: "c", count: 180)))],
-                api: "faux", provider: "faux", model: "faux"
+                api: "faux",
+                provider: "faux",
+                model: "faux"
             )),
             .user(UserMessage(text: String(repeating: "d", count: 180))),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: String(repeating: "e", count: 180)))],
-                api: "faux", provider: "faux", model: "faux"
+                api: "faux",
+                provider: "faux",
+                model: "faux"
             )),
         ]
 
@@ -461,11 +468,14 @@ struct CompactionSerializationTests {
                 content: [.text(TextContent(text: call.id))]
             ))
         }
-        results.insert(.toolResult(ToolResultMessage(
-            toolCallId: orphanIds[0],
-            toolName: "orphan",
-            content: [.text(TextContent(text: orphanIds[0]))]
-        )), at: 0)
+        results.insert(
+            .toolResult(ToolResultMessage(
+                toolCallId: orphanIds[0],
+                toolName: "orphan",
+                content: [.text(TextContent(text: orphanIds[0]))]
+            )),
+            at: 0
+        )
         results.append(.toolResult(ToolResultMessage(
             toolCallId: orphanIds[1],
             toolName: "orphan",

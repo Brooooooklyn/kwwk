@@ -211,7 +211,11 @@ final class AskModal: Modal {
     /// spans a row RANGE (a wrapped entry): keep the whole entry visible,
     /// preferring its first row when it is taller than the window.
     private func rangeScrollOffset(
-        start: Int, end: Int, count: Int, windowSize: Int, previous: Int
+        start: Int,
+        end: Int,
+        count: Int,
+        windowSize: Int,
+        previous: Int
     ) -> Int {
         var scroll = previous
         if end >= scroll + windowSize { scroll = end - windowSize + 1 }
@@ -290,7 +294,9 @@ final class AskModal: Modal {
                     label += Style.dimmed(Ask.recommendedSuffix)
                 }
                 rows.append(contentsOf: wrapHanging(
-                    first: "\(prefix)\(marker) ", content: label, width: width
+                    first: "\(prefix)\(marker) ",
+                    content: label,
+                    width: width
                 ))
                 if let description = option.description {
                     // Style row-by-row: wrap the plain text, then paint each
@@ -306,7 +312,9 @@ final class AskModal: Modal {
                 let base = isCursor ? Style.prompt("Done") : "Done"
                 let suffix = count > 0 ? Style.dimmed(" (\(count) selected)") : ""
                 rows.append(contentsOf: wrapHanging(
-                    first: prefix + "  ", content: base + suffix, width: width
+                    first: prefix + "  ",
+                    content: base + suffix,
+                    width: width
                 ))
             case .other:
                 let label = Ask.otherOptionLabel
@@ -358,8 +366,11 @@ final class AskModal: Modal {
             if entryIndex == selectedIndex { selectedRange = rangeStart...(lines.count - 1) }
         }
         scroll = rangeScrollOffset(
-            start: selectedRange.lowerBound, end: selectedRange.upperBound,
-            count: lines.count, windowSize: bodyBudget, previous: scroll
+            start: selectedRange.lowerBound,
+            end: selectedRange.upperBound,
+            count: lines.count,
+            windowSize: bodyBudget,
+            previous: scroll
         )
 
         var out: [String] = []

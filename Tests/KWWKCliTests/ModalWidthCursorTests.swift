@@ -257,14 +257,19 @@ struct ModalWidthCursorTests {
     @Test("ask other-input carries the cursor marker at the buffer end")
     func askOtherInputCursorMarker() {
         let question = AskQuestion(
-            id: "q", question: "Q?",
+            id: "q",
+            question: "Q?",
             options: [AskOption(label: "A", description: nil)],
-            multi: false, recommended: nil
+            multi: false,
+            recommended: nil
         )
         let prompt = AskPrompt(
-            question: question, progressText: nil,
-            allowBack: false, allowForward: false,
-            previousSelection: [], previousCustomInput: nil
+            question: question,
+            progressText: nil,
+            allowBack: false,
+            allowForward: false,
+            previousSelection: [],
+            previousCustomInput: nil
         )
         let modal = AskModal(prompt: prompt) { _ in }
         modal.up() // onto "Other"

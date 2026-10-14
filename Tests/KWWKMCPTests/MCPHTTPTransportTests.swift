@@ -28,7 +28,11 @@ final class FakeHTTPMCPServer: HTTPClient, @unchecked Sendable {
     var scopedTokens: Set<String>?
 
     func stream(
-        url: URL, method: String, headers: [String: String], body: Data?, cancellation: CancellationHandle?
+        url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        cancellation: CancellationHandle?
     ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         let json = body.flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
         lock.withLock { recorded.append(Recorded(method: method, headers: headers, body: json)) }
@@ -45,14 +49,24 @@ final class FakeHTTPMCPServer: HTTPClient, @unchecked Sendable {
         }
         let bearer = headers["Authorization"].flatMap { $0.hasPrefix("Bearer ") ? String($0.dropFirst(7)) : nil }
         if let acceptedTokens, !acceptedTokens.contains(bearer ?? "") {
-            return respond(url, 401, [
-                "WWW-Authenticate": #"Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", scope="read""#,
-            ], "unauthorized")
+            return respond(
+                url,
+                401,
+                [
+                    "WWW-Authenticate": #"Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", scope="read""#,
+                ],
+                "unauthorized"
+            )
         }
         if rpcMethod == "tools/call", let scopedTokens, !scopedTokens.contains(bearer ?? "") {
-            return respond(url, 403, [
-                "WWW-Authenticate": #"Bearer error="insufficient_scope", scope="write", error_description="needs write""#,
-            ], "forbidden")
+            return respond(
+                url,
+                403,
+                [
+                    "WWW-Authenticate": #"Bearer error="insufficient_scope", scope="write", error_description="needs write""#,
+                ],
+                "forbidden"
+            )
         }
         let id = json["id"] ?? .null
         switch rpcMethod {
@@ -105,7 +119,11 @@ final class FakeHTTPMCPServer: HTTPClient, @unchecked Sendable {
     }
 
     private func respond(
-        _ url: URL, _ status: Int, _ headers: [String: String], _ body: String, chunkSize: Int = 1 << 20
+        _ url: URL,
+        _ status: Int,
+        _ headers: [String: String],
+        _ body: String,
+        chunkSize: Int = 1 << 20
     ) -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         let bytes = Array(body.utf8)

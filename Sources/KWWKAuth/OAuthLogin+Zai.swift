@@ -50,7 +50,8 @@ extension OAuthLogin {
         callbacks.onProgress("exchanging authorization code…")
         let exchange = try zaiUnwrap(
             try await zaiJSON(
-                url: ZaiOAuth.tokenURL, method: "POST",
+                url: ZaiOAuth.tokenURL,
+                method: "POST",
                 body: ["provider": "zai", "code": code, "redirect_uri": redirect, "state": state],
                 client: client
             ),
@@ -66,8 +67,10 @@ extension OAuthLogin {
         callbacks.onProgress("provisioning Z.AI API key…")
         let login = try zaiUnwrap(
             try await zaiJSON(
-                url: ZaiOAuth.businessLoginURL, method: "POST",
-                body: ["token": oauthToken], client: client
+                url: ZaiOAuth.businessLoginURL,
+                method: "POST",
+                body: ["token": oauthToken],
+                client: client
             ),
             operation: "business login"
         )
@@ -81,7 +84,10 @@ extension OAuthLogin {
         let customer = try zaiUnwrap(
             try await zaiJSON(
                 url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/customer/getCustomerInfo"),
-                method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
+                method: "GET",
+                body: nil,
+                authorization: "Bearer \(bizToken)",
+                client: client
             ),
             operation: "customer lookup"
         )
@@ -94,7 +100,11 @@ extension OAuthLogin {
             .appendingPathComponent("api/biz/v1/organization/\(organizationId)/projects/\(projectId)/api_keys")
         let listed = try zaiUnwrap(
             try await zaiJSON(
-                url: keysURL, method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
+                url: keysURL,
+                method: "GET",
+                body: nil,
+                authorization: "Bearer \(bizToken)",
+                client: client
             ),
             operation: "api key list"
         )
@@ -109,8 +119,11 @@ extension OAuthLogin {
         } else {
             record = try zaiUnwrap(
                 try await zaiJSON(
-                    url: keysURL, method: "POST",
-                    body: ["name": ZaiOAuth.keyName], authorization: "Bearer \(bizToken)", client: client
+                    url: keysURL,
+                    method: "POST",
+                    body: ["name": ZaiOAuth.keyName],
+                    authorization: "Bearer \(bizToken)",
+                    client: client
                 ),
                 operation: "api key create"
             ) as? [String: Any]
@@ -125,7 +138,10 @@ extension OAuthLogin {
         let copied = try zaiUnwrap(
             try await zaiJSON(
                 url: keysURL.appendingPathComponent("copy/\(apiKey)"),
-                method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
+                method: "GET",
+                body: nil,
+                authorization: "Bearer \(bizToken)",
+                client: client
             ),
             operation: "api key copy"
         )
@@ -199,7 +215,10 @@ extension OAuthLogin {
         guard let listed = try? zaiUnwrap(
             try await zaiJSON(
                 url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/subscription/list"),
-                method: "GET", body: nil, authorization: key, client: client
+                method: "GET",
+                body: nil,
+                authorization: key,
+                client: client
             ),
             operation: "subscription list"
         ), let subscriptions = listed as? [[String: Any]] else { return nil }
@@ -222,7 +241,10 @@ extension OAuthLogin {
         if let authorization { headers["authorization"] = authorization }
         let data = try body.map { try JSONSerialization.data(withJSONObject: $0) }
         let (response, responseBody) = try await client.request(
-            url: url, method: method, headers: headers, body: data
+            url: url,
+            method: method,
+            headers: headers,
+            body: data
         )
         if response.statusCode >= 400 {
             throw OAuthError.refreshFailed("zai \(url.lastPathComponent) \(response.statusCode): \(String(data: responseBody, encoding: .utf8) ?? "")")

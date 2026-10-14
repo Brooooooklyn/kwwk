@@ -17,7 +17,8 @@ public struct AnthropicOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         let body: [String: Any] = [
             "grant_type": "refresh_token",
@@ -25,9 +26,11 @@ public struct AnthropicOAuthProvider: OAuthProvider {
             "refresh_token": credentials.refresh,
         ]
         let json = try await OAuthRefreshError.postForToken(
-            provider: id, url: tokenURL,
+            provider: id,
+            url: tokenURL,
             headers: ["content-type": "application/json", "accept": "application/json"],
-            body: try JSONSerialization.data(withJSONObject: body), client: client
+            body: try JSONSerialization.data(withJSONObject: body),
+            client: client
         )
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return OAuthCredentials(
@@ -56,7 +59,8 @@ public struct OpenAICodexOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         let form = OAuth.urlEncodedForm([
             "grant_type": "refresh_token",
@@ -64,9 +68,11 @@ public struct OpenAICodexOAuthProvider: OAuthProvider {
             "client_id": clientID,
         ])
         let json = try await OAuthRefreshError.postForToken(
-            provider: id, url: tokenURL,
+            provider: id,
+            url: tokenURL,
             headers: ["content-type": "application/x-www-form-urlencoded", "accept": "application/json"],
-            body: Data(form.utf8), client: client
+            body: Data(form.utf8),
+            client: client
         )
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var extras = credentials.extras
@@ -130,7 +136,8 @@ public struct GitHubCopilotOAuthProvider: OAuthProvider {
     /// is a long-lived GitHub token, and each refresh trades it for a
     /// short-lived session token kept as `access` until it expires.
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         var headers: [String: String] = [
             "accept": "application/json",
@@ -138,7 +145,10 @@ public struct GitHubCopilotOAuthProvider: OAuthProvider {
         ]
         for (k, v) in extraHeaders { headers[k] = v }
         let (response, body) = try await client.request(
-            url: tokenURL, method: "GET", headers: headers, body: nil
+            url: tokenURL,
+            method: "GET",
+            headers: headers,
+            body: nil
         )
         if response.statusCode >= 400 {
             let text = String(data: body, encoding: .utf8) ?? ""
@@ -188,17 +198,22 @@ public struct CursorOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         let (response, body) = try await OAuthRefreshError.post(
-            provider: id, url: refreshURL,
+            provider: id,
+            url: refreshURL,
             headers: ["authorization": "Bearer \(credentials.refresh)", "content-type": "application/json"],
-            body: Data("{}".utf8), client: client
+            body: Data("{}".utf8),
+            client: client
         )
         guard let obj = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
               let access = obj["accessToken"] as? String, !access.isEmpty else {
             throw OAuthRefreshError(
-                providerId: id, kind: .unavailable, status: response.statusCode,
+                providerId: id,
+                kind: .unavailable,
+                status: response.statusCode,
                 detail: "cursor refresh missing accessToken"
             )
         }
@@ -231,7 +246,8 @@ public struct DevinOAuthProvider: OAuthProvider {
     public init() {}
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         throw OAuthError.refreshFailed("devin session tokens cannot be refreshed; run /login devin again")
     }

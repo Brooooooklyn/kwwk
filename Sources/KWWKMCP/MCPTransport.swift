@@ -58,7 +58,10 @@ struct MCPRefusedCredential: Sendable, Equatable {
 
 /// Builds the transport of a configured server, with the server's auth
 /// (HTTP only; nil when it has none).
-public typealias MCPTransportFactory = @Sendable (_ config: MCPServerConfig, _ auth: MCPTransportAuth?) throws -> any MCPTransport
+public typealias MCPTransportFactory = @Sendable (
+    _ config: MCPServerConfig,
+    _ auth: MCPTransportAuth?
+) throws -> any MCPTransport
 
 public enum MCPTransports {
     /// The default transport for a config: `MCPStdioTransport` for `.stdio`,

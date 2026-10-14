@@ -26,7 +26,11 @@ extension MCPOAuth {
 
     static func isLoopbackHost(_ host: String?) -> Bool {
         guard let host = host?.lowercased() else { return false }
-        return host == "localhost" || host.hasSuffix(".localhost") || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+        return host == "localhost"
+            || host.hasSuffix(".localhost")
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host == "[::1]"
     }
 
     static func isHTTPSURLWithPath(_ url: URL) -> Bool {

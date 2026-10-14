@@ -30,7 +30,10 @@ enum TranscriptSnapshot {
                 for block in a.content {
                     if case .toolCall(let call) = block {
                         renderer.apply(.toolExecutionStart(
-                            toolCallId: call.id, toolName: call.name, args: call.arguments))
+                            toolCallId: call.id,
+                            toolName: call.name,
+                            args: call.arguments
+                        ))
                     }
                 }
             case .toolResult(let tr):

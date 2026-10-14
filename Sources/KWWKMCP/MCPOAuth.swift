@@ -86,7 +86,10 @@ public enum MCPOAuth {
     /// after discarding the affected credentials: `invalid_client` /
     /// `unauthorized_client` drop the client and tokens, `invalid_grant`
     /// drops the tokens.
-    public static func auth(_ provider: any MCPOAuthClientProvider, options: MCPOAuthOptions) async throws -> MCPOAuthResult {
+    public static func auth(
+        _ provider: any MCPOAuthClientProvider,
+        options: MCPOAuthOptions
+    ) async throws -> MCPOAuthResult {
         do {
             return try await authInternal(provider, options: options)
         } catch MCPAuthError.oauth(let error) {
@@ -104,11 +107,17 @@ public enum MCPOAuth {
         }
     }
 
-    private static func invalidate(_ provider: any MCPOAuthClientProvider, _ scope: MCPOAuthCredentialScope) async throws {
+    private static func invalidate(
+        _ provider: any MCPOAuthClientProvider,
+        _ scope: MCPOAuthCredentialScope
+    ) async throws {
         try await (provider as? any MCPOAuthCredentialInvalidation)?.invalidateCredentials(scope)
     }
 
-    private static func authInternal(_ provider: any MCPOAuthClientProvider, options: MCPOAuthOptions) async throws -> MCPOAuthResult {
+    private static func authInternal(
+        _ provider: any MCPOAuthClientProvider,
+        options: MCPOAuthOptions
+    ) async throws -> MCPOAuthResult {
         let http = options.httpClient
         let clientMetadata = resolveClientMetadata(provider)
         let discoveryStore = provider as? any MCPOAuthDiscoveryStore
@@ -193,7 +202,11 @@ public enum MCPOAuth {
         }
 
         // Send the metadata's resource indicator verbatim.
-        let resource = try await selectResource(serverURL: options.serverURL, provider: provider, resourceMetadata: resourceMetadata)
+        let resource = try await selectResource(
+            serverURL: options.serverURL,
+            provider: provider,
+            resourceMetadata: resourceMetadata
+        )
 
         let resolvedScope = determineScope(
             requestedScope: options.scope,
@@ -344,10 +357,13 @@ public enum MCPOAuth {
     ) async throws {
         let iss = callbackParameters["iss"]
         guard let code = callbackParameters["code"], !code.isEmpty else {
-            var metadata = try await (provider as? any MCPOAuthDiscoveryStore)?.discoveryState()?.authorizationServerMetadata
+            var metadata = try await (provider as? any MCPOAuthDiscoveryStore)?.discoveryState()?
+                .authorizationServerMetadata
             if metadata == nil {
                 metadata = try? await discoverServerInfo(
-                    serverURL: serverURL, resourceMetadataURL: resourceMetadataURL, httpClient: httpClient
+                    serverURL: serverURL,
+                    resourceMetadataURL: resourceMetadataURL,
+                    httpClient: httpClient
                 ).authorizationServerMetadata
             }
             guard let metadata else {
@@ -405,7 +421,10 @@ public enum MCPOAuth {
         a == b || (a.hasSuffix("/") && String(a.dropLast()) == b) || (b.hasSuffix("/") && String(b.dropLast()) == a)
     }
 
-    static func discardIfIssuerMismatch(_ stored: MCPOAuthClientInformation?, issuer: String) -> MCPOAuthClientInformation? {
+    static func discardIfIssuerMismatch(
+        _ stored: MCPOAuthClientInformation?,
+        issuer: String
+    ) -> MCPOAuthClientInformation? {
         guard let stored else { return nil }
         guard let stamp = stored.issuer else { return stored }
         return issuersMatch(stamp, issuer) ? stored : nil
@@ -475,14 +494,19 @@ public enum MCPOAuth {
     ) async throws -> String? {
         let defaultResource = resourceURL(fromServerURL: serverURL)
         if let validating = provider as? any MCPOAuthResourceValidation {
-            return try await validating.validateResourceURL(serverURL: defaultResource, resource: resourceMetadata?.resource)?
-                .absoluteString
+            return try await validating.validateResourceURL(
+                serverURL: defaultResource,
+                resource: resourceMetadata?.resource
+            )?.absoluteString
         }
         guard let resourceMetadata else { return nil }
         guard let configured = URL(string: resourceMetadata.resource),
               checkResourceAllowed(requested: defaultResource, configured: configured)
         else {
-            throw MCPAuthError.resourceMismatch(resource: resourceMetadata.resource, expected: defaultResource.absoluteString)
+            throw MCPAuthError.resourceMismatch(
+                resource: resourceMetadata.resource,
+                expected: defaultResource.absoluteString
+            )
         }
         return resourceMetadata.resource
     }

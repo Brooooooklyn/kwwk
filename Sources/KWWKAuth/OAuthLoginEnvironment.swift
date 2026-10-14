@@ -27,7 +27,9 @@ public protocol OAuthLoopbackListener: AnyObject, Sendable {
 
 /// Builds the listener for one sign-in.
 public typealias OAuthLoopbackFactory = @Sendable (
-    _ host: String, _ port: UInt16, _ path: String
+    _ host: String,
+    _ port: UInt16,
+    _ path: String
 ) throws -> any OAuthLoopbackListener
 
 /// Shows an authorization or verification page while the flow's own work

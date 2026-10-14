@@ -83,7 +83,11 @@ struct ToolCatalogTests {
             .factory { context, _, _, _ in
                 await log.record(context)
                 return fauxAssistantMessage(
-                    blocks: [fauxToolCall(name: toolSearchToolName, arguments: ["query": "github issues"], id: "search-1")],
+                    blocks: [fauxToolCall(
+                        name: toolSearchToolName,
+                        arguments: ["query": "github issues"],
+                        id: "search-1"
+                    )],
                     stopReason: .toolUse
                 )
             },
@@ -211,7 +215,9 @@ struct ToolCatalogTests {
     @Test("a restored tool its source never provides fails when called")
     func restoredToolWithoutSource() async throws {
         let catalog = ToolCatalog(owns: { _ in true })
-        catalog.restore(from: [.system(SystemMessage(toolsAdded: [namedTool("mcp__gone__tool", "gone").toKWWKAITool()]))])
+        catalog.restore(from: [
+            .system(SystemMessage(toolsAdded: [namedTool("mcp__gone__tool", "gone").toKWWKAITool()]))
+        ])
         let tool = try #require(catalog.tools.first)
         await #expect(throws: CodingToolError.self) {
             _ = try await tool.execute("c1", .object([:]), nil, nil)
@@ -241,7 +247,10 @@ struct ToolCatalogTests {
         let model = faux.getModel()
         let reply = { (text: String) in
             Message.assistant(AssistantMessage(
-                content: [.text(TextContent(text: text))], api: model.api, provider: model.provider, model: model.id
+                content: [.text(TextContent(text: text))],
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             ))
         }
         let calculate = makeCalculateTool().toKWWKAITool()

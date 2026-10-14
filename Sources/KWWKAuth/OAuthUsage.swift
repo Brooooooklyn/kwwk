@@ -163,7 +163,8 @@ public struct OpenAICodexUsageReader: OAuthUsageReader {
             accountId = claimed
         } else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: nil,
+                providerId: providerId,
+                status: nil,
                 detail: "the stored login carries no ChatGPT account id"
             )
         }
@@ -183,7 +184,8 @@ public struct OpenAICodexUsageReader: OAuthUsageReader {
             payload = try JSONDecoder().decode(Payload.self, from: body)
         } catch {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode,
+                providerId: providerId,
+                status: response.statusCode,
                 detail: "undecodable body: \(error)"
             )
         }
@@ -308,7 +310,9 @@ public struct KimiCodingUsageReader: OAuthUsageReader {
         )
         guard let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode, detail: "undecodable body"
+                providerId: providerId,
+                status: response.statusCode,
+                detail: "undecodable body"
             )
         }
         return Self.windows(from: payload)
@@ -333,7 +337,9 @@ public struct KimiCodingUsageReader: OAuthUsageReader {
                   let usedPercent = usedPercent(detail)
             else { continue }
             candidates.append(Candidate(
-                seconds: seconds, usedPercent: usedPercent, resetsAt: resetsAtMillis(detail, now: now)
+                seconds: seconds,
+                usedPercent: usedPercent,
+                resetsAt: resetsAtMillis(detail, now: now)
             ))
         }
 

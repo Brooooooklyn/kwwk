@@ -258,7 +258,12 @@ struct DeepSeekToolTurnReasoningTests {
 
     @Test("the Chat provider gives other models none")
     func chatProviderOthers() throws {
-        let model = Self.model("glm-5.2", api: "openai-completions", provider: "x", baseURL: "https://opencode.ai/zen/go/v1")
+        let model = Self.model(
+            "glm-5.2",
+            api: "openai-completions",
+            provider: "x",
+            baseURL: "https://opencode.ai/zen/go/v1"
+        )
         let ms = try chatRequest(model)
         for m in ms where m["role"] as? String == "assistant" {
             #expect(m["reasoning_content"] as? String != " ")

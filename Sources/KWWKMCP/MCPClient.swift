@@ -371,7 +371,10 @@ public actor MCPClient {
             } else {
                 reply = .error(
                     id: id,
-                    error: JSONRPCErrorObject(code: JSONRPCErrorObject.methodNotFound, message: "Method not found: \(method)")
+                    error: JSONRPCErrorObject(
+                        code: JSONRPCErrorObject.methodNotFound,
+                        message: "Method not found: \(method)"
+                    )
                 )
             }
             let transport = self.transport

@@ -111,7 +111,12 @@ struct MCPStdioEndToEndTests {
         let handle = CancellationHandle()
         let progress = Collector<MCPProgress>()
         let call = Task {
-            try await client.callTool(name: "slow", arguments: [:], cancellation: handle, onProgress: { progress.append($0) })
+            try await client.callTool(
+                name: "slow",
+                arguments: [:],
+                cancellation: handle,
+                onProgress: { progress.append($0) }
+            )
         }
         #expect(await waitUntil { !progress.values.isEmpty })
         #expect(progress.values.first == MCPProgress(progress: 1, total: 2, message: "halfway"))

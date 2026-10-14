@@ -393,11 +393,13 @@ struct TranscriptCommitTests {
     func readFoldsToOneLine() {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("src/foo.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             result: toolResult("line1\nline2\nline3"),
             isError: false
         ))
@@ -428,11 +430,13 @@ struct TranscriptCommitTests {
         let r = TranscriptRenderer()
         for (id, path) in [("1", "a.swift"), ("2", "b.swift"), ("3", "c.swift")] {
             r.apply(.toolExecutionStart(
-                toolCallId: id, toolName: "read",
+                toolCallId: id,
+                toolName: "read",
                 args: .object(["path": .string(path)])
             ))
             r.apply(.toolExecutionEnd(
-                toolCallId: id, toolName: "read",
+                toolCallId: id,
+                toolName: "read",
                 result: toolResult("x\ny"),
                 isError: false
             ))
@@ -447,8 +451,10 @@ struct TranscriptCommitTests {
         // A non-folded tool block seals the run before its own output.
         r.apply(.toolExecutionStart(toolCallId: "4", toolName: "bash", args: .object([:])))
         r.apply(.toolExecutionEnd(
-            toolCallId: "4", toolName: "bash",
-            result: toolResult("ok"), isError: false
+            toolCallId: "4",
+            toolName: "bash",
+            result: toolResult("ok"),
+            isError: false
         ))
         let commits = r.drainCommits().map(ANSI.stripEscapes)
         let treeIdx = commits.firstIndex(where: { $0.contains("● read 3 files") })
@@ -464,7 +470,8 @@ struct TranscriptCommitTests {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(toolCallId: "1", toolName: "ls", args: .object([:])))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "ls",
+            toolCallId: "1",
+            toolName: "ls",
             result: AgentToolResult(
                 content: [.text(TextContent(text: "a\nb"))],
                 details: .object(["entries": .array([
@@ -475,19 +482,24 @@ struct TranscriptCommitTests {
             isError: false
         ))
         r.apply(.toolExecutionStart(
-            toolCallId: "2", toolName: "read",
+            toolCallId: "2",
+            toolName: "read",
             args: .object(["path": .string("README.md")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "2", toolName: "read",
-            result: toolResult("x\ny\nz"), isError: false
+            toolCallId: "2",
+            toolName: "read",
+            result: toolResult("x\ny\nz"),
+            isError: false
         ))
         r.apply(.toolExecutionStart(
-            toolCallId: "3", toolName: "grep",
+            toolCallId: "3",
+            toolName: "grep",
             args: .object(["pattern": .string("foo")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "3", toolName: "grep",
+            toolCallId: "3",
+            toolName: "grep",
             result: AgentToolResult(
                 content: [.text(TextContent(text: "a.swift:1:foo"))],
                 details: .object(["matches": .array([
@@ -521,15 +533,19 @@ struct TranscriptCommitTests {
         let r = TranscriptRenderer()
         // First read finishes; second is still running.
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("done.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
-            result: toolResult("x\ny"), isError: false
+            toolCallId: "1",
+            toolName: "read",
+            result: toolResult("x\ny"),
+            isError: false
         ))
         r.apply(.toolExecutionStart(
-            toolCallId: "2", toolName: "grep",
+            toolCallId: "2",
+            toolName: "grep",
             args: .object(["pattern": .string("wip")])
         ))
 
@@ -545,7 +561,8 @@ struct TranscriptCommitTests {
 
         // When it resolves the row fills in its count in place.
         r.apply(.toolExecutionEnd(
-            toolCallId: "2", toolName: "grep",
+            toolCallId: "2",
+            toolName: "grep",
             result: AgentToolResult(
                 content: [.text(TextContent(text: "a:1:wip"))],
                 details: .object(["matches": .array([
@@ -566,12 +583,15 @@ struct TranscriptCommitTests {
         // queue; a read starts after it and resolves while still blocked.
         r.apply(.toolExecutionStart(toolCallId: "b", toolName: "bash", args: .object(["cmd": .string("sleep")])))
         r.apply(.toolExecutionStart(
-            toolCallId: "r", toolName: "read",
+            toolCallId: "r",
+            toolName: "read",
             args: .object(["path": .string("a.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "r", toolName: "read",
-            result: toolResult("x\ny"), isError: false
+            toolCallId: "r",
+            toolName: "read",
+            result: toolResult("x\ny"),
+            isError: false
         ))
 
         // Live: the blocked read must render as its own one-row tree (header +
@@ -585,8 +605,10 @@ struct TranscriptCommitTests {
         // so later read/grep calls can merge into the same tree); the turn end
         // seals it into scrollback in the exact same tree form — no reflow.
         r.apply(.toolExecutionEnd(
-            toolCallId: "b", toolName: "bash",
-            result: toolResult("done"), isError: false
+            toolCallId: "b",
+            toolName: "bash",
+            result: toolResult("done"),
+            isError: false
         ))
         r.apply(.agentEnd(messages: [], summary: AgentRunSummary()))
         let commits = r.drainCommits().map(ANSI.stripEscapes)
@@ -599,12 +621,15 @@ struct TranscriptCommitTests {
     func agentEndSealsReadRun() {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("a.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
-            result: toolResult("x"), isError: false
+            toolCallId: "1",
+            toolName: "read",
+            result: toolResult("x"),
+            isError: false
         ))
         r.apply(.agentEnd(messages: [], summary: AgentRunSummary()))
         let commits = r.drainCommits().map(ANSI.stripEscapes)
@@ -618,7 +643,8 @@ struct TranscriptCommitTests {
     func grepFoldsToSummaryLine() {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "grep",
+            toolCallId: "1",
+            toolName: "grep",
             args: .object(["pattern": .string("needle")])
         ))
         let result = AgentToolResult(
@@ -646,11 +672,13 @@ struct TranscriptCommitTests {
     func readErrorKeepsFullBlock() {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("missing.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             result: toolResult("file not found: missing.swift"),
             isError: true
         ))
@@ -691,12 +719,15 @@ struct TranscriptCommitTests {
     func liveTailOrdersAfterReadRun() {
         let r = TranscriptRenderer()
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("a.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
-            result: toolResult("x"), isError: false
+            toolCallId: "1",
+            toolName: "read",
+            result: toolResult("x"),
+            isError: false
         ))
         r.apply(.messageStart(message: .assistant(stubAssistant(""))))
         let partial = stubAssistant("summarizing")
@@ -1197,12 +1228,15 @@ struct TranscriptCommitTests {
         let r = TranscriptRenderer()
         // Two reads with a brief (sub-threshold) think wedged between them.
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("a.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
-            result: toolResult("x"), isError: false
+            toolCallId: "1",
+            toolName: "read",
+            result: toolResult("x"),
+            isError: false
         ))
         r.apply(.messageStart(message: .assistant(stubAssistant(""))))
         let partial = stubAssistant("")
@@ -1215,12 +1249,15 @@ struct TranscriptCommitTests {
             assistantMessageEvent: .thinkingEnd(contentIndex: 0, content: "hm", partial: partial)
         ))
         r.apply(.toolExecutionStart(
-            toolCallId: "2", toolName: "read",
+            toolCallId: "2",
+            toolName: "read",
             args: .object(["path": .string("b.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "2", toolName: "read",
-            result: toolResult("y"), isError: false
+            toolCallId: "2",
+            toolName: "read",
+            result: toolResult("y"),
+            isError: false
         ))
         r.apply(.agentEnd(messages: [], summary: AgentRunSummary()))
 
@@ -1239,12 +1276,15 @@ struct TranscriptCommitTests {
         let r = TranscriptRenderer()
         r.collapsedThinkingMinSeconds = 0  // make the think count as "shown"
         r.apply(.toolExecutionStart(
-            toolCallId: "1", toolName: "read",
+            toolCallId: "1",
+            toolName: "read",
             args: .object(["path": .string("a.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "1", toolName: "read",
-            result: toolResult("x"), isError: false
+            toolCallId: "1",
+            toolName: "read",
+            result: toolResult("x"),
+            isError: false
         ))
         r.apply(.messageStart(message: .assistant(stubAssistant(""))))
         let partial = stubAssistant("")
@@ -1257,12 +1297,15 @@ struct TranscriptCommitTests {
             assistantMessageEvent: .thinkingEnd(contentIndex: 0, content: "deliberating", partial: partial)
         ))
         r.apply(.toolExecutionStart(
-            toolCallId: "2", toolName: "read",
+            toolCallId: "2",
+            toolName: "read",
             args: .object(["path": .string("b.swift")])
         ))
         r.apply(.toolExecutionEnd(
-            toolCallId: "2", toolName: "read",
-            result: toolResult("y"), isError: false
+            toolCallId: "2",
+            toolName: "read",
+            result: toolResult("y"),
+            isError: false
         ))
         r.apply(.agentEnd(messages: [], summary: AgentRunSummary()))
 

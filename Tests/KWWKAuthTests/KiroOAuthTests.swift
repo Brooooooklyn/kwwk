@@ -113,7 +113,11 @@ struct KiroSignInTests {
             "profileArn":"arn:aws:codewhisperer:us-east-1:1:profile/P","expiresIn":3600}
             """)])
         let before = Int64(Date().timeIntervalSince1970 * 1000)
-        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        let credentials = try await OAuthLogin.loginKiro(
+            callbacks: loopback.callbacks,
+            client: client,
+            listener: loopback
+        )
 
         // The page is opened as the IDE opens it, to come back to one of its ports.
         let page = try #require(loopback.pageURL)
@@ -164,7 +168,11 @@ struct KiroSignInTests {
             .response(status: 200, body: registerAnswer),
             .response(status: 200, body: tokenAnswer),
         ])
-        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        let credentials = try await OAuthLogin.loginKiro(
+            callbacks: loopback.callbacks,
+            client: client,
+            listener: loopback
+        )
 
         #expect(client.requests[0].url.absoluteString == "https://oidc.us-east-1.amazonaws.com/client/register")
         let register = try jsonBody(client, request: 0)
@@ -222,9 +230,16 @@ struct KiroSignInTests {
             .response(status: 200, body: registerAnswer),
             .response(status: 200, body: tokenAnswer),
             .response(status: 200, body: #"{"profiles":[]}"#),
-            .response(status: 200, body: #"{"profiles":[{"arn":""},{"arn":"arn:aws:codewhisperer:eu-central-1:9:profile/E"}]}"#),
+            .response(
+                status: 200,
+                body: #"{"profiles":[{"arn":""},{"arn":"arn:aws:codewhisperer:eu-central-1:9:profile/E"}]}"#
+            ),
         ])
-        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        let credentials = try await OAuthLogin.loginKiro(
+            callbacks: loopback.callbacks,
+            client: client,
+            listener: loopback
+        )
         #expect(client.requests[0].url.host == "oidc.eu-west-1.amazonaws.com")
         #expect(client.requests[1].url.host == "oidc.eu-west-1.amazonaws.com")
         #expect(client.requests[2].url.absoluteString == "https://management.us-east-1.kiro.dev/List-Available-Profiles")
@@ -247,7 +262,11 @@ struct KiroSignInTests {
             .failure(URLError(.cannotConnectToHost)),
             .response(status: 200, body: #"{"profiles":[{"arn":"arn:aws:codewhisperer:eu-central-1:9:profile/E"}]}"#),
         ])
-        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        let credentials = try await OAuthLogin.loginKiro(
+            callbacks: loopback.callbacks,
+            client: client,
+            listener: loopback
+        )
         #expect(client.requests[3].url.host == "management.eu-central-1.kiro.dev")
         #expect(KiroOAuth.profileArn(credentials) == "arn:aws:codewhisperer:eu-central-1:9:profile/E")
     }
@@ -260,7 +279,11 @@ struct KiroSignInTests {
             .response(status: 200, body: tokenAnswer),
             .response(status: 403, body: #"{"message":"AWS Builder ID is not supported for this operation."}"#),
         ])
-        let credentials = try await OAuthLogin.loginKiro(callbacks: loopback.callbacks, client: client, listener: loopback)
+        let credentials = try await OAuthLogin.loginKiro(
+            callbacks: loopback.callbacks,
+            client: client,
+            listener: loopback
+        )
         #expect(client.requestCount == 3)
         #expect(KiroOAuth.profileArn(credentials) == KiroOAuth.builderIDProfile)
     }
@@ -307,7 +330,9 @@ struct KiroSignInTests {
         let loopback = ScriptedKiroLoopback([{ _, _ in ("/oauth/callback", ["error": "access_denied"]) }])
         await #expect(throws: OAuthLoginError.cancelled) {
             _ = try await OAuthLogin.loginKiro(
-                callbacks: loopback.callbacks, client: QueuedHTTPClient([]), listener: loopback
+                callbacks: loopback.callbacks,
+                client: QueuedHTTPClient([]),
+                listener: loopback
             )
         }
     }
@@ -321,7 +346,10 @@ struct KiroSignInTests {
         do {
             _ = try await OAuthLogin.loginKiro(
                 callbacks: loopback.callbacks,
-                client: QueuedHTTPClient([.response(status: 400, body: #"{"error":"invalid_grant","error_description":"code expired"}"#)]),
+                client: QueuedHTTPClient([.response(
+                    status: 400,
+                    body: #"{"error":"invalid_grant","error_description":"code expired"}"#
+                )]),
                 listener: loopback
             )
             Issue.record("a refused exchange signed in")
@@ -341,7 +369,12 @@ struct KiroSignInTests {
     @Test("A page that names no AWS region to sign in at registers nothing")
     func awsWithoutRegion() async throws {
         let loopback = ScriptedKiroLoopback([{ page, _ in
-            ("/signin/callback", ["login_option": "awsidc", "idc_region": "evil.example/", "issuer_url": "https://x", "state": page["state"] ?? ""])
+            ("/signin/callback", [
+                "login_option": "awsidc",
+                "idc_region": "evil.example/",
+                "issuer_url": "https://x",
+                "state": page["state"] ?? ""
+            ])
         }])
         let client = QueuedHTTPClient([])
         await #expect(throws: OAuthError.self) {
@@ -356,8 +389,11 @@ struct KiroCallbackServerTests {
     /// A session that reports redirects instead of following them.
     private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         func urlSession(
-            _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-            newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
         ) {
             completionHandler(nil)
         }
@@ -412,14 +448,18 @@ struct KiroCallbackServerTests {
 @Suite("Kiro refresh")
 struct KiroRefreshTests {
     private let social = OAuthCredentials(
-        access: "old", refresh: "rt", expires: 0,
+        access: "old",
+        refresh: "rt",
+        expires: 0,
         extras: [
             "authMethod": "social", "provider": "Google", "region": "us-east-1",
             "profileArn": "arn:aws:codewhisperer:us-east-1:1:profile/P",
         ]
     )
     private let idc = OAuthCredentials(
-        access: "old", refresh: "rt", expires: 0,
+        access: "old",
+        refresh: "rt",
+        expires: 0,
         extras: [
             "authMethod": "IdC", "provider": "Enterprise", "region": "eu-west-1",
             "clientId": "cid", "clientSecret": "sec",
@@ -450,7 +490,10 @@ struct KiroRefreshTests {
     @Test("A social refresh that names the profile anew replaces it")
     func socialProfile() async throws {
         let client = QueuedHTTPClient([
-            .response(status: 200, body: #"{"accessToken":"new","profileArn":"arn:aws:codewhisperer:eu-central-1:2:profile/Q"}"#),
+            .response(
+                status: 200,
+                body: #"{"accessToken":"new","profileArn":"arn:aws:codewhisperer:eu-central-1:2:profile/Q"}"#
+            ),
         ])
         let before = Int64(Date().timeIntervalSince1970 * 1000)
         let refreshed = try await KiroOAuthProvider().refresh(social, using: client)
@@ -518,7 +561,9 @@ struct KiroRefreshTests {
 @Suite("Kiro usage")
 struct KiroUsageTests {
     private let credentials = OAuthCredentials(
-        access: "tok", refresh: "r", expires: .max,
+        access: "tok",
+        refresh: "r",
+        expires: .max,
         extras: ["region": "eu-west-1", "profileArn": "arn:aws:codewhisperer:eu-central-1:1:profile/P"]
     )
 
@@ -575,16 +620,21 @@ struct KiroUsageTests {
     func failures() async throws {
         await #expect(throws: OAuthUsageError.unavailable(providerId: "kiro", status: nil, detail: "the Kiro login names no profile")) {
             _ = try await KiroUsageReader().usage(
-                OAuthCredentials(access: "t", refresh: "", expires: .max), using: QueuedHTTPClient([])
+                OAuthCredentials(access: "t", refresh: "", expires: .max),
+                using: QueuedHTTPClient([])
             )
         }
         await #expect(throws: OAuthUsageError.rateLimited(retryAfterSeconds: 30)) {
             _ = try await KiroUsageReader().usage(
-                credentials, using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "30"])])
+                credentials,
+                using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "30"])])
             )
         }
         await #expect(throws: OAuthUsageError.unavailable(providerId: "kiro", status: 403, detail: "no")) {
-            _ = try await KiroUsageReader().usage(credentials, using: QueuedHTTPClient([.response(status: 403, body: "no")]))
+            _ = try await KiroUsageReader().usage(
+                credentials,
+                using: QueuedHTTPClient([.response(status: 403, body: "no")])
+            )
         }
     }
 

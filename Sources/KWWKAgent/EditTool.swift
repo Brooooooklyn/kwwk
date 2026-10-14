@@ -171,7 +171,11 @@ public func createEditTool(
                     old: applied.baseContent,
                     new: applied.newContent
                 )
-                let details = editDetails(diff: diffResult.diff, patch: patch, firstChangedLine: diffResult.firstChangedLine)
+                let details = editDetails(
+                    diff: diffResult.diff,
+                    patch: patch,
+                    firstChangedLine: diffResult.firstChangedLine
+                )
                 let display = editDisplayLines(
                     summary: "Previewing \(edits.count) replacement(s) in \(rawPath).",
                     diff: diffResult.diff

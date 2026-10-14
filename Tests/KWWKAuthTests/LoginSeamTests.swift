@@ -140,7 +140,10 @@ struct LoginSeamTests {
         await #expect(throws: OAuthError.self) {
             _ = try await OAuthLogin.loginOpenAICodex(
                 callbacks: callbacks(
-                    presenter: RecordingPresenter(), params: ["code": "c"], echoState: false, made: LoopbackBox()
+                    presenter: RecordingPresenter(),
+                    params: ["code": "c"],
+                    echoState: false,
+                    made: LoopbackBox()
                 ),
                 client: client
             )
@@ -224,10 +227,15 @@ struct LoginSeamTests {
             .response(status: 200, body: #"{"access_token":"ka","refresh_token":"kr","expires_in":900}"#),
         ])
         let identity = KimiDeviceIdentity(
-            deviceId: "APP-DEVICE-1", deviceName: "Ada’s iPhone", deviceModel: "iOS arm64", osVersion: "27.0"
+            deviceId: "APP-DEVICE-1",
+            deviceName: "Ada’s iPhone",
+            deviceModel: "iOS arm64",
+            osVersion: "27.0"
         )
         let credentials = try await OAuthLogin.loginKimiCoding(
-            identity: identity, callbacks: quietCallbacksBase, client: client
+            identity: identity,
+            callbacks: quietCallbacksBase,
+            client: client
         )
         #expect(credentials.extras["deviceId"] == .string("APP-DEVICE-1"))
         #expect(client.header("X-Msh-Device-Id", request: 0) == "APP-DEVICE-1")

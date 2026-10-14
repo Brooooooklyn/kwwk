@@ -67,8 +67,11 @@ struct ReasoningEncoderTests {
 
     @Test("zai emits thinking + tool_stream via compat")
     func zaiFormat() throws {
-        let model = reasoningModel(provider: "zai", baseURL: "https://api.z.ai/api/coding/paas/v4",
-                                   compat: { var c = ModelCompat(); c.zaiToolStream = true; c.supportsReasoningEffort = true; return c }())
+        let model = reasoningModel(
+            provider: "zai",
+            baseURL: "https://api.z.ai/api/coding/paas/v4",
+            compat: { var c = ModelCompat(); c.zaiToolStream = true; c.supportsReasoningEffort = true; return c }()
+        )
         let b = try OpenAICompletionsProvider.encodeBodyDict(
             model: model,
             context: Context(messages: [.user(UserMessage(text: "hi"))],

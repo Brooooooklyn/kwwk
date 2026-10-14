@@ -230,13 +230,19 @@ struct ModelSelectorModalTests {
     func singleProviderHidesTabBar() {
         let models = [model("a"), model("b")]
         let plain = ModelSelectorModal(
-            title: "t", models: models, currentModelId: "a",
-            onSelect: { _ in }, onCancel: {}
+            title: "t",
+            models: models,
+            currentModelId: "a",
+            onSelect: { _ in },
+            onCancel: {}
         )
         let grouped = ModelSelectorModal(
-            title: "t", models: models, currentModelId: "a",
+            title: "t",
+            models: models,
+            currentModelId: "a",
             groupLabels: ["Anthropic", "Anthropic"],
-            onSelect: { _ in }, onCancel: {}
+            onSelect: { _ in },
+            onCancel: {}
         )
         #expect(!plain.render(maxRows: 40, width: 80).contains(where: { $0.contains("filter provider") }))
         #expect(!grouped.render(maxRows: 40, width: 80).contains(where: { $0.contains("filter provider") }))
@@ -287,8 +293,12 @@ struct ModelSelectorModalTests {
             + (0..<30).map { model("o\($0)", provider: "openai") }
         let groups = Array(repeating: "Anthropic", count: 30) + Array(repeating: "OpenAI", count: 30)
         let modal = ModelSelectorModal(
-            title: "t", models: models, currentModelId: nil, groupLabels: groups,
-            onSelect: { _ in }, onCancel: {}
+            title: "t",
+            models: models,
+            currentModelId: nil,
+            groupLabels: groups,
+            onSelect: { _ in },
+            onCancel: {}
         )
         for maxRows in [4, 6, 9, 12, 40] {
             for _ in 0..<60 {

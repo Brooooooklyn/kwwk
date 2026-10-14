@@ -52,7 +52,8 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         guard let auth = options?.resolvedAuth, let token = auth.token, !token.isEmpty,
               let account = QoderAccount(token: token, fields: auth.metadata) else {
             let message = state.failed(ProviderFailure(
-                message: "\(site.name) sign-in is required (run /login \(site.id))", httpStatus: 401
+                message: "\(site.name) sign-in is required (run /login \(site.id))",
+                httpStatus: 401
             ))
             out.push(.error(reason: .error, error: message))
             out.end(message)
@@ -62,16 +63,27 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         do {
             let baseURL = model.baseURL.isEmpty ? site.api : model.baseURL
             let listed = try await listings.model(
-                model.id, baseURL: baseURL, account: account, site: site, client: client, cancellation: cancellation
+                model.id,
+                baseURL: baseURL,
+                account: account,
+                site: site,
+                client: client,
+                cancellation: cancellation
             )
             let messages = TransformMessages.normalize(context.messages, model: model)
             let wire = QoderCodec.encodeRequestBody(try Self.chatBody(
-                model: listed, context: context, messages: messages, options: options,
+                model: listed,
+                context: context,
+                messages: messages,
+                options: options,
                 windowCeiling: model.contextWindow
             ))
             let url = baseURL + Self.chatPath
             var headers = try QoderCosy.headers(
-                url: url, account: account, body: wire, timestamp: Int64(Date().timeIntervalSince1970)
+                url: url,
+                account: account,
+                body: wire,
+                timestamp: Int64(Date().timeIntervalSince1970)
             )
             headers["Accept"] = "text/event-stream"
             headers["Cache-Control"] = "no-cache"
@@ -80,7 +92,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             for (name, value) in options?.headers ?? [:] { headers[name] = value }
 
             let (response, body) = try await client.stream(
-                url: URL(string: url)!, method: "POST", headers: headers, body: Data(wire.utf8),
+                url: URL(string: url)!,
+                method: "POST",
+                headers: headers,
+                body: Data(wire.utf8),
                 cancellation: cancellation
             )
             guard (200..<300).contains(response.statusCode) else {
@@ -90,7 +105,8 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             // (magpie #1012).
             if response.value(forHTTPHeaderField: "content-type")?.lowercased().hasPrefix("text/html") == true {
                 throw ProviderFailure(
-                    message: "Qoder: answered \(response.statusCode) with a web page, not an API reply", httpStatus: 502
+                    message: "Qoder: answered \(response.statusCode) with a web page, not an API reply",
+                    httpStatus: 502
                 )
             }
 
@@ -200,7 +216,8 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
                     let id = call["id"] as? String ?? ""
                     state.startToolCall(
                         id: id.isEmpty ? "call_" + QoderCosy.compactUUID() : id,
-                        name: function["name"] as? String ?? "", emit: emit
+                        name: function["name"] as? String ?? "",
+                        emit: emit
                     )
                 }
                 if let arguments = function["arguments"] as? String, !arguments.isEmpty {
@@ -252,7 +269,10 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
             if !buffer.isEmpty { _ = try handle(buffer) }
             // Nothing at all under a 200 is no API reply (magpie #1012).
             if !received {
-                throw ProviderFailure(message: "Qoder: answered 200 with nothing in it, not an API reply", httpStatus: 502)
+                throw ProviderFailure(
+                    message: "Qoder: answered 200 with nothing in it, not an API reply",
+                    httpStatus: 502
+                )
             }
             if !state.sawFinishReason, state.hasIncompleteToolArguments {
                 throw ProviderFailure(message: "Qoder: stream ended before its tool call was complete")
@@ -270,13 +290,20 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         private var byAccount: [String: [QoderModelInfo]] = [:]
 
         func model(
-            _ key: String, baseURL: String, account: QoderAccount, site: QoderSite,
-            client: HTTPClient, cancellation: CancellationHandle?
+            _ key: String,
+            baseURL: String,
+            account: QoderAccount,
+            site: QoderSite,
+            client: HTTPClient,
+            cancellation: CancellationHandle?
         ) async throws -> QoderModelInfo {
             let cacheKey = "\(baseURL)\n\(account.uid)"
             if let found = byAccount[cacheKey]?.first(where: { $0.key == key }) { return found }
             let fresh = try await QoderModels.fetchListing(
-                baseURL: baseURL, account: account, client: client, cancellation: cancellation
+                baseURL: baseURL,
+                account: account,
+                client: client,
+                cancellation: cancellation
             )
             byAccount[cacheKey] = fresh
             guard let found = fresh.first(where: { $0.key == key }) else {
@@ -287,7 +314,8 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
     }
 
     private static func httpFailure(
-        response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>
+        response: HTTPURLResponse,
+        body: AsyncThrowingStream<Data, Error>
     ) async -> ProviderFailure {
         var bytes = Data()
         // A broken error body must not erase a status already received.

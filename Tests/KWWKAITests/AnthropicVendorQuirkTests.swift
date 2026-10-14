@@ -13,7 +13,11 @@ struct AnthropicVendorQuirkTests {
         return model
     }
 
-    private func request(_ messages: [Message], model: Model, options: StreamOptions? = nil) async throws -> [String: Any] {
+    private func request(
+        _ messages: [Message],
+        model: Model,
+        options: StreamOptions? = nil
+    ) async throws -> [String: Any] {
         let client = StubSSEClient(body: AnthropicToolChoiceTests.minimalSSE)
         let provider = AnthropicProvider(client: client, defaultAPIKey: "test")
         _ = await provider.stream(model: model, context: Context(messages: messages), options: options).result()

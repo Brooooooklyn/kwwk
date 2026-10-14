@@ -219,7 +219,10 @@ enum CursorConnect {
 
         let (stream, continuation) = AsyncThrowingStream<CursorConnectFrame, Error>.makeStream()
         let handler = CursorStreamHandler(
-            host: host, path: path, headers: headers, initialBody: initialBody,
+            host: host,
+            path: path,
+            headers: headers,
+            initialBody: initialBody,
             continuation: continuation
         )
 
@@ -276,7 +279,10 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
     private var sawConnectEndStream = false
 
     init(
-        host: String, path: String, headers: [(String, String)], initialBody: Data,
+        host: String,
+        path: String,
+        headers: [(String, String)],
+        initialBody: Data,
         continuation: AsyncThrowingStream<CursorConnectFrame, Error>.Continuation
     ) {
         self.host = host
@@ -324,7 +330,10 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
             // Trailing gRPC status on the closing HEADERS frame.
             if let grpcStatus = headerFrame.headers.first(name: "grpc-status"), grpcStatus != "0" {
                 let msg = headerFrame.headers.first(name: "grpc-message") ?? ""
-                finish(throwing: CursorConnectError.grpc(status: grpcStatus, message: msg.removingPercentEncoding ?? msg))
+                finish(throwing: CursorConnectError.grpc(
+                    status: grpcStatus,
+                    message: msg.removingPercentEncoding ?? msg
+                ))
             }
             // END_STREAM riding a HEADERS frame ends the response too —
             // headers-only errors (e.g. a body-less 401) and clean trailers

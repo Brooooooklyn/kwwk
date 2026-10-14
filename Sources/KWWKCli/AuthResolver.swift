@@ -54,7 +54,8 @@ func resolveAgentAuth(
     if !all.isEmpty {
         return try await registerAllStored(
             store: store,
-            modelOverride: modelOverride, context1m: context1m,
+            modelOverride: modelOverride,
+            context1m: context1m,
             notice: cliAuthNotice
         )
     }
@@ -232,22 +233,32 @@ private func registerCursorEnv(token: String, modelOverride: String?) async -> R
 private func registerAzureEnv(_ azure: EnvAPIKeys.Azure, modelOverride: String?) async -> ResolvedAuth {
     let endpoint = URL(string: azure.baseURL) ?? URL(string: "https://example.openai.azure.com/openai/v1")!
     await APIRegistry.shared.register(ProviderVariants.azureOpenAIResponsesV1(
-        endpoint: endpoint, apiVersion: azure.apiVersion, apiKey: azure.apiKey
+        endpoint: endpoint,
+        apiVersion: azure.apiVersion,
+        apiKey: azure.apiKey
     ))
     let modelId = modelOverride ?? "gpt-5.5"
     let catalog = ModelsCatalog.model(provider: "azure", id: modelId)
     let model = Model(
-        id: modelId, name: catalog?.name ?? modelId,
-        api: "azure-openai-responses", provider: "azure",
-        baseURL: azure.baseURL, reasoning: catalog?.reasoning ?? true,
+        id: modelId,
+        name: catalog?.name ?? modelId,
+        api: "azure-openai-responses",
+        provider: "azure",
+        baseURL: azure.baseURL,
+        reasoning: catalog?.reasoning ?? true,
         input: catalog?.input ?? [.text, .image],
-        contextWindow: catalog?.contextWindow ?? 200_000, maxTokens: catalog?.maxTokens ?? 128_000
+        contextWindow: catalog?.contextWindow ?? 200_000,
+        maxTokens: catalog?.maxTokens ?? 128_000
     )
     return ResolvedAuth(model: model, modelLabel: "\(modelId) · Azure OpenAI (env)", authResolver: nil)
 }
 
 /// Register Cloudflare Workers AI / AI Gateway from resolved env config.
-private func registerCloudflareEnv(_ cf: EnvAPIKeys.Cloudflare, gateway: Bool, modelOverride: String?) async -> ResolvedAuth {
+private func registerCloudflareEnv(
+    _ cf: EnvAPIKeys.Cloudflare,
+    gateway: Bool,
+    modelOverride: String?
+) async -> ResolvedAuth {
     let providerId = gateway ? "cloudflare-ai-gateway" : "cloudflare-workers-ai"
     if gateway {
         await APIRegistry.shared.register(ProviderVariants.cloudflareAIGateway(
@@ -276,12 +287,17 @@ private func registerCloudflareEnv(_ cf: EnvAPIKeys.Cloudflare, gateway: Bool, m
     // endpoint, so we ignore the catalog there and use the compat fallback base.
     let catalog = gateway ? nil : ModelsCatalog.model(provider: providerId, id: modelId)
     let model = Model(
-        id: modelId, name: catalog?.name ?? modelId,
-        api: providerId, provider: providerId,
-        baseURL: catalog?.baseURL ?? fallbackBase, reasoning: catalog?.reasoning ?? false,
+        id: modelId,
+        name: catalog?.name ?? modelId,
+        api: providerId,
+        provider: providerId,
+        baseURL: catalog?.baseURL ?? fallbackBase,
+        reasoning: catalog?.reasoning ?? false,
         input: catalog?.input ?? [.text],
-        contextWindow: catalog?.contextWindow ?? 128_000, maxTokens: catalog?.maxTokens ?? 16_384,
-        compat: catalog?.compat, thinkingLevelMap: catalog?.thinkingLevelMap
+        contextWindow: catalog?.contextWindow ?? 128_000,
+        maxTokens: catalog?.maxTokens ?? 16_384,
+        compat: catalog?.compat,
+        thinkingLevelMap: catalog?.thinkingLevelMap
     )
     let label = gateway ? "Cloudflare AI Gateway" : "Cloudflare Workers AI"
     return ResolvedAuth(model: model, modelLabel: "\(modelId) · \(label) (env)", authResolver: nil)
@@ -315,11 +331,18 @@ private func pickEnvModel(provider: String, id: String?) -> Model? {
         // provider's wire api/baseURL from any sibling model.
         if let sibling = models.first {
             return Model(
-                id: id, name: id, api: sibling.api, provider: provider,
-                baseURL: sibling.baseURL, reasoning: sibling.reasoning,
-                input: sibling.input, cost: sibling.cost,
-                contextWindow: sibling.contextWindow, maxTokens: sibling.maxTokens,
-                headers: sibling.headers, compat: sibling.compat
+                id: id,
+                name: id,
+                api: sibling.api,
+                provider: provider,
+                baseURL: sibling.baseURL,
+                reasoning: sibling.reasoning,
+                input: sibling.input,
+                cost: sibling.cost,
+                contextWindow: sibling.contextWindow,
+                maxTokens: sibling.maxTokens,
+                headers: sibling.headers,
+                compat: sibling.compat
             )
         }
     }

@@ -18,7 +18,12 @@ import FoundationNetworking
 ///  - Output items are typed (`message`, `function_call`, `reasoning`) and
 ///    carry `output_index` + `content_index` for nested content.
 ///  - `parallel_tool_calls` is a top-level boolean.
-public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifecycle, NativeCompactionProvider, @unchecked Sendable {
+public final class OpenAIResponsesProvider:
+    APIProvider,
+    APIProviderSessionLifecycle,
+    NativeCompactionProvider,
+    @unchecked Sendable
+{
     public typealias URLBuilder = @Sendable (Model, StreamOptions?, URL) -> URL
     public typealias AuthHeaderBuilder = @Sendable (String) -> [String: String]
     public typealias WebSocketURLBuilder = @Sendable (URL) -> URL
@@ -89,8 +94,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         sessions.closeSession(sessionId: sessionId)
     }
 
-    public func compact(model: Model, context: Context, instructions: String,
-                        options: StreamOptions?) async throws -> NativeCompactionResult? {
+    public func compact(
+        model: Model,
+        context: Context,
+        instructions: String,
+        options: StreamOptions?
+    ) async throws -> NativeCompactionResult? {
         guard model.compat?.supportsServerCompaction != false,
               model.api == "chatgpt-codex" || model.compat?.supportsServerCompaction == true else { return nil }
         let codex = model.api == "chatgpt-codex"
@@ -101,8 +110,11 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         // otherwise leave later tools out of both `tools` and `input`.
         let refusedSeals = sessions.session(for: options?.sessionId).refusedSeals
         nativeContext.messages = TransformMessages.normalize(
-            Self.unsealingRefusedCompactions(TranscriptTools.withoutSystemMessages(context.messages),
-                                             refusedSeals: refusedSeals), model: model
+            Self.unsealingRefusedCompactions(
+                TranscriptTools.withoutSystemMessages(context.messages),
+                refusedSeals: refusedSeals
+            ),
+            model: model
         )
         let input = Self.encodeInput(context: nativeContext, model: model, refusedSeals: refusedSeals)
         var body: [String: JSONValue] = [
@@ -113,9 +125,13 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         if codex {
             // ChatGPT subscriptions expose V2 on /responses, not V1's
             // /responses/compact. Reuse the live request serializer.
-            let request = try Self.makeRequest(model: model, context: nativeContext,
-                                               options: options, bodyOverrides: bodyOverrides,
-                                               refusedSeals: refusedSeals)
+            let request = try Self.makeRequest(
+                model: model,
+                context: nativeContext,
+                options: options,
+                bodyOverrides: bodyOverrides,
+                refusedSeals: refusedSeals
+            )
             body = request.fields
             body["input"] = .array(input + [["type": "compaction_trigger"]])
             body["store"] = false
@@ -128,15 +144,23 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         if let sessionId = options?.sessionId { headers["session_id"] = sessionId }
         let json: [String: JSONValue]
         if codex {
-            let compacted = try await client.compactionSSE(url: url, headers: headers,
-                body: JSONEncoder().encode(body), cancellation: options?.cancellation)
+            let compacted = try await client.compactionSSE(
+                url: url,
+                headers: headers,
+                body: JSONEncoder().encode(body),
+                cancellation: options?.cancellation
+            )
             // V2 compacts assistant history; original user messages remain
             // part of the replacement input, as in omp/Codex.
             let retained = input.filter { $0["role"] == .string("user") }
             json = ["output": .array(retained + [compacted])]
         } else {
-            json = try await client.compactionJSON(url: url, headers: headers,
-                body: JSONEncoder().encode(body), cancellation: options?.cancellation)
+            json = try await client.compactionJSON(
+                url: url,
+                headers: headers,
+                body: JSONEncoder().encode(body),
+                cancellation: options?.cancellation
+            )
         }
         guard case .array(let output) = json["output"], output.contains(where: {
             guard case .object(let item) = $0 else { return false }
@@ -156,8 +180,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         }
         return NativeCompactionResult(
             summary: "Earlier conversation is preserved in provider-native compacted context.",
-            payload: NativeCompactionPayload(model: model, items: items,
-                fallbackMessages: TransformMessages.expandNativeCompaction(context.messages)))
+            payload: NativeCompactionPayload(
+                model: model,
+                items: items,
+                fallbackMessages: TransformMessages.expandNativeCompaction(context.messages)
+            )
+        )
     }
 
     private func run(
@@ -175,8 +203,14 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 source: "openai.responses",
                 message: "replayed encrypted content was refused; asking again without it"
             )
-            _ = await attempt(out: out, model: model, context: context, options: options,
-                              session: session, holdSealRefusal: false)
+            _ = await attempt(
+                out: out,
+                model: model,
+                context: context,
+                options: options,
+                session: session,
+                holdSealRefusal: false
+            )
         }
     }
 
@@ -292,7 +326,10 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
 
         do {
             var (response, stream) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: try request.data(),
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: try request.data(),
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
@@ -314,8 +351,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             // Bridge external cancellation to the in-flight request (see
             // AnthropicProvider.run for the rationale).
             let driveTask = Task {
-                try await self.drive(events: parseSSE(bytes: stream), out: out, state: state,
-                                     holdSealRefusal: holdSealRefusal).sealsRefused
+                try await self.drive(
+                    events: parseSSE(bytes: stream),
+                    out: out,
+                    state: state,
+                    holdSealRefusal: holdSealRefusal
+                ).sealsRefused
             }
             let cancelReg = options?.cancellation?.onCancel { _ in driveTask.cancel() }
             defer { cancelReg?.cancel() }
@@ -578,7 +619,12 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                     "failure_count": .int(failure.count),
                 ]
             )
-            let err = AssistantMessage.makeError(api: api, model: model, text: "WebSocket stream failed: \(error)", failure: .capture(error))
+            let err = AssistantMessage.makeError(
+                api: api,
+                model: model,
+                text: "WebSocket stream failed: \(error)",
+                failure: .capture(error)
+            )
             out.push(.error(reason: .error, error: err))
             out.end(err)
             return .failedWithoutFallback
@@ -711,7 +757,10 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                             return ""
                         }()
                         let index = state.noteFunctionCallItem(
-                            outputIndex: outputIndex, callId: callId, name: name, arguments: arguments
+                            outputIndex: outputIndex,
+                            callId: callId,
+                            name: name,
+                            arguments: arguments
                         )
                         if !emittedStart {
                             out.push(.start(partial: state.snapshot()))
@@ -851,8 +900,11 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                     if case .object(let details) = response["incomplete_details"],
                        case .string(let reason) = details["reason"], reason != "max_output_tokens" {
                         var error = state.asError(text: "OpenAI Responses incomplete: \(reason)")
-                        error.failure = ProviderFailure(message: error.errorMessage!, rawStopReason: reason,
-                                                        stopDetails: .object(details))
+                        error.failure = ProviderFailure(
+                            message: error.errorMessage!,
+                            rawStopReason: reason,
+                            stopDetails: .object(details)
+                        )
                         out.push(.error(reason: .error, error: error))
                         out.end(error)
                         return OpenAIResponsesDriveResult(message: error, completed: false)
@@ -948,7 +1000,9 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     }
 
     private static func finishWebSocketFailure(
-        _ error: any Error, out: AssistantMessageStream, state: OpenAIResponsesState
+        _ error: any Error,
+        out: AssistantMessageStream,
+        state: OpenAIResponsesState
     ) {
         let failure = ProviderFailure.capture(error)
         if failure.category == .cancelled {
@@ -1036,7 +1090,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     /// Name what came back instead. Anything else, a mislabelled stream
     /// included, is handed back untouched in `body`.
     static func notAnEventStream(
-        _ response: HTTPURLResponse, body: inout AsyncThrowingStream<Data, Error>
+        _ response: HTTPURLResponse,
+        body: inout AsyncThrowingStream<Data, Error>
     ) async throws -> ProviderFailure? {
         let type = (response.value(forHTTPHeaderField: "content-type") ?? "").lowercased()
         let page = type.hasPrefix("text/html")
@@ -1060,15 +1115,19 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 .map { ": " + text[$0].trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
             // A challenge or an edge's error page can pass; the dropped
             // stream it used to read as was retried too.
-            return ProviderFailure(message: "The server answered HTTP 200 with a web page, not an event stream\(title)",
-                                   shouldRetry: true)
+            return ProviderFailure(
+                message: "The server answered HTTP 200 with a web page, not an event stream\(title)",
+                shouldRetry: true
+            )
         }
         if !page, text.hasPrefix("{") {
             if case .object(let root)? = parseJSONObject(text), root["error"] != nil || root["detail"] != nil {
                 return readingDetail(ProviderFailure.payload(.object(root), fallback: text))
             }
-            return ProviderFailure(message: "The server answered HTTP 200 with JSON, not an event stream",
-                                   shouldRetry: false)
+            return ProviderFailure(
+                message: "The server answered HTTP 200 with JSON, not an event stream",
+                shouldRetry: false
+            )
         }
         let rest = body
         let buffered = head
@@ -1086,13 +1145,17 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     }
 
     private static func makeRequest(
-        model: Model, context: Context, options: StreamOptions?,
+        model: Model,
+        context: Context,
+        options: StreamOptions?,
         bodyOverrides: [String: JSONValue] = [:],
         refusedSeals: Set<String> = []
     ) throws -> OpenAIResponsesRequest {
         var context = context
         context.messages = TransformMessages.normalize(
-            unsealingRefusedCompactions(context.messages, refusedSeals: refusedSeals), model: model)
+            unsealingRefusedCompactions(context.messages, refusedSeals: refusedSeals),
+            model: model
+        )
         // Tools added mid-conversation are loaded in place (pi
         // openai-responses-shared.ts) so the cached prefix, which starts with
         // the top-level tool list, survives the change. Removals and
@@ -1412,7 +1475,10 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 // "[image/webp, 1254x1254, ...]" note and went looking for OCR.
                 if !imageParts.isEmpty {
                     var carrier: [JSONValue] = [
-                        .object(["type": .string("input_text"), "text": .string("Attached image(s) from tool result:")]),
+                        .object([
+                            "type": .string("input_text"),
+                            "text": .string("Attached image(s) from tool result:")
+                        ]),
                     ]
                     carrier.append(contentsOf: imageParts)
                     out.append(.object([
@@ -1447,7 +1513,8 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
     /// multi-turn replay stays stateless. Output array positions correspond
     /// to `output_index`. Ports pi #6608.
     private static func backfillReasoningSignatures(
-        _ outputItems: [JSONValue], state: OpenAIResponsesState
+        _ outputItems: [JSONValue],
+        state: OpenAIResponsesState
     ) {
         for (outputIndex, entry) in outputItems.enumerated() {
             guard case .object(let item) = entry,

@@ -419,7 +419,9 @@ struct BedrockCacheAndAuthTests {
         let gatedJSON = try Self.decode(gated)
         let gatedSystem = gatedJSON["system"] as? [[String: Any]] ?? []
         #expect(gatedSystem.allSatisfy { $0["cachePoint"] == nil })
-        let gatedMessageContent = ((gatedJSON["messages"] as? [[String: Any]] ?? []).last?["content"] as? [[String: Any]]) ?? []
+        let gatedMessageContent = (
+            (gatedJSON["messages"] as? [[String: Any]] ?? []).last?["content"] as? [[String: Any]]
+        ) ?? []
         #expect(gatedMessageContent.allSatisfy { $0["cachePoint"] == nil })
 
         let forced = await Self.send(

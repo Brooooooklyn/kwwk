@@ -41,7 +41,10 @@ public func createWriteTool(
         "type": "object",
         "properties": [
             "path": ["type": "string", "description": "Path (relative or absolute) to the file to write."],
-            "content": ["type": "string", "description": "Complete file content. Replaces any existing content entirely."],
+            "content": [
+                "type": "string",
+                "description": "Complete file content. Replaces any existing content entirely."
+            ],
         ],
         "required": ["path", "content"],
     ]

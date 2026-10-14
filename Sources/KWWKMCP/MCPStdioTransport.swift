@@ -158,15 +158,18 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     }
 
     public func close() async {
-        let (process, stdin, continuation): (Process?, FileHandle?, AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?) =
-            lock.withLock {
-                if closing { return (nil, nil, nil) }
-                closing = true
-                let result = (self.process, stdinHandle, self.continuation)
-                stdinHandle = nil
-                self.continuation = nil
-                return result
-            }
+        let (process, stdin, continuation): (
+            Process?,
+            FileHandle?,
+            AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
+        ) = lock.withLock {
+            if closing { return (nil, nil, nil) }
+            closing = true
+            let result = (self.process, stdinHandle, self.continuation)
+            stdinHandle = nil
+            self.continuation = nil
+            return result
+        }
         continuation?.finish()
         try? stdin?.close()
         guard let process else { return }
@@ -223,7 +226,9 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
             details.append("server exited with status \(process.terminationStatus)")
         }
         if let tail = diagnostics { details.append(tail) }
-        continuation.finish(throwing: MCPError.connectionClosed(details: details.isEmpty ? nil : details.joined(separator: "\n")))
+        continuation.finish(
+            throwing: MCPError.connectionClosed(details: details.isEmpty ? nil : details.joined(separator: "\n"))
+        )
     }
 
     /// Ignore SIGPIPE on Linux, where a pipe cannot opt out per descriptor;

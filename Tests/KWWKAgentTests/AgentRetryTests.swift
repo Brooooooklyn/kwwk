@@ -13,10 +13,14 @@ struct AgentRetryTests {
         // Two retryable failures, then success on the third attempt.
         registration.setResponses([
             .message(fauxAssistantMessage(
-                "", stopReason: .error, errorMessage: "HTTP 429: rate limit exceeded"
+                "",
+                stopReason: .error,
+                errorMessage: "HTTP 429: rate limit exceeded"
             )),
             .message(fauxAssistantMessage(
-                "", stopReason: .error, errorMessage: "HTTP 503: service unavailable"
+                "",
+                stopReason: .error,
+                errorMessage: "HTTP 503: service unavailable"
             )),
             .message(fauxAssistantMessage("done")),
         ])
@@ -83,7 +87,9 @@ struct AgentRetryTests {
         defer { registration.unregister() }
         registration.setResponses([
             .message(fauxAssistantMessage(
-                "", stopReason: .error, errorMessage: "HTTP 400: invalid request body"
+                "",
+                stopReason: .error,
+                errorMessage: "HTTP 400: invalid request body"
             )),
         ])
 
@@ -116,7 +122,9 @@ struct AgentRetryTests {
 
         // 5 attempts allowed — queue 5 retryable failures.
         let failure: FauxResponseStep = .message(fauxAssistantMessage(
-            "", stopReason: .error, errorMessage: "HTTP 504: gateway timeout"
+            "",
+            stopReason: .error,
+            errorMessage: "HTTP 504: gateway timeout"
         ))
         registration.setResponses([failure, failure, failure, failure, failure])
 

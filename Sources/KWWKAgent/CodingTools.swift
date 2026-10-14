@@ -99,7 +99,15 @@ public struct GrepParams: Sendable {
     public var context: Int
     public var limit: Int?
 
-    public init(pattern: String, path: String, glob: String? = nil, ignoreCase: Bool = false, literal: Bool = false, context: Int = 0, limit: Int? = nil) {
+    public init(
+        pattern: String,
+        path: String,
+        glob: String? = nil,
+        ignoreCase: Bool = false,
+        literal: Bool = false,
+        context: Int = 0,
+        limit: Int? = nil
+    ) {
         self.pattern = pattern
         self.path = path
         self.glob = glob

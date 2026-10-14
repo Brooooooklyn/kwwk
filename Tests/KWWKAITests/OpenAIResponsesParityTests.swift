@@ -72,11 +72,18 @@ struct OpenAIResponsesParityTests {
         #expect(client.requests[0].headers["thread-id"] == "conversation-1")
 
         // No caching asked, no key in the body: no session named either.
-        _ = await Self.run(client, options: StreamOptions(cacheRetention: CacheRetention.none, sessionId: "conversation-1"))
+        _ = await Self.run(
+            client,
+            options: StreamOptions(cacheRetention: CacheRetention.none, sessionId: "conversation-1")
+        )
         #expect(client.requests[1].headers["session-id"] == nil)
 
         // The public API keys its cache by the body's prompt_cache_key.
-        _ = await Self.run(client, model: OpenAIResponsesTests.model, options: StreamOptions(sessionId: "conversation-1"))
+        _ = await Self.run(
+            client,
+            model: OpenAIResponsesTests.model,
+            options: StreamOptions(sessionId: "conversation-1")
+        )
         #expect(client.requests[2].headers["session-id"] == nil)
         #expect(client.requests[2].headers["thread-id"] == nil)
     }
@@ -139,7 +146,9 @@ struct OpenAIResponsesParityTests {
         #expect(model.errorMessage == "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.")
 
         let object = OpenAIResponsesProvider.readingDetail(ProviderFailure(
-            message: #"{"detail":{"message":"Workspace is deactivated","code":"deactivated_workspace"}}"#, httpStatus: 402))
+            message: #"{"detail":{"message":"Workspace is deactivated","code":"deactivated_workspace"}}"#,
+            httpStatus: 402
+        ))
         #expect(object.message == "Workspace is deactivated")
         #expect(object.providerCode == "deactivated_workspace")
 
@@ -153,7 +162,9 @@ struct OpenAIResponsesParityTests {
     @Test("a 200 web page is named as one, not reported as a dropped stream")
     func webPageReply() async throws {
         let page = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body></body></html>"
-        let result = await Self.run(ScriptedResponsesClient([.init(contentType: "text/html; charset=UTF-8", body: page)]))
+        let result = await Self.run(ScriptedResponsesClient([
+            .init(contentType: "text/html; charset=UTF-8", body: page)
+        ]))
         #expect(result.stopReason == .error)
         #expect(result.errorMessage == "The server answered HTTP 200 with a web page, not an event stream: Just a moment...")
         // A challenge can pass: still asked again, as the dropped stream was.
@@ -164,7 +175,8 @@ struct OpenAIResponsesParityTests {
     func jsonReply() async throws {
         let refused = await Self.run(ScriptedResponsesClient([.init(
             contentType: "application/json",
-            body: #"{"error":{"message":"The model `gpt-9` does not exist","type":"invalid_request_error","code":"model_not_found"}}"#)]))
+            body: #"{"error":{"message":"The model `gpt-9` does not exist","type":"invalid_request_error","code":"model_not_found"}}"#
+        )]))
         #expect(refused.errorMessage == "The model `gpt-9` does not exist")
         #expect(refused.failure?.providerCode == "model_not_found")
         #expect(refused.failure?.isRetryable == false)
@@ -178,7 +190,9 @@ struct OpenAIResponsesParityTests {
     @Test("an event stream under a JSON or HTML content type is still read")
     func mislabelledStream() async throws {
         for type in ["application/json", "text/html"] {
-            let result = await Self.run(ScriptedResponsesClient([.init(contentType: type, body: OpenAIResponsesTests.textSSE)]))
+            let result = await Self.run(ScriptedResponsesClient([
+                .init(contentType: type, body: OpenAIResponsesTests.textSSE)
+            ]))
             #expect(result.stopReason == .stop)
             #expect(result.responseId == "resp_1")
             #expect(result.content == [.text(TextContent(text: "Hello, world"))])
@@ -190,8 +204,12 @@ struct OpenAIResponsesParityTests {
         let (stream, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
         let first = Data("data: {\"type\":\"response.created\"}\n\n".utf8)
         continuation.yield(first)
-        let response = HTTPURLResponse(url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: "HTTP/1.1",
-                                       headerFields: ["content-type": "application/json"])!
+        let response = HTTPURLResponse(
+            url: URL(string: "https://example.com")!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["content-type": "application/json"]
+        )!
         // The rest of the turn is slow, as a reasoning model's is.
         let rest = Task {
             try? await Task.sleep(for: .seconds(3))
@@ -227,8 +245,14 @@ struct OpenAIResponsesParityTests {
     static func reasoningTurn(_ sealed: String, answer: String) -> Message {
         let item = #"{"type":"reasoning","id":"rs_\#(sealed)","summary":[],"encrypted_content":"\#(sealed)"}"#
         return .assistant(AssistantMessage(
-            content: [.thinking(ThinkingContent(thinking: "", thinkingSignature: item)), .text(TextContent(text: answer))],
-            api: codex.api, provider: codex.provider, model: codex.id))
+            content: [
+                .thinking(ThinkingContent(thinking: "", thinkingSignature: item)),
+                .text(TextContent(text: answer))
+            ],
+            api: codex.api,
+            provider: codex.provider,
+            model: codex.id
+        ))
     }
 
     static let sealedHistory: [Message] = [
@@ -247,7 +271,12 @@ struct OpenAIResponsesParityTests {
             .init(status: 400, contentType: "application/json", body: Self.sealRefusal),
             .init(body: OpenAIResponsesTests.textSSE),
         ])
-        let provider = OpenAIResponsesProvider(api: Self.codex.api, client: client, webSocketClient: nil, defaultAPIKey: "k")
+        let provider = OpenAIResponsesProvider(
+            api: Self.codex.api,
+            client: client,
+            webSocketClient: nil,
+            defaultAPIKey: "k"
+        )
         let options = StreamOptions(sessionId: "moved")
         let result = await Self.run(client, messages: Self.sealedHistory, options: options, provider: provider)
         #expect(result.stopReason == .stop)
@@ -258,7 +287,10 @@ struct OpenAIResponsesParityTests {
 
         // Next turn of the conversation: the refused seal stays out, what
         // this account sealed since goes along.
-        let later = Self.sealedHistory + [Self.reasoningTurn("sealed-here", answer: "two"), .user(UserMessage(text: "third"))]
+        let later = Self.sealedHistory + [
+            Self.reasoningTurn("sealed-here", answer: "two"),
+            .user(UserMessage(text: "third"))
+        ]
         _ = await Self.run(client, messages: later, options: options, provider: provider)
         #expect(client.requests.count == 3)
         let reasoning = try client.input(2).filter { $0["type"] as? String == "reasoning" }
@@ -267,13 +299,17 @@ struct OpenAIResponsesParityTests {
 
     @Test("a seal refusal is shown when the retry is refused too, or when the request held no seal")
     func sealRefusalSurfaces() async throws {
-        let twice = ScriptedResponsesClient([.init(status: 400, contentType: "application/json", body: Self.sealRefusal)])
+        let twice = ScriptedResponsesClient([
+            .init(status: 400, contentType: "application/json", body: Self.sealRefusal)
+        ])
         let result = await Self.run(twice, messages: Self.sealedHistory)
         #expect(twice.requests.count == 2)
         #expect(result.stopReason == .error)
         #expect(result.failure?.providerCode == "invalid_encrypted_content")
 
-        let unsealed = ScriptedResponsesClient([.init(status: 400, contentType: "application/json", body: Self.sealRefusal)])
+        let unsealed = ScriptedResponsesClient([
+            .init(status: 400, contentType: "application/json", body: Self.sealRefusal)
+        ])
         let plain = await Self.run(unsealed)
         #expect(unsealed.requests.count == 1)
         #expect(plain.stopReason == .error)
@@ -309,9 +345,18 @@ struct OpenAIResponsesParityTests {
         let second = StubWebSocketConnection(batches: [answer])
         let ws = StubWebSocketClient(connections: [first, second])
         let http = ScriptedResponsesClient([.init(body: OpenAIResponsesTests.textSSE)])
-        let provider = OpenAIResponsesProvider(api: Self.codex.api, client: http, webSocketClient: ws, defaultAPIKey: "k")
-        let result = await Self.run(http, messages: Self.sealedHistory,
-                                    options: StreamOptions(sessionId: "moved-ws"), provider: provider)
+        let provider = OpenAIResponsesProvider(
+            api: Self.codex.api,
+            client: http,
+            webSocketClient: ws,
+            defaultAPIKey: "k"
+        )
+        let result = await Self.run(
+            http,
+            messages: Self.sealedHistory,
+            options: StreamOptions(sessionId: "moved-ws"),
+            provider: provider
+        )
         #expect(result.stopReason == .stop)
         #expect(result.content == [.text(TextContent(text: "Hello, world"))])
         #expect(http.requests.isEmpty)

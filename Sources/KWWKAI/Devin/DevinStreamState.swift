@@ -121,7 +121,9 @@ final class DevinStreamState: @unchecked Sendable {
             thinkingIndex = nil
             return (idx, t.thinking)
         }
-        if let (index, content) = closed { emit(.thinkingEnd(contentIndex: index, content: content, partial: snapshot())) }
+        if let (index, content) = closed {
+            emit(.thinkingEnd(contentIndex: index, content: content, partial: snapshot()))
+        }
     }
 
     /// Tool-call deltas carry the call id on the first frame (later frames may
@@ -145,7 +147,9 @@ final class DevinStreamState: @unchecked Sendable {
             guard let id = named else { return .skip }
             activeToolCallId = id
             if let idx = toolIndexById[id] {
-                if !call.name.isEmpty, case .toolCall(var tc) = blocks[idx] { tc.name = call.name; blocks[idx] = .toolCall(tc) }
+                if !call.name.isEmpty, case .toolCall(var tc) = blocks[idx] {
+                    tc.name = call.name; blocks[idx] = .toolCall(tc)
+                }
                 return .existing(idx)
             }
             blocks.append(.toolCall(ToolCall(id: id, name: call.name, arguments: .object([:]))))
@@ -168,7 +172,9 @@ final class DevinStreamState: @unchecked Sendable {
         let delta: String = lock.withLock {
             let id = activeToolCallId ?? ""
             let previous = toolArgs[id] ?? ""
-            let accumulated = call.argumentsJson.hasPrefix(previous) ? call.argumentsJson : previous + call.argumentsJson
+            let accumulated = call.argumentsJson.hasPrefix(previous)
+                ? call.argumentsJson
+                : previous + call.argumentsJson
             toolArgs[id] = accumulated
             return String(accumulated.dropFirst(previous.count))
         }
@@ -228,9 +234,15 @@ final class DevinStreamState: @unchecked Sendable {
         var u = usage
         u.cost = calculateCost(model: model, usage: u)
         return AssistantMessage(
-            content: blocks, api: api, provider: model.provider, model: model.id,
-            responseId: responseId, responseModel: responseModel,
-            usage: u, stopReason: stopReason, timestamp: Timestamp.now()
+            content: blocks,
+            api: api,
+            provider: model.provider,
+            model: model.id,
+            responseId: responseId,
+            responseModel: responseModel,
+            usage: u,
+            stopReason: stopReason,
+            timestamp: Timestamp.now()
         )
     }
 }

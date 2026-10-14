@@ -81,7 +81,10 @@ for line in sys.stdin:
             root = FileManager.default.temporaryDirectory.appendingPathComponent("kwwk-live-mcp-\(UUID().uuidString)")
             let kwwk = root.appendingPathComponent("home/.kwwk")
             try FileManager.default.createDirectory(at: kwwk, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: root.appendingPathComponent("cwd"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("cwd"),
+                withIntermediateDirectories: true
+            )
             let script = root.appendingPathComponent("acme.py")
             try LiveMCPToolSearchTests.server.write(to: script, atomically: true, encoding: .utf8)
             let config: [String: Any] = ["mcpServers": ["acme": [
@@ -117,7 +120,9 @@ for line in sys.stdin:
                 run.usages.append(assistant.usage)
                 run.stop = assistant.stopReason
                 if let failure = assistant.failure {
-                    let detail = (assistant.errorMessage ?? failure.message).replacingOccurrences(of: "\n", with: " ").prefix(400)
+                    let detail = (assistant.errorMessage ?? failure.message)
+                        .replacingOccurrences(of: "\n", with: " ")
+                        .prefix(400)
                     run.failure = "\(failure.category.rawValue) status=\(failure.httpStatus.map(String.init) ?? "none") \(detail)"
                 }
                 if ProcessInfo.processInfo.environment["KWWK_LIVE_MCP_VERBOSE"] == "1" {
@@ -179,7 +184,11 @@ for line in sys.stdin:
             await runtime.start()
             let sessionId = UUID().uuidString
             let agent = Agent(options: AgentOptions(
-                initialState: AgentInitialState(systemPrompt: Self.systemPrompt, model: resolved.model, thinkingLevel: .medium),
+                initialState: AgentInitialState(
+                    systemPrompt: Self.systemPrompt,
+                    model: resolved.model,
+                    thinkingLevel: .medium
+                ),
                 sessionId: sessionId,
                 cwd: sandbox.cwd,
                 maxTurns: 8,
@@ -202,7 +211,11 @@ for line in sys.stdin:
 
 
             // Same session, tool already loaded: no new search needed.
-            let second = await Self.prompt(agent, "Now search Acme issues about login and give me the number.", recorder: recorder)
+            let second = await Self.prompt(
+                agent,
+                "Now search Acme issues about login and give me the number.",
+                recorder: recorder
+            )
             Self.report("\(label) [reuse]", second)
             #expect(second.finalText.contains("4302"), "\(label) should reuse the loaded tool")
 
@@ -216,7 +229,12 @@ for line in sys.stdin:
                 let resumedRuntime = MCPRuntime(cwd: sandbox.cwd, homeDirectory: sandbox.home, environment: [:])
                 await resumedRuntime.start()
                 let resumed = Agent(options: AgentOptions(
-                    initialState: AgentInitialState(systemPrompt: Self.systemPrompt, model: resolved.model, thinkingLevel: .medium, messages: agent.state.messages),
+                    initialState: AgentInitialState(
+                        systemPrompt: Self.systemPrompt,
+                        model: resolved.model,
+                        thinkingLevel: .medium,
+                        messages: agent.state.messages
+                    ),
                     sessionId: sessionId,
                     cwd: sandbox.cwd,
                     maxTurns: 8,
@@ -226,14 +244,22 @@ for line in sys.stdin:
                 // No waiting: the restored tool is declared before its server connects.
                 resumedRuntime.attach(to: resumed, messages: resumed.state.messages)
                 #expect(resumed.state.effectiveTools.contains { $0.name == "mcp__acme__search_issues" }, "resume should reload the tool")
-                let third = await Self.prompt(resumed, "Search Acme issues about timeout and give me the number.", recorder: recorder)
+                let third = await Self.prompt(
+                    resumed,
+                    "Search Acme issues about timeout and give me the number.",
+                    recorder: recorder
+                )
                 Self.report("\(label) [resume]", third)
                 #expect(third.finalText.contains("4400"))
                 #expect(!third.toolCalls.contains(toolSearchToolName), "resumed session should not need to search again")
 
                 let outcome = await AgentContextCompactor.compactAgent(agent: resumed, sessionId: sessionId)
                 print("LIVE \(label) [compact] outcome=\(outcome) roles=\(resumed.state.messages.map(\.role.rawValue))")
-                let fourth = await Self.prompt(resumed, "Search Acme issues about crash once more and give me the number.", recorder: recorder)
+                let fourth = await Self.prompt(
+                    resumed,
+                    "Search Acme issues about crash once more and give me the number.",
+                    recorder: recorder
+                )
                 Self.report("\(label) [after-compact]", fourth)
                 #expect(fourth.finalText.contains("4217"))
                 await resumedRuntime.shutdown()
@@ -266,13 +292,22 @@ struct LiveCacheBaselineTests {
             let sessionId = UUID().uuidString
             let agent = Agent(options: AgentOptions(
                 initialState: AgentInitialState(
-                    systemPrompt: LiveMCPToolSearchTests.systemPrompt, model: resolved.model,
-                    thinkingLevel: .medium, tools: [lookup]
+                    systemPrompt: LiveMCPToolSearchTests.systemPrompt,
+                    model: resolved.model,
+                    thinkingLevel: .medium,
+                    tools: [lookup]
                 ),
-                sessionId: sessionId, maxTurns: 6, autoCompact: nil, authResolver: resolved.authResolver
+                sessionId: sessionId,
+                maxTurns: 6,
+                autoCompact: nil,
+                authResolver: resolved.authResolver
             ))
             let recorder = LiveMCPToolSearchTests.Recorder()
-            let run = await LiveMCPToolSearchTests.prompt(agent, "Use lookup_issue to find the crash issue and tell me its number.", recorder: recorder)
+            let run = await LiveMCPToolSearchTests.prompt(
+                agent,
+                "Use lookup_issue to find the crash issue and tell me its number.",
+                recorder: recorder
+            )
             LiveMCPToolSearchTests.report("\(label) [baseline]", run)
             await closeProviderSession(sessionId: sessionId)
         }

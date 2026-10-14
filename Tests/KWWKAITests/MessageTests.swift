@@ -57,7 +57,13 @@ struct CostTests {
             provider: "faux",
             cost: ModelCost(input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75)
         )
-        let usage = Usage(input: 1_000_000, output: 500_000, cacheRead: 250_000, cacheWrite: 100_000, totalTokens: 1_850_000)
+        let usage = Usage(
+            input: 1_000_000,
+            output: 500_000,
+            cacheRead: 250_000,
+            cacheWrite: 100_000,
+            totalTokens: 1_850_000
+        )
         let cost = calculateCost(model: model, usage: usage)
         #expect(cost.input == 3.0)
         #expect(cost.output == 7.5)

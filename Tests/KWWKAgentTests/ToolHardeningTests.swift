@@ -24,7 +24,8 @@ struct SymlinkWriteTests {
         _ = try await tool.execute(
             "call-edit-symlink",
             .object(["path": .string(link.path), "edits": edits]),
-            nil, nil
+            nil,
+            nil
         )
 
         // The link is still a symlink pointing at the same target...
@@ -47,7 +48,8 @@ struct SymlinkWriteTests {
         _ = try await tool.execute(
             "call-write-symlink",
             ["path": .string(link.path), "content": .string("replaced")],
-            nil, nil
+            nil,
+            nil
         )
 
         let destination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
@@ -67,7 +69,8 @@ struct SymlinkWriteTests {
         _ = try await tool.execute(
             "call-inode",
             ["path": .string(file.path), "content": .string("after")],
-            nil, nil
+            nil,
+            nil
         )
 
         let after = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
@@ -86,7 +89,9 @@ struct GrepHardeningTests {
         try write("needle here", to: dir.appendingPathComponent("a.swift"))
         try write("needle there", to: dir.appendingPathComponent("b.txt"))
         try FileManager.default.createDirectory(
-            at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+            at: dir.appendingPathComponent("sub"),
+            withIntermediateDirectories: true
+        )
         try write("needle nested", to: dir.appendingPathComponent("sub/c.swift"))
         // A match inside .git must be pruned even though it is a plain text file.
         let git = dir.appendingPathComponent(".git")
@@ -97,7 +102,8 @@ struct GrepHardeningTests {
         let result = try await tool.execute(
             "call-grep-glob",
             ["pattern": .string("needle"), "path": .string(dir.path), "glob": .string("*.swift")],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("a.swift"))
@@ -117,7 +123,8 @@ struct GrepHardeningTests {
         let result = try await tool.execute(
             "call-grep-ctx",
             ["pattern": .string("MATCH"), "path": .string(file.path), "context": 1],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("line before"))
@@ -144,7 +151,8 @@ struct GrepHardeningTests {
         let result = try await tool.execute(
             "call-grep-bin",
             ["pattern": .string("needle"), "path": .string(dir.path)],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("text.txt"))

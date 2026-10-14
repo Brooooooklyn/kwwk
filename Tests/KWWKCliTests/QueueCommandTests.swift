@@ -171,7 +171,9 @@ struct AgentQueueIntrospectionTests {
         #expect(seen == ["c", "b", "a", "c"], "cycle should rotate in reverse and wrap")
         // The queue still holds all three prompts the whole time.
         #expect(agent.queuedSteeringCount() == 2)
-        let remaining = Set(agent.queuedSteeringMessages().map { queuedMessageBodyText($0) } + [queuedMessageBodyText(last!)])
+        let remaining = Set(
+            agent.queuedSteeringMessages().map { queuedMessageBodyText($0) } + [queuedMessageBodyText(last!)]
+        )
         #expect(remaining == ["a", "b", "c"], "no prompt is ever lost during cycling")
     }
 

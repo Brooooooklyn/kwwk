@@ -11,7 +11,10 @@ public actor SessionAuthResolvers {
         self.map = initial
     }
 
-    public func set(scope: String, _ resolver: @escaping @Sendable (Model, String?) async throws -> ResolvedProviderAuth?) {
+    public func set(
+        scope: String,
+        _ resolver: @escaping @Sendable (Model, String?) async throws -> ResolvedProviderAuth?
+    ) {
         map[scope] = resolver
     }
 

@@ -396,14 +396,20 @@ public enum ProviderVariants {
     ) -> [any APIProvider] {
         [
             githubCopilot(
-                client: client, integrationID: integrationID,
-                api: "openai-completions", baseURL: baseURL
+                client: client,
+                integrationID: integrationID,
+                api: "openai-completions",
+                baseURL: baseURL
             ),
             CopilotRequestHeadersProvider(base: githubCopilotAnthropic(
-                client: client, integrationID: integrationID, baseURL: baseURL
+                client: client,
+                integrationID: integrationID,
+                baseURL: baseURL
             )),
             CopilotRequestHeadersProvider(base: githubCopilotResponses(
-                client: client, integrationID: integrationID, baseURL: baseURL
+                client: client,
+                integrationID: integrationID,
+                baseURL: baseURL
             )),
         ]
     }
@@ -478,11 +484,17 @@ struct CopilotRequestHeadersProvider: APIProvider, APIProviderSessionLifecycle, 
     }
 
     func compact(
-        model: Model, context: Context, instructions: String, options: StreamOptions?
+        model: Model,
+        context: Context,
+        instructions: String,
+        options: StreamOptions?
     ) async throws -> NativeCompactionResult? {
         guard let native = base as? any NativeCompactionProvider else { return nil }
         return try await native.compact(
-            model: model, context: context, instructions: instructions, options: options
+            model: model,
+            context: context,
+            instructions: instructions,
+            options: options
         )
     }
 }

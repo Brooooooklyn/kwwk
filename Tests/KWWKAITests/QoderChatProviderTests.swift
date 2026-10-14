@@ -101,7 +101,9 @@ private func auth(token: String = "jt-test", uid: String = "uid-test") -> Resolv
     )
 }
 
-private func collect(_ stream: AssistantMessageStream) async -> (events: [AssistantMessageEvent], final: AssistantMessage) {
+private func collect(
+    _ stream: AssistantMessageStream
+) async -> (events: [AssistantMessageEvent], final: AssistantMessage) {
     var events: [AssistantMessageEvent] = []
     for await event in stream { events.append(event) }
     return (events, await stream.result())
@@ -117,7 +119,11 @@ private func turn(
     options: StreamOptions = StreamOptions(resolvedAuth: auth())
 ) async -> (events: [AssistantMessageEvent], final: AssistantMessage, client: QoderStubClient) {
     let client = QoderStubClient([listPath: [.init(body: listing)], chatPath: [reply]])
-    let (events, final) = await collect(QoderChatProvider(client: client).stream(model: model, context: context, options: options))
+    let (events, final) = await collect(QoderChatProvider(client: client).stream(
+        model: model,
+        context: context,
+        options: options
+    ))
     return (events, final, client)
 }
 
@@ -167,9 +173,15 @@ struct QoderChatRequestTests {
                 .user(UserMessage(text: "hi")),
                 .assistant(AssistantMessage(
                     content: [.toolCall(ToolCall(id: "c1", name: "read", arguments: ["path": "x"]))],
-                    api: "qoder-chat", provider: "qoder", model: "qfmodel"
+                    api: "qoder-chat",
+                    provider: "qoder",
+                    model: "qfmodel"
                 )),
-                .toolResult(ToolResultMessage(toolCallId: "c1", toolName: "read", content: [.text(TextContent(text: "the file"))])),
+                .toolResult(ToolResultMessage(
+                    toolCallId: "c1",
+                    toolName: "read",
+                    content: [.text(TextContent(text: "the file"))]
+                )),
             ],
             tools: [readTool]
         )
@@ -334,11 +346,20 @@ struct QoderChatRequestTests {
                     .toolCall(ToolCall(id: "call_A", name: "read", arguments: ["path": "/tmp/x & y"])),
                     .toolCall(ToolCall(id: "call_B", name: "bash", arguments: ["command": "ls"])),
                 ],
-                api: "qoder-chat", provider: "qoder", model: "qfmodel"
+                api: "qoder-chat",
+                provider: "qoder",
+                model: "qfmodel"
             )),
-            .toolResult(ToolResultMessage(toolCallId: "call_B", toolName: "bash", content: [.text(TextContent(text: "second result"))])),
             .toolResult(ToolResultMessage(
-                toolCallId: "call_A", toolName: "read", content: [.text(TextContent(text: "first result"))], isError: true
+                toolCallId: "call_B",
+                toolName: "bash",
+                content: [.text(TextContent(text: "second result"))]
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "call_A",
+                toolName: "read",
+                content: [.text(TextContent(text: "first result"))],
+                isError: true
             )),
         ])
         #expect(messages.count == 4)
@@ -362,7 +383,9 @@ struct QoderChatRequestTests {
                 .toolCall(ToolCall(id: "call_C", name: "read", arguments: [:])),
                 .text(TextContent(text: "Then this.")),
             ],
-            api: "qoder-chat", provider: "qoder", model: "qfmodel"
+            api: "qoder-chat",
+            provider: "qoder",
+            model: "qfmodel"
         ))])
         #expect(spoken[0]["content"] as? String == "First. Then this.")
     }
@@ -373,11 +396,17 @@ struct QoderChatRequestTests {
         let messages = QoderChatProvider.chatMessages([
             .user(UserMessage(content: [.text(TextContent(text: "look")), .image(png)])),
             .assistant(AssistantMessage(
-                content: [.thinking(ThinkingContent(thinking: "hm"))], api: "qoder-chat", provider: "qoder", model: "qfmodel"
+                content: [.thinking(ThinkingContent(thinking: "hm"))],
+                api: "qoder-chat",
+                provider: "qoder",
+                model: "qfmodel"
             )),
             .system(SystemMessage(toolsAdded: [readTool])),
             .assistant(AssistantMessage(
-                content: [.text(TextContent(text: "A cat."))], api: "qoder-chat", provider: "qoder", model: "qfmodel"
+                content: [.text(TextContent(text: "A cat."))],
+                api: "qoder-chat",
+                provider: "qoder",
+                model: "qfmodel"
             )),
         ])
         #expect(messages.map { $0["role"] as? String } == ["user", "assistant"])
@@ -394,7 +423,9 @@ struct QoderChatRequestTests {
         func screenshot(_ id: String) -> Message {
             .assistant(AssistantMessage(
                 content: [.toolCall(ToolCall(id: id, name: "screenshot", arguments: [:]))],
-                api: "qoder-chat", provider: "qoder", model: "qfmodel"
+                api: "qoder-chat",
+                provider: "qoder",
+                model: "qfmodel"
             ))
         }
         let messages = QoderChatProvider.chatMessages([
@@ -485,19 +516,31 @@ struct QoderChatRequestTests {
         let context = Context(messages: [.user(UserMessage(text: "hi"))])
         let options = StreamOptions(resolvedAuth: auth())
         for _ in 0..<2 {
-            let (_, final) = await collect(provider.stream(model: qoderModel(id: "qfmodel", site: .global), context: context, options: options))
+            let (_, final) = await collect(provider.stream(
+                model: qoderModel(id: "qfmodel", site: .global),
+                context: context,
+                options: options
+            ))
             #expect(final.stopReason == .stop)
         }
         #expect(client.requests(to: listPath).count == 1)
 
         // A new model on the roster is found by a fresh read…
-        let (_, found) = await collect(provider.stream(model: qoderModel(id: "other-model", site: .global), context: context, options: options))
+        let (_, found) = await collect(provider.stream(
+            model: qoderModel(id: "other-model", site: .global),
+            context: context,
+            options: options
+        ))
         #expect(found.stopReason == .stop)
         #expect(client.requests(to: listPath).count == 2)
         #expect(client.requests(to: chatPath).last?.headers["X-Model-Source"] == "custom")
 
         // …and one the account isn't offered is refused before any chat.
-        let (_, refused) = await collect(provider.stream(model: qoderModel(id: "unknown", site: .global), context: context, options: options))
+        let (_, refused) = await collect(provider.stream(
+            model: qoderModel(id: "unknown", site: .global),
+            context: context,
+            options: options
+        ))
         #expect(refused.stopReason == .error)
         #expect(refused.errorMessage == "Qoder: unknown or disabled model \"unknown\"")
         #expect(refused.failure?.category == .invalidRequest)
@@ -634,7 +677,11 @@ struct QoderChatStreamTests {
 
     @Test("Chunks split anywhere and lines with no blank between them read the same")
     func chunking() async throws {
-        let lines = [content("Hel"), content("lo, 世界"), envelope(#"{"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#)]
+        let lines = [
+            content("Hel"),
+            content("lo, 世界"),
+            envelope(#"{"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#)
+        ]
         let wire = Data(lines.map { "data: \($0)\n" }.joined().utf8)
         var reply = QoderStubClient.Reply(body: "")
         reply.chunks = stride(from: 0, to: wire.count, by: 7).map { wire[$0..<min($0 + 7, wire.count)] }
@@ -718,7 +765,9 @@ struct QoderChatStreamTests {
          "Qoder: prompt is too long: 250000 tokens > 200000 maximum", .contextOverflow),
     ])
     func httpErrors(status: Int, body: String, message: String, category: ProviderFailure.Category) async throws {
-        let (events, final, client) = await turn(reply: .init(status: status, contentType: "application/json", body: body))
+        let (events, final, client) = await turn(
+            reply: .init(status: status, contentType: "application/json", body: body)
+        )
         #expect(final.stopReason == .error)
         #expect(final.errorMessage?.lowercased() == message.lowercased())
         #expect(final.failure?.category == category)
@@ -747,7 +796,10 @@ struct QoderChatStreamTests {
     @Test("The queue's own wait is used, a queued request says so, and with no wait it is 30s")
     func queueWait() throws {
         func queue(_ state: [String: Any], code: String = "10605", status: Int = 403) -> ProviderFailure {
-            QoderChatProvider.failure(status: status, body: Data(jsonText(["code": code, "message": jsonText(state)]).utf8))
+            QoderChatProvider.failure(
+                status: status,
+                body: Data(jsonText(["code": code, "message": jsonText(state)]).utf8)
+            )
         }
         let queued = queue(["isQueued": true, "modelKey": "ultimate", "retryAfterSeconds": 12.2])
         #expect(queued.httpStatus == 503)
@@ -797,7 +849,9 @@ struct QoderChatStreamTests {
     func listingRefused() async throws {
         let client = QoderStubClient([listPath: [.init(status: 403, contentType: "application/json", body: "{}")]])
         let (_, final) = await collect(QoderChatProvider(client: client).stream(
-            model: qoderModel(id: "qfmodel", site: .global), context: Context(), options: StreamOptions(resolvedAuth: auth())
+            model: qoderModel(id: "qfmodel", site: .global),
+            context: Context(),
+            options: StreamOptions(resolvedAuth: auth())
         ))
         #expect(final.failure?.category == .authentication)
         #expect(client.requests(to: chatPath).isEmpty)
@@ -828,7 +882,9 @@ struct QoderChatStreamTests {
 
     @Test("A web page or nothing at all under a 200 is no reply")
     func notAnAPIReply() async throws {
-        let (_, page, _) = await turn(reply: .init(contentType: "text/html; charset=utf-8", body: "<html>Just a moment...</html>"))
+        let (_, page, _) = await turn(
+            reply: .init(contentType: "text/html; charset=utf-8", body: "<html>Just a moment...</html>")
+        )
         #expect(page.stopReason == .error)
         #expect(page.errorMessage == "Qoder: answered 200 with a web page, not an API reply")
         #expect(page.failure?.category == .server)
@@ -931,7 +987,11 @@ struct QoderRegistrationTests {
         #expect(auth.token == "jt-one")
         #expect(auth.metadata == ["uid": "uid-one", "machineId": "machine-one", "email": "one@x", "name": "One"])
 
-        let override = try #require(try await registerStored(storeId: storeId, store: store, modelOverride: "kmodel_latest"))
+        let override = try #require(try await registerStored(
+            storeId: storeId,
+            store: store,
+            modelOverride: "kmodel_latest"
+        ))
         #expect(override.model.name == "Kimi-K3")
     }
 

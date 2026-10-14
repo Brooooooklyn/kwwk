@@ -5,7 +5,10 @@ extension OpenAICompletionsProvider {
     /// `thinkingFormat`, honoring `thinkingLevelMap` remapping and clamping.
     /// Ports pi's openai-completions reasoning branch.
     static func applyReasoning(
-        _ root: inout [String: Any], model: Model, options: StreamOptions?, compat: ResolvedCompletionsCompat
+        _ root: inout [String: Any],
+        model: Model,
+        options: StreamOptions?,
+        compat: ResolvedCompletionsCompat
     ) {
         guard model.reasoning else { return }
 

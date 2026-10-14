@@ -79,7 +79,11 @@ struct APIRegistryScopeTests {
     func unregisterSource() async {
         let registry = APIRegistry()
         await registry.register(TaggedProvider(api: "openai-completions", tag: "flat"), sourceId: "src")
-        await registry.register(TaggedProvider(api: "anthropic-messages", tag: "scoped"), scope: "anthropic", sourceId: "src")
+        await registry.register(
+            TaggedProvider(api: "anthropic-messages", tag: "scoped"),
+            scope: "anthropic",
+            sourceId: "src"
+        )
         await registry.unregisterSource("src")
         #expect(await registry.provider(for: "openai-completions") == nil)
         #expect(await registry.provider(scope: "anthropic", api: "anthropic-messages") == nil)

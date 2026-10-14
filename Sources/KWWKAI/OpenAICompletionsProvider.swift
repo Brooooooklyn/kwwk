@@ -150,7 +150,10 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
 
         do {
             let (response, stream) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: body,
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: body,
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
@@ -371,7 +374,9 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
     /// surfaced as error events rather than a silent successful completion.
     /// Returns true if it emitted a terminal event (caller should return).
     private func validateAndFinish(
-        out: AssistantMessageStream, state: OpenAICompletionsState, hasFinishReason: Bool
+        out: AssistantMessageStream,
+        state: OpenAICompletionsState,
+        hasFinishReason: Bool
     ) -> Bool {
         if state.signal?.isCancelled == true || state.stopReason == .aborted {
             let m = state.asAborted()

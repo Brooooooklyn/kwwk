@@ -155,7 +155,8 @@ func registerWorkBuddy(
                 // Read after the token: a refresh may have changed the domain.
                 guard let credentials = try await manager.credentials(for: site.id) else { return nil }
                 return ResolvedProviderAuth(
-                    token: token, scheme: .bearer,
+                    token: token,
+                    scheme: .bearer,
                     headers: WorkBuddyOAuth.accountHeaders(credentials, site: site)
                 )
             } catch OAuthError.missing, OAuthError.unknownProvider {

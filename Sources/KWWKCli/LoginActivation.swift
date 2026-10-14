@@ -150,7 +150,9 @@ func performLogout(_ ctx: SlashContext, _ args: String, store: OAuthStore) async
             ctx.notify(Style.dimmed("  /logout: removed \(target); now on \(next.template.id) · \(next.displayName)\(compactionSuffix)"))
         } else {
             ctx.agent.state.model = loggedOutModel
-            ctx.notify(Style.dimmed("  /logout: removed \(target) — no providers left; /login to sign in\(compactionSuffix)"))
+            ctx.notify(
+                Style.dimmed("  /logout: removed \(target) — no providers left; /login to sign in\(compactionSuffix)")
+            )
         }
     } else {
         ctx.notify(Style.dimmed("  /logout: removed \(target)\(compactionSuffix)"))

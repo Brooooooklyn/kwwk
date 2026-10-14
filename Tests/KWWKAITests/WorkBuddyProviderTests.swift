@@ -129,7 +129,13 @@ struct WorkBuddyProviderTests {
         _ = await run(
             client: client,
             context: Context(systemPrompt: "You are kwwk.", messages: [.user(UserMessage(text: "hi"))], tools: [tool]),
-            options: StreamOptions(maxTokens: 1024, cacheRetention: .long, sessionId: "s-1", resolvedAuth: auth, reasoning: .medium)
+            options: StreamOptions(
+                maxTokens: 1024,
+                cacheRetention: .long,
+                sessionId: "s-1",
+                resolvedAuth: auth,
+                reasoning: .medium
+            )
         )
         let expected: [String: Any] = [
             "model": "hy3",
@@ -248,7 +254,11 @@ struct WorkBuddyProviderTests {
             messages: [
                 .user(UserMessage(text: "read it")),
                 .assistant(earlier),
-                .toolResult(ToolResultMessage(toolCallId: "call_0", toolName: "fs.read", content: [.text(TextContent(text: "ok"))])),
+                .toolResult(ToolResultMessage(
+                    toolCallId: "call_0",
+                    toolName: "fs.read",
+                    content: [.text(TextContent(text: "ok"))]
+                )),
             ],
             tools: [
                 Tool(name: "fs.read", description: "Read", parameters: .object(["type": .string("object")])),
@@ -288,7 +298,8 @@ struct WorkBuddyProviderTests {
         #expect(ownCall.name == "fs_read")
 
         let sent = try body(client)
-        let names = (sent["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+        let names = (sent["tools"] as? [[String: Any]] ?? [])
+            .compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
         #expect(names == ["fs_read_2", "fs_read", "__"])
         // The chat's history names the call as its tool now is.
         let messages = sent["messages"] as? [[String: Any]] ?? []
@@ -305,7 +316,11 @@ struct WorkBuddyProviderTests {
         )
         func sent(_ choice: ToolChoice?) async throws -> [String: Any] {
             let client = StubSSEClient(body: textStream)
-            _ = await run(client: client, context: context, options: StreamOptions(resolvedAuth: auth, toolChoice: choice))
+            _ = await run(
+                client: client,
+                context: context,
+                options: StreamOptions(resolvedAuth: auth, toolChoice: choice)
+            )
             return try body(client)
         }
         #expect(try await sent(.tool(name: "read"))["tool_choice"] as? String == "read")
@@ -339,7 +354,11 @@ struct WorkBuddyProviderTests {
         #expect(WorkBuddyWire.fitParameters(.null) == .object(["type": .string("object"), "properties": .object([:])]))
         // A union at the root is folded.
         let union: JSONValue = .object(["anyOf": .array([
-            .object(["type": .string("object"), "properties": .object(["a": .object(["type": .string("string")])]), "required": .array([.string("a")])]),
+            .object([
+                "type": .string("object"),
+                "properties": .object(["a": .object(["type": .string("string")])]),
+                "required": .array([.string("a")])
+            ]),
             .object(["type": .string("object"), "properties": .object(["b": .object(["type": .string("string")])])]),
         ])])
         #expect(WorkBuddyWire.fitParameters(union) == .object([
@@ -564,7 +583,11 @@ struct WorkBuddyWireTests {
         content: [.toolCall(ToolCall(id: "call_1", name: "grep", arguments: .object([:])))],
         api: "openai-completions", provider: "workbuddy", model: "hy3", stopReason: .toolUse
     )
-    private let result = ToolResultMessage(toolCallId: "call_1", toolName: "grep", content: [.text(TextContent(text: "ok"))])
+    private let result = ToolResultMessage(
+        toolCallId: "call_1",
+        toolName: "grep",
+        content: [.text(TextContent(text: "ok"))]
+    )
     private let answer = AssistantMessage(
         content: [.text(TextContent(text: "done"))], api: "openai-completions", provider: "workbuddy", model: "hy3"
     )
@@ -580,7 +603,10 @@ struct WorkBuddyWireTests {
             .user(UserMessage(content: [.image(ImageContent(data: "AA==", mimeType: "image/png"))])),
             .user(UserMessage(text: "a background task finished", source: .runtime)),
         ], session: "s-1")
-        let next = ids(send + [.assistant(call), .toolResult(result), .assistant(answer), .user(UserMessage(text: "and now?"))], session: "s-1")
+        let next = ids(
+            send + [.assistant(call), .toolResult(result), .assistant(answer), .user(UserMessage(text: "and now?"))],
+            session: "s-1"
+        )
 
         #expect(first["X-Conversation-Request-ID"] == step["X-Conversation-Request-ID"])
         #expect(first["X-Conversation-Request-ID"] != next["X-Conversation-Request-ID"])
@@ -610,7 +636,11 @@ struct WorkBuddyWireTests {
         #expect(nameless["X-Conversation-Request-ID"] != ids([.assistant(answer)])["X-Conversation-Request-ID"])
 
         // After a compaction the summary is the only user message there is.
-        let compacted: [Message] = [.user(UserMessage(text: "summary so far", source: .compaction)), .assistant(call), .toolResult(result)]
+        let compacted: [Message] = [
+            .user(UserMessage(text: "summary so far", source: .compaction)),
+            .assistant(call),
+            .toolResult(result)
+        ]
         #expect(ids(compacted, session: "s-1")["X-Conversation-Request-ID"] == ids(compacted + [.assistant(call), .toolResult(result)], session: "s-1")["X-Conversation-Request-ID"])
     }
 }
@@ -722,7 +752,9 @@ struct WorkBuddyModelsTests {
         func failure(_ body: String, status: Int = 200) async -> ProviderFailure? {
             do {
                 _ = try await WorkBuddyModels.fetch(
-                    site: .international, credentials: credentials, client: StubSSEClient(body: body, statusCode: status)
+                    site: .international,
+                    credentials: credentials,
+                    client: StubSSEClient(body: body, statusCode: status)
                 )
                 return nil
             } catch {
@@ -763,7 +795,10 @@ struct WorkBuddyModelsTests {
     @Test("A later model of the same name is named for what its id adds, or else its id")
     func distinctNames() {
         func listing(_ id: String, _ name: String) -> WorkBuddyModels.Listing {
-            WorkBuddyModels.Listing(model: Model(id: id, name: name, api: "openai-completions", provider: "workbuddy"), creditRate: nil)
+            WorkBuddyModels.Listing(
+                model: Model(id: id, name: name, api: "openai-completions", provider: "workbuddy"),
+                creditRate: nil
+            )
         }
         let named = WorkBuddyModels.distinctNames([
             listing("deepseek-v4.1-flash", "Deepseek-V4.1-Flash"),

@@ -31,7 +31,11 @@ private func signIn(
     var callbacks = quietCallbacksBase
     callbacks.browser = presenter
     return try await OAuthLogin.loginWorkBuddy(
-        site: site, callbacks: callbacks, client: client, pollSleep: {}, now: now
+        site: site,
+        callbacks: callbacks,
+        client: client,
+        pollSleep: {},
+        now: now
     )
 }
 
@@ -146,7 +150,11 @@ struct WorkBuddySignInTests {
             (#"{"uid":"u1","nickname":"  ","phoneNumber":"13800000000"}"#, "13800000000"),
             (#"{"uid":"u1"}"#, "u1"),
         ] {
-            let client = QueuedHTTPClient([statePage, answered(#"{"accessToken":"a","expiresIn":3600}"#), answered(account)])
+            let client = QueuedHTTPClient([
+                statePage,
+                answered(#"{"accessToken":"a","expiresIn":3600}"#),
+                answered(account)
+            ])
             let credentials = try await signIn(.china, client)
             #expect(credentials.extras["accountName"] == .string(name))
             #expect(client.header("X-Domain", request: 2) == "copilot.tencent.com")
@@ -168,7 +176,10 @@ struct WorkBuddySignInTests {
         _ = try await signIn(.china, client)
         #expect(client.requestCount == 7)
 
-        let refused = QueuedHTTPClient([statePage, .response(status: 200, body: #"{"code":10085,"msg":"请求不合法"}"#)])
+        let refused = QueuedHTTPClient([
+            statePage,
+            .response(status: 200, body: #"{"code":10085,"msg":"请求不合法"}"#)
+        ])
         await #expect(throws: OAuthLoginError.denied("WorkBuddy: 请求不合法")) {
             _ = try await signIn(.china, refused)
         }
@@ -215,7 +226,9 @@ struct WorkBuddySignInTests {
     func enterprise() async throws {
         // Named by /login/account itself.
         let named = QueuedHTTPClient([
-            statePage, tokenGiven, answered(#"{"uid":"u1","nickname":"E","type":"enterprise","enterpriseId":" ent-1 "}"#),
+            statePage,
+            tokenGiven,
+            answered(#"{"uid":"u1","nickname":"E","type":"enterprise","enterpriseId":" ent-1 "}"#),
         ])
         #expect(try await signIn(.china, named).extras["enterpriseId"] == .string("ent-1"))
         #expect(named.requestCount == 3)
@@ -315,7 +328,8 @@ struct WorkBuddyRefreshTests {
             #"{"accessToken":"fresh","refreshToken":"next","expiresAt":1900000000000,"refreshExpiresAt":1900000360000,"domain":"www.codebuddy.ai"}"#
         )])
         let refreshed = try await WorkBuddyOAuthProvider(site: .international).refresh(
-            stale(extras: ["enterpriseId": .string("ent-1")]), using: client
+            stale(extras: ["enterpriseId": .string("ent-1")]),
+            using: client
         )
         #expect(client.requests[0].url.host == "www.workbuddy.ai")
         // An enterprise account is refreshed as the enterprise.
@@ -331,7 +345,8 @@ struct WorkBuddyRefreshTests {
     }
 
     private func refreshError(
-        _ credentials: OAuthCredentials, _ answers: [QueuedHTTPClient.Answer]
+        _ credentials: OAuthCredentials,
+        _ answers: [QueuedHTTPClient.Answer]
     ) async -> (OAuthRefreshError?, QueuedHTTPClient) {
         let client = QueuedHTTPClient(answers)
         do {
@@ -360,7 +375,10 @@ struct WorkBuddyRefreshTests {
         #expect(await refreshError(stale(), [.response(status: 200, body: "<html>")]).0?.kind == .unavailable)
         #expect(await refreshError(stale(), [answered(#"{"refreshToken":"next"}"#)]).0?.kind == .unavailable)
         // A business code under a 200 isn't known to mean the grant is gone.
-        let (coded, _) = await refreshError(stale(), [.response(status: 200, body: #"{"code":10085,"msg":"请求不合法"}"#)])
+        let (coded, _) = await refreshError(
+            stale(),
+            [.response(status: 200, body: #"{"code":10085,"msg":"请求不合法"}"#)]
+        )
         #expect(coded?.kind == .unavailable)
         #expect(coded?.detail == "请求不合法 (code 10085)")
     }
@@ -378,7 +396,9 @@ struct WorkBuddyRefreshTests {
 @Suite("WorkBuddy credits")
 struct WorkBuddyUsageTests {
     private let credentials = OAuthCredentials(
-        access: "own-access", refresh: "r", expires: .max,
+        access: "own-access",
+        refresh: "r",
+        expires: .max,
         extras: ["uid": .string("u1"), "domain": .string("www.codebuddy.cn")]
     )
 
@@ -422,7 +442,10 @@ struct WorkBuddyUsageTests {
     @Test("An account whose packages grant nothing has no window")
     func noPackages() async throws {
         for summary in [#"{"IsPaidUser":false,"Packages":[]}"#, "null", #"{"Packages":[{"CycleTotalCapacity":"0","CycleUsedCapacity":"0"}]}"#] {
-            let windows = try await WorkBuddyUsageReader(site: .china).usage(credentials, using: QueuedHTTPClient([answered(summary)]))
+            let windows = try await WorkBuddyUsageReader(site: .china).usage(
+                credentials,
+                using: QueuedHTTPClient([answered(summary)])
+            )
             #expect(windows.isEmpty)
         }
     }

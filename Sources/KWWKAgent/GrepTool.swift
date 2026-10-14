@@ -92,12 +92,22 @@ public struct LocalGrepOperations: GrepOperations {
         var after: [GrepContextLine] = []
         if context > 0 {
             for j in max(0, i - context)..<i {
-                before.append(GrepContextLine(line: j + 1, text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text))
+                before.append(
+                    GrepContextLine(
+                        line: j + 1,
+                        text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text
+                    )
+                )
             }
             let end = min(lines.count - 1, i + context)
             if i < end {
                 for j in (i + 1)...end {
-                    after.append(GrepContextLine(line: j + 1, text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text))
+                    after.append(
+                        GrepContextLine(
+                            line: j + 1,
+                            text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text
+                        )
+                    )
                 }
             }
         }

@@ -184,7 +184,13 @@ public final class MCPOAuthAdapter: MCPAuthProvider, @unchecked Sendable {
         interactive: Bool = true,
         httpClient: any MCPAuthHTTPClient = URLSessionMCPAuthHTTPClient()
     ) {
-        self.init(provider: provider, serverURL: serverURL, interactive: interactive, httpClient: httpClient, gate: MCPAuthRunGate())
+        self.init(
+            provider: provider,
+            serverURL: serverURL,
+            interactive: interactive,
+            httpClient: httpClient,
+            gate: MCPAuthRunGate()
+        )
     }
 
     init(
@@ -210,7 +216,9 @@ public final class MCPOAuthAdapter: MCPAuthProvider, @unchecked Sendable {
         // server's 401 takes the usual recovery path.
         _ = try? await gate.run { [provider, httpClient] in
             try await MCPOAuth.auth(provider, options: MCPOAuthOptions(
-                serverURL: serverURL, interactive: false, httpClient: httpClient
+                serverURL: serverURL,
+                interactive: false,
+                httpClient: httpClient
             ))
         }
         return try await provider.tokens(nil)?.accessToken

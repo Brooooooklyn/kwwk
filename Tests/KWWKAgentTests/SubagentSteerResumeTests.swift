@@ -124,7 +124,10 @@ struct SubagentSteerResumeTests {
         let toolset = steerToolset(model: faux.getModel(), sessionId: "bg-parent", manager: manager)
 
         let started = try await tool(toolset, "agent").execute(
-            "bg-launch", launchArgs(background: true), nil, nil
+            "bg-launch",
+            launchArgs(background: true),
+            nil,
+            nil
         )
         let firstTask = try #require(steerDetail(started, "task_id"))
         #expect(await manager.get(firstTask)?.spec.hardTimeoutSeconds == 0)
@@ -263,7 +266,10 @@ struct SubagentSteerResumeTests {
         let history = try tool(toolset, "agent_history")
 
         let transcript = steerText(try await history.execute(
-            "transcript", .object(["agent_id": .string("mini-1")]), nil, nil
+            "transcript",
+            .object(["agent_id": .string("mini-1")]),
+            nil,
+            nil
         ))
         #expect(transcript.contains("## [2] assistant\n\nReading the notes first.\n→ [2.1] read(notes.txt) ⇒ ok · "))
         #expect(transcript.contains("## [4] result · complete\n\nThe notes have 300 lines."))

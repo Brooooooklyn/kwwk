@@ -106,7 +106,8 @@ public enum OAuthSubscriptions {
     /// with nothing to renew. `kimiIdentity` is sent for a Kimi login that
     /// recorded no device id of its own; nil uses this machine's.
     public static func refresher(
-        providerId: String, kimiIdentity: KimiDeviceIdentity? = nil
+        providerId: String,
+        kimiIdentity: KimiDeviceIdentity? = nil
     ) -> (any OAuthProvider)? {
         switch providerId {
         case "anthropic": AnthropicOAuthProvider()

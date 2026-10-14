@@ -93,9 +93,12 @@ final class AnthropicStreamState: @unchecked Sendable {
             let isFallback = entry["type"] == .string("fallback_message")
             // Classifier-blocked attempts before any output/cache write are waived.
             if hasFallback && !isFallback && output == 0 && cacheWrite == 0 { continue }
-            let attempt = Usage(input: isFallback ? 0 : input, output: output,
-                                cacheRead: count("cache_read_input_tokens") + (isFallback ? input : 0),
-                                cacheWrite: cacheWrite)
+            let attempt = Usage(
+                input: isFallback ? 0 : input,
+                output: output,
+                cacheRead: count("cache_read_input_tokens") + (isFallback ? input : 0),
+                cacheWrite: cacheWrite
+            )
             let id: String? = { if case .string(let id) = entry["model"] { return id }; return nil }()
             let cost = calculateCost(model: pricedModel(id), usage: attempt)
             total.input += cost.input

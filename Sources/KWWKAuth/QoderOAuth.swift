@@ -43,8 +43,13 @@ public struct QoderSite: Sendable, Hashable {
     public let redirectURI: String?
 
     public init(
-        id: String, name: String, web: String, openAPI: String, api: String,
-        clientID: String, redirectURI: String?
+        id: String,
+        name: String,
+        web: String,
+        openAPI: String,
+        api: String,
+        clientID: String,
+        redirectURI: String?
     ) {
         self.id = id
         self.name = name
@@ -57,9 +62,13 @@ public struct QoderSite: Sendable, Hashable {
 
     /// qoder.com, signing in as the desktop client does.
     public static let global = QoderSite(
-        id: "qoder", name: "Qoder", web: "https://qoder.com",
-        openAPI: "https://openapi.qoder.sh", api: "https://api3.qoder.sh",
-        clientID: "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa", redirectURI: "qoder-app://"
+        id: "qoder",
+        name: "Qoder",
+        web: "https://qoder.com",
+        openAPI: "https://openapi.qoder.sh",
+        api: "https://api3.qoder.sh",
+        clientID: "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa",
+        redirectURI: "qoder-app://"
     )
 
     /// qoder.cn, whose accounts (Alibaba Cloud or a phone number) exist only
@@ -67,9 +76,13 @@ public struct QoderSite: Sendable, Hashable {
     /// id is that CLI's: the desktop id is not known to be registered on
     /// qoder.cn (magpie #349).
     public static let cn = QoderSite(
-        id: "qoder-cn", name: "Qoder CN", web: "https://qoder.cn",
-        openAPI: "https://openapi.qoder.com.cn", api: "https://gateway.qoder.com.cn",
-        clientID: "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb", redirectURI: nil
+        id: "qoder-cn",
+        name: "Qoder CN",
+        web: "https://qoder.cn",
+        openAPI: "https://openapi.qoder.com.cn",
+        api: "https://gateway.qoder.com.cn",
+        clientID: "e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb",
+        redirectURI: nil
     )
 
     public static let all: [QoderSite] = [.global, .cn]
@@ -198,7 +211,11 @@ extension OAuthLogin {
         callbacks.onProgress("Sign in to \(site.name) in your browser — waiting for approval…")
         let device = try await present(page, callbacks: callbacks) {
             try await pollQoderDeviceToken(
-                site: site, nonce: nonce, verifier: verifier, client: client, intervalMs: pollIntervalMs
+                site: site,
+                nonce: nonce,
+                verifier: verifier,
+                client: client,
+                intervalMs: pollIntervalMs
             )
         }
         guard !device.userID.isEmpty else {
@@ -214,7 +231,8 @@ extension OAuthLogin {
         ]
         var credentials: OAuthCredentials
         let (response, body) = try await client.request(
-            url: URL(string: site.openAPI + QoderSite.jobTokenPath)!, method: "POST",
+            url: URL(string: site.openAPI + QoderSite.jobTokenPath)!,
+            method: "POST",
             headers: QoderTokens.jsonHeaders.merging(["Authorization": "Bearer \(device.token)"]) { $1 },
             body: try JSONSerialization.data(withJSONObject: ["clientId": site.clientID])
         )
@@ -241,8 +259,10 @@ extension OAuthLogin {
         // The account page says who signed in; the label is worth having but
         // not worth failing a finished sign-in over.
         if let (info, data) = try? await client.request(
-            url: URL(string: site.openAPI + QoderSite.userInfoPath)!, method: "GET",
-            headers: ["Accept": "application/json", "Authorization": "Bearer \(device.token)"], body: nil
+            url: URL(string: site.openAPI + QoderSite.userInfoPath)!,
+            method: "GET",
+            headers: ["Accept": "application/json", "Authorization": "Bearer \(device.token)"],
+            body: nil
         ), (200..<300).contains(info.statusCode), let user = QoderTokens.object(data) {
             let email = QoderTokens.string(user, "email")
             let name = QoderTokens.string(user, "name")
@@ -261,7 +281,11 @@ extension OAuthLogin {
     /// but a 200 carrying a token means "not yet" (the poll answers 404 while
     /// it waits); only three thrown requests in a row give up.
     private static func pollQoderDeviceToken(
-        site: QoderSite, nonce: String, verifier: String, client: HTTPClient, intervalMs: UInt64
+        site: QoderSite,
+        nonce: String,
+        verifier: String,
+        client: HTTPClient,
+        intervalMs: UInt64
     ) async throws -> QoderTokens.Device {
         let query = qoderQuery([("challenge_method", "S256"), ("nonce", nonce), ("verifier", verifier)])
         let url = URL(string: site.openAPI + QoderSite.deviceTokenPollPath + "?" + query)!
@@ -271,7 +295,10 @@ extension OAuthLogin {
             try Task.checkCancellation()
             do {
                 let (response, body) = try await client.request(
-                    url: url, method: "GET", headers: ["Accept": "application/json"], body: nil
+                    url: url,
+                    method: "GET",
+                    headers: ["Accept": "application/json"],
+                    body: nil
                 )
                 consecutiveErrors = 0
                 if response.statusCode == 200, let token = QoderTokens.Device(body, now: QoderTokens.nowMs()) {
@@ -319,7 +346,8 @@ public struct QoderOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         var refreshed = credentials
         if case .bool(true)? = credentials.extras["deviceChat"] {
@@ -365,13 +393,17 @@ public struct QoderOAuthProvider: OAuthProvider {
         // renew with").
         guard !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OAuthRefreshError(
-                providerId: id, kind: .rejected, status: nil, detail: "the stored login carries no refresh token"
+                providerId: id,
+                kind: .rejected,
+                status: nil,
+                detail: "the stored login carries no refresh token"
             )
         }
         let data: Data
         do {
             (_, data) = try await OAuthRefreshError.post(
-                provider: id, url: URL(string: site.openAPI + path)!,
+                provider: id,
+                url: URL(string: site.openAPI + path)!,
                 headers: QoderTokens.jsonHeaders,
                 body: try JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken]),
                 client: client
@@ -385,8 +417,10 @@ public struct QoderOAuthProvider: OAuthProvider {
             // answer a dead token 400, so here a 400 is a refresh to try
             // again, not a login to park.
             throw OAuthRefreshError(
-                providerId: id, kind: refused.status == 403 ? .rejected : .unavailable,
-                status: refused.status, detail: refused.detail
+                providerId: id,
+                kind: refused.status == 403 ? .rejected : .unavailable,
+                status: refused.status,
+                detail: refused.detail
             )
         }
         let answer = QoderTokens.object(data) ?? [:]
@@ -397,12 +431,16 @@ public struct QoderOAuthProvider: OAuthProvider {
         let refresh = QoderTokens.string(answer, "refresh_token")
         guard !token.isEmpty, !refresh.isEmpty else {
             throw OAuthRefreshError(
-                providerId: id, kind: .unavailable, status: nil, detail: "incomplete token pair"
+                providerId: id,
+                kind: .unavailable,
+                status: nil,
+                detail: "incomplete token pair"
             )
         }
         let now = QoderTokens.nowMs()
         return Pair(
-            token: token, refresh: refresh,
+            token: token,
+            refresh: refresh,
             jobExpires: QoderTokens.jobExpiry(answer, now: now),
             deviceExpires: QoderTokens.deviceExpiry(answer, now: now)
         )
@@ -427,10 +465,14 @@ public struct QoderUsageReader: OAuthUsageReader {
     public func usage(_ credentials: OAuthCredentials, using client: HTTPClient) async throws -> [OAuthUsageWindow] {
         var deviceToken = ""
         if case .string(let stored)? = credentials.extras["deviceToken"] { deviceToken = stored }
-        if deviceToken.isEmpty, case .bool(true)? = credentials.extras["deviceChat"] { deviceToken = credentials.access }
+        if deviceToken.isEmpty, case .bool(true)? = credentials.extras["deviceChat"] {
+            deviceToken = credentials.access
+        }
         guard !deviceToken.isEmpty else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: nil, detail: "the stored login carries no device token"
+                providerId: providerId,
+                status: nil,
+                detail: "the stored login carries no device token"
             )
         }
         let (response, body) = try await OAuthUsage.get(
@@ -446,7 +488,9 @@ public struct QoderUsageReader: OAuthUsageReader {
         )
         guard let windows = Self.windows(fromJSON: body) else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode, detail: "missing quota data"
+                providerId: providerId,
+                status: response.statusCode,
+                detail: "missing quota data"
             )
         }
         return windows

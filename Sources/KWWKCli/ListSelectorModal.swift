@@ -152,8 +152,10 @@ final class ModalListCore {
 
         // Scroll only at the edges.
         scroll = edgeScrollOffset(
-            selection: selectedLine, count: lines.count,
-            windowSize: windowRows, previous: scroll
+            selection: selectedLine,
+            count: lines.count,
+            windowSize: windowRows,
+            previous: scroll
         )
 
         var visible = Array(lines[scroll ..< min(lines.count, scroll + windowRows)])

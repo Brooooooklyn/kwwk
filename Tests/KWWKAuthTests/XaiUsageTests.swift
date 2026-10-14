@@ -57,7 +57,8 @@ struct XaiUsageTests {
     func request() async throws {
         let client = QueuedHTTPClient([.response(status: 200, body: #"{"config":{"creditUsagePercent":1}}"#)])
         let windows = try await XaiUsageReader().usage(
-            OAuthCredentials(access: "tok-2", refresh: "", expires: .max), using: client
+            OAuthCredentials(access: "tok-2", refresh: "", expires: .max),
+            using: client
         )
         #expect(windows.map(\.usedPercent) == [1])
         #expect(client.requests[0].url.absoluteString == "https://cli-chat-proxy.grok.com/v1/billing?format=credits")
@@ -74,12 +75,14 @@ struct XaiUsageTests {
         }
         await #expect(throws: OAuthUsageError.unavailable(providerId: "xai", status: 200, detail: "undecodable body")) {
             _ = try await XaiUsageReader().usage(
-                creds, using: QueuedHTTPClient([.response(status: 200, body: "<html>oops</html>")])
+                creds,
+                using: QueuedHTTPClient([.response(status: 200, body: "<html>oops</html>")])
             )
         }
         await #expect(throws: OAuthUsageError.rateLimited(retryAfterSeconds: 120)) {
             _ = try await XaiUsageReader().usage(
-                creds, using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "120"])])
+                creds,
+                using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "120"])])
             )
         }
     }

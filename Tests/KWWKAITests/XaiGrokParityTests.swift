@@ -146,7 +146,9 @@ struct XaiGrokParityTests {
 
     @Test("Responses: a tool added mid-conversation is folded for xAI the same")
     func addedToolRootUnionFolded() throws {
-        let system = SystemMessage(toolsAdded: [Tool(name: "automation_update", description: "d", parameters: Self.rootUnion)])
+        let system = SystemMessage(toolsAdded: [
+            Tool(name: "automation_update", description: "d", parameters: Self.rootUnion)
+        ])
         for (flag, key) in [(\ModelCompat.supportsAdditionalTools, "additional_tools"), (\.supportsToolSearch, "tool_search_output")] {
             for (base, folds) in [(Self.responses, true), (OpenAIResponsesTests.model, false)] {
                 var model = base
@@ -184,7 +186,11 @@ struct XaiGrokParityTests {
         #expect(client.requests[2].headers["x-grok-conv-id"] == nil)
 
         // Grok's header goes to Grok only.
-        _ = await Self.send(client, model: OpenAIResponsesTests.model, options: StreamOptions(sessionId: "conversation-1"))
+        _ = await Self.send(
+            client,
+            model: OpenAIResponsesTests.model,
+            options: StreamOptions(sessionId: "conversation-1")
+        )
         #expect(client.requests[3].headers["x-grok-conv-id"] == nil)
     }
 
@@ -198,7 +204,11 @@ struct XaiGrokParityTests {
                             options: StreamOptions(cacheRetention: CacheRetention.none, sessionId: "conversation-1"))
         #expect(client.requests[1].headers["x-grok-conv-id"] == nil)
 
-        _ = await Self.send(client, model: OpenAICompletionsTests.model, options: StreamOptions(sessionId: "conversation-1"))
+        _ = await Self.send(
+            client,
+            model: OpenAICompletionsTests.model,
+            options: StreamOptions(sessionId: "conversation-1")
+        )
         #expect(client.requests[2].headers["x-grok-conv-id"] == nil)
     }
 

@@ -78,9 +78,15 @@ private let sonnet = Model(
     contextWindow: 200_000, maxTokens: 64_000
 )
 
-private func kiroAuth(token: String = "tok", profile: String? = "arn:p", baseURL: String? = nil) -> ResolvedProviderAuth {
+private func kiroAuth(
+    token: String = "tok",
+    profile: String? = "arn:p",
+    baseURL: String? = nil
+) -> ResolvedProviderAuth {
     ResolvedProviderAuth(
-        token: token, scheme: .bearer, baseURL: baseURL,
+        token: token,
+        scheme: .bearer,
+        baseURL: baseURL,
         metadata: profile.map { ["profileArn": .string($0)] } ?? [:]
     )
 }
@@ -476,11 +482,17 @@ struct KiroRequestTests {
             system: "Be brief.",
             messages: [
                 assistant([text("an opening the caller made up")]),
-                .user(UserMessage(content: [.text(TextContent(text: "hi")), .image(ImageContent(data: "AAA", mimeType: "image/png"))])),
+                .user(UserMessage(content: [
+                    .text(TextContent(text: "hi")),
+                    .image(ImageContent(data: "AAA", mimeType: "image/png"))
+                ])),
                 assistant([text("reading"), call("c1", "read", ["p": 1]), call(long, "grep")]),
                 result("c1", [.text(TextContent(text: "file"))]),
                 result("orphan", [.text(TextContent(text: "?"))]),
-                .user(UserMessage(content: [.text(TextContent(text: "and?")), .image(ImageContent(data: "BBB", mimeType: "image/jpeg"))])),
+                .user(UserMessage(content: [
+                    .text(TextContent(text: "and?")),
+                    .image(ImageContent(data: "BBB", mimeType: "image/jpeg"))
+                ])),
                 assistant([text("done")]),
             ],
             tools: [Tool(name: "read", description: "Read a file", parameters: objectSchema)]
@@ -670,7 +682,11 @@ struct KiroRequestTests {
         #expect(KiroRequest.thinkingBudget(.low) == 10_000)
         #expect(KiroRequest.thinkingBudget(.medium) == 20_000)
         #expect(KiroRequest.thinkingBudget(.xhigh) == 50_000)
-        let other = try build(messages: [.user(UserMessage(text: "why?"))], model: model("deepseek-3.2"), reasoning: .high)
+        let other = try build(
+            messages: [.user(UserMessage(text: "why?"))],
+            model: model("deepseek-3.2"),
+            reasoning: .high
+        )
         #expect(other.current["content"] as? String == "why?")
     }
 
@@ -837,7 +853,9 @@ struct KiroModelTests {
             access: "at", refresh: "rt", expires: .max,
             extras: ["region": "us-east-1", "profileArn": .string(KiroOAuth.builderIDProfile)]
         )
-        let client = KiroStubClient([.init(headers: ["Content-Type": "application/json"], chunks: [Data(Self.list.utf8)])])
+        let client = KiroStubClient([
+            .init(headers: ["Content-Type": "application/json"], chunks: [Data(Self.list.utf8)])
+        ])
         let models = try await KiroModels.fetch(credentials: credentials, client: client)
         #expect(models.map(\.id) == ["auto", "claude-sonnet-4.5"])
         let request = try #require(client.requests.first)

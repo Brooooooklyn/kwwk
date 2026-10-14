@@ -113,7 +113,8 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
                         // outgoing callback can append to the restored file.
                         recorderBox.unsubscribe()
                         let restoredAgent = await ctx.replaceSessionAgent(
-                            info.id, loaded.messages
+                            info.id,
+                            loaded.messages
                         )
                         let recorder = SessionRecorder(
                             store: sessionStore,
@@ -153,7 +154,10 @@ func registerSessionSlashCommands(_ registry: SlashCommandRegistry, ctx: Session
                         var snapshot = TranscriptSnapshot.render(loaded.displayMessages, width: terminalWidth())
                         snapshot.append(contentsOf: [
                             "",
-                            Theme.accentText("↻ resumed session \(info.id.prefix(8)) · \(loaded.displayMessages.count) messages", bold: false),
+                            Theme.accentText(
+                                "↻ resumed session \(info.id.prefix(8)) · \(loaded.displayMessages.count) messages",
+                                bold: false
+                            ),
                         ])
                         replaceTranscript(snapshot)
                         requestRender()

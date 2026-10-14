@@ -23,7 +23,9 @@ extension MCPOAuth {
                 throw MCPAuthError.incompatibleServer("does not support code challenge method S256")
             }
             guard let url = URL(string: metadata.authorizationEndpoint) else {
-                throw MCPAuthError.incompatibleServer("invalid authorization endpoint \(metadata.authorizationEndpoint)")
+                throw MCPAuthError.incompatibleServer(
+                    "invalid authorization endpoint \(metadata.authorizationEndpoint)"
+                )
             }
             endpoint = url
         } else {
@@ -37,8 +39,10 @@ extension MCPOAuth {
             throw MCPAuthError.incompatibleServer("invalid authorization endpoint \(endpoint.absoluteString)")
         }
         var items = (components.queryItems ?? []).filter {
-            !["response_type", "client_id", "code_challenge", "code_challenge_method", "redirect_uri", "state", "scope", "resource"]
-                .contains($0.name)
+            ![
+                "response_type", "client_id", "code_challenge", "code_challenge_method",
+                "redirect_uri", "state", "scope", "resource"
+            ].contains($0.name)
         }
         items.append(URLQueryItem(name: "response_type", value: "code"))
         items.append(URLQueryItem(name: "client_id", value: client.clientID))
@@ -162,7 +166,10 @@ extension MCPOAuth {
         var form = parameters
         if let resource { form.append(("resource", resource)) }
         var headers = ["Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"]
-        let method = selectClientAuthMethod(client: client, supportedMethods: metadata?.tokenEndpointAuthMethodsSupported ?? [])
+        let method = selectClientAuthMethod(
+            client: client,
+            supportedMethods: metadata?.tokenEndpointAuthMethodsSupported ?? []
+        )
         switch method {
         case "client_secret_basic":
             guard let secret = client.clientSecret else {

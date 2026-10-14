@@ -144,7 +144,9 @@ struct QoderCosyTests {
         var sawSlash = false
         for _ in 0..<8 {
             let headers = try QoderCosy.headers(url: chatURL, account: account, body: "", timestamp: 1)
-            let payload = try #require(headers["Authorization"]).dropFirst("Bearer COSY.".count).split(separator: ".")[0]
+            let payload = try #require(headers["Authorization"])
+                .dropFirst("Bearer COSY.".count)
+                .split(separator: ".")[0]
             let text = String(decoding: try #require(Data(base64Encoded: String(payload))), as: UTF8.self)
             #expect(!text.contains("\\"))
             sawSlash = sawSlash || text.contains("/")

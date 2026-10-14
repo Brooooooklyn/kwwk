@@ -541,8 +541,14 @@ struct GoogleGeminiTests {
         let t2 = ToolResultMessage(toolCallId: "b", toolName: "f2", content: [.text(TextContent(text: "r2"))])
         let json = try await Self.encodedBody(
             model: Self.model,
-            context: Context(messages: [.user(UserMessage(text: "x")), .assistant(calls), .toolResult(t1), .toolResult(t2)]),
-            options: nil)
+            context: Context(messages: [
+                .user(UserMessage(text: "x")),
+                .assistant(calls),
+                .toolResult(t1),
+                .toolResult(t2)
+            ]),
+            options: nil
+        )
         let contents = json["contents"] as? [[String: Any]]
         let turn = contents!.last!
         #expect(turn["role"] as? String == "user")

@@ -24,15 +24,25 @@ public protocol HTTPClient: Sendable {
         body: Data?,
         cancellation: CancellationHandle?
     ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>)
-    func stream(url: URL, method: String, headers: [String: String], body: Data?,
-                cancellation: CancellationHandle?, timeoutSeconds: TimeInterval)
-        async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>)
+    func stream(
+        url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        cancellation: CancellationHandle?,
+        timeoutSeconds: TimeInterval
+    ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>)
 }
 
 extension HTTPClient {
-    public func stream(url: URL, method: String, headers: [String: String], body: Data?,
-                       cancellation: CancellationHandle?, timeoutSeconds: TimeInterval)
-        async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+    public func stream(
+        url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        cancellation: CancellationHandle?,
+        timeoutSeconds: TimeInterval
+    ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         try await stream(url: url, method: method, headers: headers, body: body, cancellation: cancellation)
     }
 }
@@ -67,13 +77,24 @@ public final class URLSessionHTTPClient: HTTPClient, @unchecked Sendable {
         body: Data?,
         cancellation: CancellationHandle?
     ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
-        try await stream(url: url, method: method, headers: headers, body: body,
-                         cancellation: cancellation, timeoutSeconds: session.configuration.timeoutIntervalForRequest)
+        try await stream(
+            url: url,
+            method: method,
+            headers: headers,
+            body: body,
+            cancellation: cancellation,
+            timeoutSeconds: session.configuration.timeoutIntervalForRequest
+        )
     }
 
-    public func stream(url: URL, method: String, headers: [String: String], body: Data?,
-                       cancellation: CancellationHandle?, timeoutSeconds: TimeInterval)
-        async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+    public func stream(
+        url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        cancellation: CancellationHandle?,
+        timeoutSeconds: TimeInterval
+    ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeoutSeconds
         request.httpMethod = method
@@ -323,7 +344,11 @@ public extension HTTPClient {
         cancellation: CancellationHandle? = nil
     ) async throws -> (HTTPURLResponse, Data) {
         let (response, stream) = try await self.stream(
-            url: url, method: method, headers: headers, body: body, cancellation: cancellation
+            url: url,
+            method: method,
+            headers: headers,
+            body: body,
+            cancellation: cancellation
         )
         var buffer = Data()
         for try await chunk in stream { buffer.append(chunk) }

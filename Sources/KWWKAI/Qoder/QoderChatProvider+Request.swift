@@ -10,7 +10,10 @@ extension QoderChatProvider {
     /// window, the most the caller means the model to be asked for (see
     /// `contextLength`); nil asks for whatever the request needs.
     static func chatBody(
-        model: QoderModelInfo, context: Context, messages: [Message], options: StreamOptions?,
+        model: QoderModelInfo,
+        context: Context,
+        messages: [Message],
+        options: StreamOptions?,
         windowCeiling: Int? = nil
     ) throws -> Data {
         let tools = context.tools ?? []
@@ -33,9 +36,11 @@ extension QoderChatProvider {
         let window = contextLength(
             model: model,
             requestBytes: model.windows.isEmpty ? 0 : try JSONSerialization.data(
-                withJSONObject: ["m": turns, "t": chatTools], options: [.withoutEscapingSlashes]
+                withJSONObject: ["m": turns, "t": chatTools],
+                options: [.withoutEscapingSlashes]
             ).count,
-            reply: maxTokens, ceiling: windowCeiling
+            reply: maxTokens,
+            ceiling: windowCeiling
         )
         if window > 0 { parameters["context_length"] = window }
 
@@ -187,7 +192,10 @@ extension QoderChatProvider {
     }
 
     private static func chatTool(_ tool: Tool) throws -> [String: Any] {
-        var parameters = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tool.parameters), options: [.fragmentsAllowed])
+        var parameters = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(tool.parameters),
+            options: [.fragmentsAllowed]
+        )
         if parameters is NSNull { parameters = ["type": "object", "properties": [String: Any]()] as [String: Any] }
         return [
             "type": "function",

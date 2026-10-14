@@ -20,7 +20,9 @@ struct SessionHardeningTests {
     private func assistantMsg(_ text: String) -> Message {
         .assistant(AssistantMessage(
             content: [.text(TextContent(text: text))],
-            api: "anthropic", provider: "anthropic", model: "claude-test"
+            api: "anthropic",
+            provider: "anthropic",
+            model: "claude-test"
         ))
     }
 
@@ -32,15 +34,24 @@ struct SessionHardeningTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let id = "resume-preserve"
-        try await store.append(id: id, cwd: "/w", message: userMsg("a"),
-                               model: "m1", provider: "p1")
+        try await store.append(
+            id: id,
+            cwd: "/w",
+            message: userMsg("a"),
+            model: "m1",
+            provider: "p1"
+        )
         try await store.append(id: id, cwd: "/w", message: assistantMsg("b"))
 
         // Simulate a resuming SDK caller who (wrongly) calls ensureCreated on a
         // recorder seeded with the already-persisted count.
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1", persistedCount: 2
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1",
+            persistedCount: 2
         )
         await recorder.ensureCreated()
 
@@ -98,8 +109,13 @@ struct SessionHardeningTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let id = "count-me"
-        try await store.append(id: id, cwd: "/w", message: userMsg("one"),
-                               model: "m1", provider: "p1")
+        try await store.append(
+            id: id,
+            cwd: "/w",
+            message: userMsg("one"),
+            model: "m1",
+            provider: "p1"
+        )
         try await store.append(id: id, cwd: "/w", message: assistantMsg("two"))
         try await store.append(id: id, cwd: "/w", message: userMsg("three"))
         try await store.setTitle(id: id, cwd: "/w", title: "My Session")

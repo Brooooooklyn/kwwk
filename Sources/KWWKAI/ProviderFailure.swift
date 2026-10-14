@@ -25,10 +25,19 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
     public var upstreamMessage: String?
     public var errorDescription: String? { message }
 
-    public init(message: String, httpStatus: Int? = nil, providerCode: String? = nil,
-                transportDomain: String? = nil, transportCode: Int? = nil,
-                requestId: String? = nil, retryAfterMs: Double? = nil, shouldRetry: Bool? = nil,
-                rawStopReason: String? = nil, stopDetails: JSONValue? = nil, upstreamMessage: String? = nil) {
+    public init(
+        message: String,
+        httpStatus: Int? = nil,
+        providerCode: String? = nil,
+        transportDomain: String? = nil,
+        transportCode: Int? = nil,
+        requestId: String? = nil,
+        retryAfterMs: Double? = nil,
+        shouldRetry: Bool? = nil,
+        rawStopReason: String? = nil,
+        stopDetails: JSONValue? = nil,
+        upstreamMessage: String? = nil
+    ) {
         self.message = message
         self.httpStatus = httpStatus
         self.providerCode = providerCode
@@ -56,7 +65,9 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             default: return Self(message: message)
             }
         }
-        if error is CancellationError { return Self(message: "Request was aborted", transportDomain: NSURLErrorDomain, transportCode: -999) }
+        if error is CancellationError {
+            return Self(message: "Request was aborted", transportDomain: NSURLErrorDomain, transportCode: -999)
+        }
         if case HTTPClientError.unexpectedStatus(let status, let body) = error {
             return Self(message: body, httpStatus: status)
         }
@@ -107,9 +118,15 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             else if let data = try? JSONEncoder().encode(raw) { upstream = String(decoding: data, as: UTF8.self) }
             else { upstream = nil }
         } else { upstream = nil }
-        return Self(message: String((string(root["error"]) ?? string(error["message"]) ?? string(root["message"]) ?? fallback).prefix(4096)),
-                    httpStatus: status, providerCode: code,
-                    requestId: string(root["request_id"]) ?? string(error["request_id"]), upstreamMessage: upstream)
+        return Self(
+            message: String(
+                (string(root["error"]) ?? string(error["message"]) ?? string(root["message"]) ?? fallback).prefix(4096)
+            ),
+            httpStatus: status,
+            providerCode: code,
+            requestId: string(root["request_id"]) ?? string(error["request_id"]),
+            upstreamMessage: upstream
+        )
     }
 
     /// The first 4096 bytes of an error body.
@@ -144,9 +161,13 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
 
     public static func retryDelay(headers: [String: String], now: Date = Date()) -> Double? {
         let headers = headers.reduce(into: [String: String]()) { $0[$1.key.lowercased()] = $1.value }
-        if let value = headers["retry-after-ms"], let number = Double(value), number.isFinite, number >= 0 { return number }
+        if let value = headers["retry-after-ms"], let number = Double(value), number.isFinite, number >= 0 {
+            return number
+        }
         guard let value = headers["retry-after"] else { return nil }
-        if let seconds = Double(value), seconds.isFinite, seconds >= 0, (seconds * 1000).isFinite { return seconds * 1000 }
+        if let seconds = Double(value), seconds.isFinite, seconds >= 0, (seconds * 1000).isFinite {
+            return seconds * 1000
+        }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -169,8 +190,13 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         // refusal status: WorkBuddy's code 14018 comes with one nobody has
         // recorded, and neither a new login nor a mended request brings
         // credit back.
-        if let status, (400..<500).contains(status), providerCode?.lowercased() == "insufficient_quota" { return .quota }
-        let text = [providerCode, rawStopReason, message, upstreamMessage].compactMap { $0 }.joined(separator: " ").lowercased()
+        if let status, (400..<500).contains(status), providerCode?.lowercased() == "insufficient_quota" {
+            return .quota
+        }
+        let text = [providerCode, rawStopReason, message, upstreamMessage]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
         // The outer HTTP response governs nested transport prose. Overflow is
         // a distinct recovery only for an input rejection, never auth/limits.
         if status == 401 || status == 403 {
@@ -193,11 +219,17 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         case "permission_denied" where text.contains("region is not yet available"),
              "unauthenticated" where text.contains("region is not yet available"): return .invalidRequest
         case "permission_denied", "unauthenticated": return .authentication
-        case "invalid_argument", "not_found", "already_exists", "failed_precondition", "aborted", "out_of_range", "unimplemented", "data_loss": return .invalidRequest
+        case "invalid_argument", "not_found", "already_exists", "failed_precondition",
+             "aborted", "out_of_range", "unimplemented", "data_loss": return .invalidRequest
         default: break
         }
-        let domain = transportDomain ?? Self.match(#"\bdomain\s*=\s*(NSURLErrorDomain|NSPOSIXErrorDomain)\s+code"#, in: message)
-        let code = transportCode ?? Self.match(#"\bdomain\s*=\s*(?:NSURLErrorDomain|NSPOSIXErrorDomain)\s+code\s*=\s*(-?\d+)\b"#, in: message).flatMap(Int.init)
+        let domain = transportDomain
+            ?? Self.match(#"\bdomain\s*=\s*(NSURLErrorDomain|NSPOSIXErrorDomain)\s+code"#, in: message)
+        let code = transportCode
+            ?? Self.match(
+                #"\bdomain\s*=\s*(?:NSURLErrorDomain|NSPOSIXErrorDomain)\s+code\s*=\s*(-?\d+)\b"#,
+                in: message
+            ).flatMap(Int.init)
         if ["refusal", "content_filter", "sensitive", "safety", "guardrail_intervened", "prohibited_content", "blocklist", "recitation", "spii"].contains(where: text.contains) { return .refusal }
         if ["insufficient_quota", "out of budget", "available balance", "billing", "monthly quota", "daily quota", "insufficient credits", "credits exhausted",
             "monthly usage limit", "usage limit reached", "usage_limit_reached", "gousagelimiterror", "freeusagelimiterror",
@@ -225,7 +257,10 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
                 // Structured transport evidence uses the producer's native
                 // errno constants. Never interpret a legacy text's number as
                 // local errno: Darwin and Linux assign different values.
-                return [Int(ECONNRESET), Int(ECONNABORTED), Int(ENOTCONN), Int(EPIPE), Int(ETIMEDOUT), Int(ECONNREFUSED), Int(ENETUNREACH), Int(EHOSTUNREACH)].contains(code) ? .transport : .invalidRequest
+                return [
+                    Int(ECONNRESET), Int(ECONNABORTED), Int(ENOTCONN), Int(EPIPE),
+                    Int(ETIMEDOUT), Int(ECONNREFUSED), Int(ENETUNREACH), Int(EHOSTUNREACH)
+                ].contains(code) ? .transport : .invalidRequest
             }
             // Legacy diagnostics can cross platform boundaries. Require a
             // specific socket failure, not a bare number or generic "network".
@@ -243,7 +278,9 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         }
         if ["unauthorized", "forbidden", "invalid api key", "authentication_error", "permission_denied", "unauthenticated"].contains(where: text.contains) { return .authentication }
         if ["invalid", "validation", "bad request", "unsupported", "schema", "missing required", "not found"].contains(where: text.contains) { return .invalidRequest }
-        if text.contains("timeout") || text.contains("timed out") || text.contains("deadline_exceeded") { return .timeout }
+        if text.contains("timeout") || text.contains("timed out") || text.contains("deadline_exceeded") {
+            return .timeout
+        }
         if ["rate limit", "rate_limit", "throttlingexception", "too many requests", "resourceexhausted", "resource_exhausted", "resource exhausted"].contains(where: text.contains) { return .rateLimit }
         if ["overloaded", "internal error", "internal_error", "server error", "service unavailable", "service_unavailable", "bad gateway", "temporarily",
             "server_error", "internalserverexception", "serviceunavailableexception", "no_capacity", "at capacity", "insufficient capacity", "capacity exhausted",
@@ -259,7 +296,8 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
     private static func grpcCode(_ raw: String) -> String {
         let names = ["ok", "cancelled", "unknown", "invalid_argument", "deadline_exceeded", "not_found",
                      "already_exists", "permission_denied", "resource_exhausted", "failed_precondition",
-                     "aborted", "out_of_range", "unimplemented", "internal", "unavailable", "data_loss", "unauthenticated"]
+                     "aborted", "out_of_range", "unimplemented", "internal", "unavailable", "data_loss",
+                     "unauthenticated"]
         if let index = Int(raw), names.indices.contains(index) { return names[index] }
         return raw.lowercased()
     }
@@ -331,7 +369,12 @@ public extension AssistantMessage {
 }
 
 extension AssistantMessage {
-    static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
+    static func makeError(
+        api: String,
+        model: Model,
+        text: String,
+        failure: ProviderFailure? = nil
+    ) -> AssistantMessage {
         AssistantMessage(
             content: [],
             api: api,

@@ -35,7 +35,11 @@ struct ToolCallIdEmptyAndGeminiTests {
     @Test("a Chat stream's calls with no id each get one of their own, the same in the end event and the message")
     func chatMintsIds() async throws {
         let provider = OpenAICompletionsProvider(client: StubSSEClient(body: Self.chatNoIdsSSE), defaultAPIKey: "k")
-        let stream = provider.stream(model: Self.chatModel, context: Context(messages: [.user(UserMessage(text: "read both"))]), options: nil)
+        let stream = provider.stream(
+            model: Self.chatModel,
+            context: Context(messages: [.user(UserMessage(text: "read both"))]),
+            options: nil
+        )
         var ended: [String] = []
         for await event in stream {
             if case .toolCallEnd(_, let call, _) = event { ended.append(call.id) }
@@ -56,7 +60,11 @@ struct ToolCallIdEmptyAndGeminiTests {
             .replacingOccurrences(of: #"{"index":0,"type":"function""#, with: #"{"index":0,"id":"call_A","type":"function""#)
             .replacingOccurrences(of: #""id":"","#, with: #""id":"call_B","#)
         let provider = OpenAICompletionsProvider(client: StubSSEClient(body: sse), defaultAPIKey: "k")
-        let message = await provider.stream(model: Self.chatModel, context: Context(messages: [.user(UserMessage(text: "x"))]), options: nil).result()
+        let message = await provider.stream(
+            model: Self.chatModel,
+            context: Context(messages: [.user(UserMessage(text: "x"))]),
+            options: nil
+        ).result()
         #expect(Self.calls(message).map(\.id) == ["call_A", "call_B"])
     }
 
@@ -70,8 +78,16 @@ struct ToolCallIdEmptyAndGeminiTests {
                 .toolCall(ToolCall(id: "", name: "grep", arguments: ["q": "x"])),
             ], api: "openai-completions", provider: provider, model: model, stopReason: .toolUse)),
             // answered out of order: paired by tool name
-            .toolResult(ToolResultMessage(toolCallId: "", toolName: "grep", content: [.text(TextContent(text: "grep out"))])),
-            .toolResult(ToolResultMessage(toolCallId: "", toolName: "read", content: [.text(TextContent(text: "read out"))])),
+            .toolResult(ToolResultMessage(
+                toolCallId: "",
+                toolName: "grep",
+                content: [.text(TextContent(text: "grep out"))]
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "",
+                toolName: "read",
+                content: [.text(TextContent(text: "read out"))]
+            )),
             .user(UserMessage(text: "now summarize")),
         ]
     }
@@ -103,7 +119,9 @@ struct ToolCallIdEmptyAndGeminiTests {
         var results: [String: String] = [:]
         for message in body["messages"] as? [[String: Any]] ?? [] {
             for block in message["content"] as? [[String: Any]] ?? [] {
-                if block["type"] as? String == "tool_use" { uses[block["id"] as? String ?? ""] = block["name"] as? String }
+                if block["type"] as? String == "tool_use" {
+                    uses[block["id"] as? String ?? ""] = block["name"] as? String
+                }
                 if block["type"] as? String == "tool_result" {
                     let content = block["content"]
                     results[block["tool_use_id"] as? String ?? ""] = (content as? String)
@@ -129,21 +147,38 @@ struct ToolCallIdEmptyAndGeminiTests {
     @Test("Gemini's functionCall.id is the call's id; a call without one gets one made up")
     func geminiReadsId() async {
         let provider = GoogleGeminiProvider(client: StubSSEClient(body: Self.geminiIdSSE), defaultAPIKey: "k")
-        let message = await provider.stream(model: GoogleGeminiTests.model,
-                                            context: Context(messages: [.user(UserMessage(text: "calc"))]), options: nil).result()
+        let message = await provider.stream(
+            model: GoogleGeminiTests.model,
+            context: Context(messages: [.user(UserMessage(text: "calc"))]),
+            options: nil
+        ).result()
         let ids = Self.calls(message).map(\.id)
         #expect(ids.count == 2)
         #expect(ids.first == "fc_9f1c2e")
         #expect(ids.last?.hasPrefix(GoogleGeminiProvider.mintedIdPrefix) == true)
     }
 
-    private static func geminiTurn(_ model: Model, ids: [String], api: String? = nil, provider: String? = nil, from: String? = nil) -> [Message] {
+    private static func geminiTurn(
+        _ model: Model,
+        ids: [String],
+        api: String? = nil,
+        provider: String? = nil,
+        from: String? = nil
+    ) -> [Message] {
         var messages: [Message] = [.user(UserMessage(text: "calc"))]
         messages.append(.assistant(AssistantMessage(
             content: ids.map { .toolCall(ToolCall(id: $0, name: "calc", arguments: ["a": 1])) },
-            api: api ?? model.api, provider: provider ?? model.provider, model: from ?? model.id, stopReason: .toolUse)))
+            api: api ?? model.api,
+            provider: provider ?? model.provider,
+            model: from ?? model.id,
+            stopReason: .toolUse
+        )))
         for id in ids {
-            messages.append(.toolResult(ToolResultMessage(toolCallId: id, toolName: "calc", content: [.text(TextContent(text: "1"))])))
+            messages.append(.toolResult(ToolResultMessage(
+                toolCallId: id,
+                toolName: "calc",
+                content: [.text(TextContent(text: "1"))]
+            )))
         }
         return messages
     }
@@ -178,8 +213,15 @@ struct ToolCallIdEmptyAndGeminiTests {
         let model = GoogleGeminiTests.model
         let body = try await GoogleGeminiTests.encodedBody(
             model: model,
-            context: Context(messages: Self.geminiTurn(model, ids: ["toolu_01A"], api: "anthropic-messages", provider: "anthropic", from: "claude-x")),
-            options: nil)
+            context: Context(messages: Self.geminiTurn(
+                model,
+                ids: ["toolu_01A"],
+                api: "anthropic-messages",
+                provider: "anthropic",
+                from: "claude-x"
+            )),
+            options: nil
+        )
         let (calls, responses) = Self.wire(body)
         #expect(calls.count == 1 && calls[0] == nil)
         #expect(responses.count == 1 && responses[0] == nil)

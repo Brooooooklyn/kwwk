@@ -12,7 +12,11 @@ extension AnthropicProvider {
         fallbackEnabled: Bool = false
     ) throws -> Data {
         var context = context
-        context.messages = TransformMessages.normalize(context.messages, model: model, preserveAnthropicFallback: fallbackEnabled)
+        context.messages = TransformMessages.normalize(
+            context.messages,
+            model: model,
+            preserveAnthropicFallback: fallbackEnabled
+        )
         let modelCeiling = OutputTokenPolicy.maximumAllowedLimit(for: model)
         let routeCeiling = maximumOutputTokens.map { min(modelCeiling, $0) }
             ?? modelCeiling
@@ -395,7 +399,11 @@ extension AnthropicProvider {
         return type == "image/jpg" ? "image/jpeg" : type
     }
 
-    private static func encodeMessage(_ message: Message, allowEmptySignature: Bool, fallbackEnabled: Bool) -> [String: Any]? {
+    private static func encodeMessage(
+        _ message: Message,
+        allowEmptySignature: Bool,
+        fallbackEnabled: Bool
+    ) -> [String: Any]? {
         switch message {
         case .system:
             // Encoded by `encodeToolChanges` when the request anchors tool
@@ -436,7 +444,11 @@ extension AnthropicProvider {
                 switch block {
                 case .fallback(let fallback):
                     if fallbackEnabled {
-                        blocks.append(["type": "fallback", "from": ["model": fallback.from.model], "to": ["model": fallback.to.model]])
+                        blocks.append([
+                            "type": "fallback",
+                            "from": ["model": fallback.from.model],
+                            "to": ["model": fallback.to.model]
+                        ])
                     }
                 case .text(let t):
                     // Cross-provider history and tool-only turns can contain

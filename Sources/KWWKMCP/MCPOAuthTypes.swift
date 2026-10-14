@@ -112,11 +112,18 @@ public struct MCPAuthorizationServerMetadata: Sendable, Hashable, Codable {
         responseTypesSupported = try c.decodeIfPresent([String].self, forKey: .responseTypesSupported) ?? ["code"]
         grantTypesSupported = try c.decodeIfPresent([String].self, forKey: .grantTypesSupported)
         codeChallengeMethodsSupported = try c.decodeIfPresent([String].self, forKey: .codeChallengeMethodsSupported)
-        tokenEndpointAuthMethodsSupported = try c.decodeIfPresent([String].self, forKey: .tokenEndpointAuthMethodsSupported)
+        tokenEndpointAuthMethodsSupported = try c.decodeIfPresent(
+            [String].self,
+            forKey: .tokenEndpointAuthMethodsSupported
+        )
         // Only a literal boolean counts.
-        clientIDMetadataDocumentSupported = try? c.decodeIfPresent(Bool.self, forKey: .clientIDMetadataDocumentSupported)
+        clientIDMetadataDocumentSupported = try? c.decodeIfPresent(
+            Bool.self,
+            forKey: .clientIDMetadataDocumentSupported
+        )
         authorizationResponseIssParameterSupported = try? c.decodeIfPresent(
-            Bool.self, forKey: .authorizationResponseIssParameterSupported
+            Bool.self,
+            forKey: .authorizationResponseIssParameterSupported
         )
     }
 }
@@ -457,7 +464,8 @@ public enum MCPAuthError: Error, LocalizedError, Sendable, Equatable {
             return "Refusing to send credentials to non-TLS token endpoint \(url)"
         case .registrationRejected(let status, let body):
             let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            return "OAuth dynamic client registration rejected (HTTP \(status))" + (trimmed.isEmpty ? "" : ": \(trimmed)")
+            return "OAuth dynamic client registration rejected (HTTP \(status))"
+                + (trimmed.isEmpty ? "" : ": \(trimmed)")
         case .incompatibleServer(let message):
             return "Incompatible authorization server: \(message)"
         case .resourceMismatch(let resource, let expected):

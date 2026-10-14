@@ -62,7 +62,9 @@ actor MCPOAuthFileStore {
     }
 
     func record(server: String, serverURL: URL) -> MCPOAuthRecord {
-        if let record = Self.readRecords(url: url)[server], record.serverURL == serverURL.absoluteString { return record }
+        if let record = Self.readRecords(url: url)[server], record.serverURL == serverURL.absoluteString {
+            return record
+        }
         return MCPOAuthRecord(serverURL: serverURL.absoluteString)
     }
 
@@ -91,7 +93,9 @@ actor MCPOAuthFileStore {
         let directory = url.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
             )
         }
     }
@@ -185,7 +189,10 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
         return await store.record(server: server, serverURL: serverURL).client
     }
 
-    func saveClientInformation(_ information: MCPOAuthClientInformation, context: MCPOAuthStorageContext?) async throws {
+    func saveClientInformation(
+        _ information: MCPOAuthClientInformation,
+        context: MCPOAuthStorageContext?
+    ) async throws {
         guard settings.clientID == nil else { return }
         try await store.update(server: server, serverURL: serverURL) { $0.client = information }
     }

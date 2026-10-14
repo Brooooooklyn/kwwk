@@ -9,7 +9,10 @@ struct SkillsIndexTests {
         let skill = root.appendingPathComponent("example")
         try FileManager.default.createDirectory(at: skill, withIntermediateDirectories: true)
         try "---\nname: example\ndescription: Example skill\ndisable-model-invocation: true\n---\nBody".write(
-            to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+            to: skill.appendingPathComponent("SKILL.md"),
+            atomically: true,
+            encoding: .utf8
+        )
         return root
     }
 
@@ -25,7 +28,9 @@ struct SkillsIndexTests {
         #expect(Skills.load(directories: [root.path], useIndex: false).skills.isEmpty)
     }
 
-    @Test(arguments: ["../outside/SKILL.md", "/etc/passwd", "example/../../secret", "example\\SKILL.md", "example//SKILL.md"])
+    @Test(arguments: [
+        "../outside/SKILL.md", "/etc/passwd", "example/../../secret", "example\\SKILL.md", "example//SKILL.md"
+    ])
     func unsafePathFallsBack(path: String) throws {
         let root = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -58,7 +63,10 @@ struct SkillsIndexTests {
         try Skills.writeIndex(directory: root.path)
         let relocated = root.appendingPathComponent("moved")
         try FileManager.default.createDirectory(at: relocated, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: root.appendingPathComponent("skills.index"), to: relocated.appendingPathComponent("skills.index"))
+        try FileManager.default.copyItem(
+            at: root.appendingPathComponent("skills.index"),
+            to: relocated.appendingPathComponent("skills.index")
+        )
         #expect(Skills.load(directories: [relocated.path]).skills.first?.path == relocated.appendingPathComponent("example/SKILL.md").path)
         let result = Skills.load(directories: [root.path, other.path])
         #expect(result.skills.map(\.path) == [root.appendingPathComponent("example/SKILL.md").path])

@@ -108,16 +108,13 @@ extension SessionStore {
                 self = .compaction(
                     timestamp: timestamp,
                     compaction: Compaction(
-                        replacementMessages: try c.decode(
-                            [Message].self, forKey: .replacementMessages),
+                        replacementMessages: try c.decode([Message].self, forKey: .replacementMessages),
                         messagesCompacted: try c.decode(Int.self, forKey: .messagesCompacted),
-                        firstKeptMessageIndex: try c.decodeIfPresent(
-                            Int.self, forKey: .firstKeptMessageIndex),
+                        firstKeptMessageIndex: try c.decodeIfPresent(Int.self, forKey: .firstKeptMessageIndex),
                         tokensBefore: try c.decodeIfPresent(Int.self, forKey: .tokensBefore),
                         contextWindow: try c.decodeIfPresent(Int.self, forKey: .contextWindow),
                         trustedRecap: try c.decodeIfPresent(Bool.self, forKey: .trustedRecap),
-                        reason: try c.decodeIfPresent(
-                            CompactionReason.self, forKey: .reason)
+                        reason: try c.decodeIfPresent(CompactionReason.self, forKey: .reason)
                     )
                 )
             }
@@ -142,8 +139,7 @@ extension SessionStore {
                 try c.encode(timestamp, forKey: .timestamp)
                 try c.encode(compaction.replacementMessages, forKey: .replacementMessages)
                 try c.encode(compaction.messagesCompacted, forKey: .messagesCompacted)
-                try c.encodeIfPresent(
-                    compaction.firstKeptMessageIndex, forKey: .firstKeptMessageIndex)
+                try c.encodeIfPresent(compaction.firstKeptMessageIndex, forKey: .firstKeptMessageIndex)
                 try c.encodeIfPresent(compaction.tokensBefore, forKey: .tokensBefore)
                 try c.encodeIfPresent(compaction.contextWindow, forKey: .contextWindow)
                 try c.encodeIfPresent(compaction.trustedRecap, forKey: .trustedRecap)

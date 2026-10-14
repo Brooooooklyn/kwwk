@@ -36,7 +36,10 @@ struct TaskToolTests {
             let startedAt = Date()
             await #expect(throws: CodingToolError.self) {
                 _ = try await pollTool.execute(
-                    "invalid-task-\(index)", arguments, nil, nil
+                    "invalid-task-\(index)",
+                    arguments,
+                    nil,
+                    nil
                 )
             }
             #expect(Date().timeIntervalSince(startedAt) < 0.25)
@@ -664,7 +667,8 @@ struct TaskToolTests {
     func cancelIsAtomicAndCancellationSafe() async throws {
         let manager = BackgroundTaskManager(outputDir: makeTaskTempDir())
         let (validId, _) = await manager.spawn(
-            runner: TaskNeverRunner(label: "valid"), sessionId: "s1"
+            runner: TaskNeverRunner(label: "valid"),
+            sessionId: "s1"
         )
         let tool = createTaskCancelTool(manager: manager, sessionId: "s1")
         defer { Task { await manager.killAll(sessionId: nil) } }
@@ -727,7 +731,8 @@ struct TaskToolTests {
         )
         defer { Task { await detach() } }
         let (taskId, _) = await manager.spawn(
-            runner: TaskNeverRunner(label: "cancelled"), sessionId: "s1"
+            runner: TaskNeverRunner(label: "cancelled"),
+            sessionId: "s1"
         )
         faux.setResponses([
             .message(fauxAssistantMessage(
@@ -902,7 +907,8 @@ struct TaskToolTests {
         defer { faux.unregister() }
         let manager = BackgroundTaskManager(outputDir: makeTaskTempDir())
         let (taskId, _) = await manager.spawn(
-            runner: TaskDelayedRunner(label: "already-done", delayMs: 10), sessionId: "s1"
+            runner: TaskDelayedRunner(label: "already-done", delayMs: 10),
+            sessionId: "s1"
         )
         let completed = await awaitUntil(2_000) {
             await manager.get(taskId)?.status != .running
@@ -972,10 +978,12 @@ struct TaskToolTests {
         defer { faux.unregister() }
         let manager = BackgroundTaskManager(outputDir: makeTaskTempDir())
         let (firstId, _) = await manager.spawn(
-            runner: TaskNeverRunner(label: "first-never"), sessionId: "s1"
+            runner: TaskNeverRunner(label: "first-never"),
+            sessionId: "s1"
         )
         let (secondId, _) = await manager.spawn(
-            runner: TaskNeverRunner(label: "second-never"), sessionId: "s1"
+            runner: TaskNeverRunner(label: "second-never"),
+            sessionId: "s1"
         )
         defer { Task { await manager.killAll(sessionId: nil) } }
 
@@ -1061,7 +1069,8 @@ struct TaskToolTests {
         defer { faux.unregister() }
         let manager = BackgroundTaskManager(outputDir: makeTaskTempDir())
         let (taskId, _) = await manager.spawn(
-            runner: TaskNeverRunner(label: "same-id-never"), sessionId: "s1"
+            runner: TaskNeverRunner(label: "same-id-never"),
+            sessionId: "s1"
         )
         defer { Task { await manager.killAll(sessionId: nil) } }
         let call = ToolCall(

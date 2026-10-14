@@ -165,7 +165,10 @@ extension OAuthLogin {
                 let body: Data
                 do {
                     (response, body) = try await client.request(
-                        url: tokenURL, method: "POST", headers: headers, body: form
+                        url: tokenURL,
+                        method: "POST",
+                        headers: headers,
+                        body: form
                     )
                 } catch is CancellationError {
                     throw CancellationError()

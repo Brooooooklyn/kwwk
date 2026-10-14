@@ -120,7 +120,9 @@ private func makeTaskListTool(
                 allowedKeys: ["include_all", "offset", "limit"]
             )
             let includeAll = try taskBool(
-                object["include_all"], field: "include_all", toolName: "task_list"
+                object["include_all"],
+                field: "include_all",
+                toolName: "task_list"
             )
             let offset = try taskBoundedInteger(
                 object["offset"],
@@ -251,7 +253,9 @@ private func makeTaskCancelTool(
             )
             var seen: Set<String> = []
             let taskIds = try taskStringArray(
-                object["task_ids"], field: "task_ids", toolName: "task_cancel"
+                object["task_ids"],
+                field: "task_ids",
+                toolName: "task_cancel"
             ).filter { seen.insert($0).inserted }
             guard !taskIds.isEmpty else {
                 return taskActionResult(snapshots: [], cancelledIds: [])
@@ -340,7 +344,9 @@ private func makeTaskPollTool(
             )
             var seen: Set<String> = []
             let requestedIds = try taskStringArray(
-                object["task_ids"], field: "task_ids", toolName: "task_poll"
+                object["task_ids"],
+                field: "task_ids",
+                toolName: "task_poll"
             ).filter { seen.insert($0).inserted }
             let timeoutSeconds = try taskTimeout(object["timeout_seconds"])
             let taskIds: [String]

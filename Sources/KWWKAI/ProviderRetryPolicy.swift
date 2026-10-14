@@ -43,8 +43,10 @@ public struct ProviderRetryPolicy: Sendable {
 
     /// Retry self-contained throwing requests, including native compaction.
     /// Uses the same classifier, server hints and cancellation as summaries.
-    public func run<T>(cancellation: CancellationHandle? = nil,
-                       operation: () async throws -> T) async throws -> T {
+    public func run<T>(
+        cancellation: CancellationHandle? = nil,
+        operation: () async throws -> T
+    ) async throws -> T {
         for attempt in 0..<maxAttempts {
             try await Self.wait(0, cancellation: cancellation)
             do { return try await operation() }
@@ -58,8 +60,10 @@ public struct ProviderRetryPolicy: Sendable {
 
     /// Self-contained calls (e.g. summaries) have no executed tools or committed
     /// output to replay. Return the last provider failure intact on exhaustion.
-    public func complete(cancellation: CancellationHandle? = nil,
-                         operation: () async throws -> AssistantMessage) async throws -> AssistantMessage {
+    public func complete(
+        cancellation: CancellationHandle? = nil,
+        operation: () async throws -> AssistantMessage
+    ) async throws -> AssistantMessage {
         for attempt in 0..<maxAttempts {
             try await Self.wait(0, cancellation: cancellation)
             let result: AssistantMessage

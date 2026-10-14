@@ -29,17 +29,29 @@ public enum DevinModels {
     /// when discovery returns a reduced roster.
     public static let seedModels: [Model] = [
         Model(
-            id: "swe-1-6-fast", name: "SWE-1.6 Fast", api: "devin-agent", provider: "devin",
-            baseURL: DevinWire.defaultBaseURL, reasoning: true, input: [.text],
+            id: "swe-1-6-fast",
+            name: "SWE-1.6 Fast",
+            api: "devin-agent",
+            provider: "devin",
+            baseURL: DevinWire.defaultBaseURL,
+            reasoning: true,
+            input: [.text],
             cost: ModelCost(input: 0.3, output: 1.5, cacheRead: 0.03, cacheWrite: 0),
-            contextWindow: 200_000, maxTokens: 128_000,
+            contextWindow: 200_000,
+            maxTokens: 128_000,
             compat: parallelToolsCompat()
         ),
         Model(
-            id: "swe-1-6", name: "SWE-1.6", api: "devin-agent", provider: "devin",
-            baseURL: DevinWire.defaultBaseURL, reasoning: true, input: [.text],
+            id: "swe-1-6",
+            name: "SWE-1.6",
+            api: "devin-agent",
+            provider: "devin",
+            baseURL: DevinWire.defaultBaseURL,
+            reasoning: true,
+            input: [.text],
             cost: ModelCost(),
-            contextWindow: 200_000, maxTokens: 128_000,
+            contextWindow: 200_000,
+            maxTokens: 128_000,
             compat: parallelToolsCompat()
         ),
     ]
@@ -72,7 +84,9 @@ public enum DevinModels {
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> [Model] {
         let native = try? await fetchConfigs(
-            metadata: DevinWire.discoveryMetadata(apiKey: apiKey), baseURL: baseURL, client: client
+            metadata: DevinWire.discoveryMetadata(apiKey: apiKey),
+            baseURL: baseURL,
+            client: client
         )
         let nativeModels = native.map { normalize($0, baseURL: baseURL) }
         let seedIds = Set(seedModels.map(\.id))
@@ -80,7 +94,9 @@ public enum DevinModels {
             return withSeed(nativeModels)
         }
         let legacy = try? await fetchConfigs(
-            metadata: DevinWire.legacyWindsurfMetadata(apiKey: apiKey), baseURL: baseURL, client: client
+            metadata: DevinWire.legacyWindsurfMetadata(apiKey: apiKey),
+            baseURL: baseURL,
+            client: client
         )
         let legacyModels = legacy.map { normalize($0, baseURL: baseURL) }
         let chosen: [Model]?
@@ -94,11 +110,15 @@ public enum DevinModels {
     }
 
     static func fetchConfigs(
-        metadata: DevinProto.Metadata, baseURL: String, client: HTTPClient
+        metadata: DevinProto.Metadata,
+        baseURL: String,
+        client: HTTPClient
     ) async throws -> [DevinProto.ClientModelConfig] {
         let url = URL(string: DevinAgentProvider.trimSlashes(baseURL) + DevinWire.getCliModelConfigsPath)!
         let (response, body) = try await client.request(
-            url: url, method: "POST", headers: DevinWire.unaryHeaders,
+            url: url,
+            method: "POST",
+            headers: DevinWire.unaryHeaders,
             body: DevinProto.encodeGetCliModelConfigsRequest(metadata: metadata)
         )
         guard response.statusCode < 400 else {
@@ -121,7 +141,10 @@ public enum DevinModels {
     /// internal configs and Fusion pairings, collapse effort families
     /// (server-declared first, then the reviewed static table), and apply
     /// list-price fallbacks for plan-included models.
-    static func normalize(_ configs: [DevinProto.ClientModelConfig], baseURL: String = DevinWire.defaultBaseURL) -> [Model] {
+    static func normalize(
+        _ configs: [DevinProto.ClientModelConfig],
+        baseURL: String = DevinWire.defaultBaseURL
+    ) -> [Model] {
         var specs: [Model] = []
         var seen = Set<String>()
         var lanes: [String: FamilyLane] = [:]
@@ -155,7 +178,10 @@ public enum DevinModels {
     }
 
     static func modelSpec(
-        _ config: DevinProto.ClientModelConfig, uid: String, baseURL: String, isAssignRouter: Bool
+        _ config: DevinProto.ClientModelConfig,
+        uid: String,
+        baseURL: String,
+        isAssignRouter: Bool
     ) -> Model {
         let features = config.modelInfo?.modelFeatures
         let supportsImages = (features?.supportsImages ?? config.supportsImages) && !imageBlindUids.contains(uid)
@@ -186,8 +212,10 @@ public enum DevinModels {
         if let features = config.modelInfo?.modelFeatures { return features.supportsThinking }
         let label = config.label
         if label.range(of: #"\bno thinking\b"#, options: [.regularExpression, .caseInsensitive]) != nil { return false }
-        return label.range(of: "think|thinking|minimal|high|medium|low|xhigh|max|reasoning",
-                           options: [.regularExpression, .caseInsensitive]) != nil
+        return label.range(
+            of: "think|thinking|minimal|high|medium|low|xhigh|max|reasoning",
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
     }
 
     /// Per-million-token rates from the config's cost dimensions. A
@@ -287,7 +315,9 @@ public enum DevinModels {
 
         for family in families {
             // Already collapsed (logical row present, no raw members) passes through.
-            let present = family.members.filter { byId[$0] != nil && !($0 == family.id && byId[$0]?.thinkingLevelMap != nil) }
+            let present = family.members.filter {
+                byId[$0] != nil && !($0 == family.id && byId[$0]?.thinkingLevelMap != nil)
+            }
             guard !present.isEmpty else { continue }
             let presentSet = Set(present)
             let defaultUid = family.defaultMember.flatMap { presentSet.contains($0) ? $0 : nil } ?? present[0]
@@ -369,8 +399,10 @@ public enum DevinModels {
     /// 1M context become separate lanes (`-fast` / `-1m`); effort is the
     /// lane's only routing axis.
     static func collectFamilyLane(
-        _ lanes: inout [String: FamilyLane], order: inout [String],
-        config: DevinProto.ClientModelConfig, uid: String
+        _ lanes: inout [String: FamilyLane],
+        order: inout [String],
+        config: DevinProto.ClientModelConfig,
+        uid: String
     ) {
         guard let metadata = config.modelFamilyMetadata else { return }
         let label = metadata.label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -418,7 +450,13 @@ public enum DevinModels {
         if let def = lane.defaultMember {
             members = [def] + members.filter { $0 != def }
         }
-        return Family(id: lane.id, name: lane.name, members: members, routing: lane.routing, defaultMember: lane.defaultMember)
+        return Family(
+            id: lane.id,
+            name: lane.name,
+            members: members,
+            routing: lane.routing,
+            defaultMember: lane.defaultMember
+        )
     }
 
     // MARK: Reviewed static families (oh-my-pi `_collapse.kdl`, provider "devin")

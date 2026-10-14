@@ -341,11 +341,18 @@ struct QoderCatalogTests {
                 client: QoderStubClient([:])
             )
         }
-        let client = QoderStubClient(["/algo/api/v2/model/list": [.init(status: 401, body: #"{"message":"token expired"}"#)]])
+        let client = QoderStubClient([
+            "/algo/api/v2/model/list": [.init(status: 401, body: #"{"message":"token expired"}"#)]
+        ])
         do {
             _ = try await QoderModels.fetch(
                 site: .global,
-                credentials: OAuthCredentials(access: "jt", refresh: "rt", expires: .max, extras: ["uid": "u", "machineId": "m"]),
+                credentials: OAuthCredentials(
+                    access: "jt",
+                    refresh: "rt",
+                    expires: .max,
+                    extras: ["uid": "u", "machineId": "m"]
+                ),
                 client: client
             )
             Issue.record("a refused listing answered")

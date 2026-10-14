@@ -107,7 +107,10 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
 
         do {
             let (response, stream) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: body,
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: body,
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
@@ -158,8 +161,11 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                case .string(let reason) = feedback["blockReason"], reason != "BLOCK_REASON_UNSPECIFIED" {
                 var message = state.snapshot()
                 message.stopReason = .error
-                message.failure = ProviderFailure(message: "Gemini prompt blocked: \(reason)",
-                                                   providerCode: "refusal", rawStopReason: reason)
+                message.failure = ProviderFailure(
+                    message: "Gemini prompt blocked: \(reason)",
+                    providerCode: "refusal",
+                    rawStopReason: reason
+                )
                 message.errorMessage = message.failure?.message
                 out.push(.error(reason: .error, error: message))
                 out.end(message)
@@ -314,7 +320,10 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             // it with the "ended without" wording the retry policy replays.
             // A reply cut at its length or refused keeps its own reason, and
             // so does one that wrote text before UNEXPECTED_TOOL_CALL.
-            let failure = ProviderFailure(message: "Gemini stream ended without content", rawStopReason: rawFinishReason)
+            let failure = ProviderFailure(
+                message: "Gemini stream ended without content",
+                rawStopReason: rawFinishReason
+            )
             final.stopReason = .error
             final.errorMessage = failure.message
             final.failure = failure
@@ -327,7 +336,9 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
     // MARK: - Encoding
 
     private static func encodeBody(
-        model: Model, context: Context, options: StreamOptions?
+        model: Model,
+        context: Context,
+        options: StreamOptions?
     ) throws -> Data {
         var context = context
         context.messages = TransformMessages.normalize(context.messages, model: model)
@@ -373,7 +384,9 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                 // Gemini 3.x and Gemma 4 take a string `thinkingLevel`
                 // (MINIMAL/LOW/MEDIUM/HIGH) rather than an integer budget.
                 thinking["thinkingLevel"] = catalogThinkingLevel(
-                    geminiThinkingLevel(reasoning, modelId: id), model: model)
+                    geminiThinkingLevel(reasoning, modelId: id),
+                    model: model
+                )
             } else {
                 // Gemini 2.x integer budget. Always emit (per-level table for
                 // 2.5 models, -1 dynamic fallback otherwise) to match pi's

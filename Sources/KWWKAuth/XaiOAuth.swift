@@ -23,7 +23,8 @@ public struct XaiOAuthProvider: OAuthProvider {
     }
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         let form = OAuth.urlEncodedForm([
             "grant_type": "refresh_token",
@@ -31,9 +32,11 @@ public struct XaiOAuthProvider: OAuthProvider {
             "client_id": clientID,
         ])
         let json = try await OAuthRefreshError.postForToken(
-            provider: id, url: tokenURL,
+            provider: id,
+            url: tokenURL,
             headers: ["content-type": "application/x-www-form-urlencoded", "accept": "application/json"],
-            body: Data(form.utf8), client: client
+            body: Data(form.utf8),
+            client: client
         )
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return OAuthCredentials(

@@ -259,7 +259,10 @@ public enum OAuthLogin {
         let state = UUID().uuidString.lowercased()
         // Devin registered the numeric loopback host, not `localhost`.
         let server = try await openLoopback(
-            callbacks, host: DevinOAuth.callbackHost, port: port, path: DevinOAuth.callbackPath
+            callbacks,
+            host: DevinOAuth.callbackHost,
+            port: port,
+            path: DevinOAuth.callbackPath
         )
         defer { server.stop() }
         let redirectURI = server.redirectURI
@@ -324,7 +327,8 @@ public enum OAuthLogin {
     ) async throws -> OAuth.TokenResponse {
         let data = try JSONSerialization.data(withJSONObject: body)
         let (response, responseBody) = try await client.request(
-            url: url, method: "POST",
+            url: url,
+            method: "POST",
             headers: ["content-type": "application/json", "accept": "application/json"],
             body: data
         )

@@ -32,7 +32,9 @@ enum DeepSeekToolTurnReasoning {
     static let noReasoning = " "
 
     private static let anthropicModel = try! NSRegularExpression(
-        pattern: #"(?:^|[/.:-])claude-"#, options: [.caseInsensitive])
+        pattern: #"(?:^|[/.:-])claude-"#,
+        options: [.caseInsensitive]
+    )
 
     /// Whether `model` is a DeepSeek model, served on any host or one whose
     /// host is DeepSeek's.

@@ -242,7 +242,11 @@ struct CompactionRecoveryTests {
         let model = faux.getModel()
         let router = RecoveryStreamRouter(mode: .kimiPlanRefusalThenSucceed)
         let agent = Agent(options: AgentOptions(
-            initialState: AgentInitialState(systemPrompt: "main-system", model: model, messages: shortHistory(model: model)),
+            initialState: AgentInitialState(
+                systemPrompt: "main-system",
+                model: model,
+                messages: shortHistory(model: model)
+            ),
             streamFn: recoveryStream(router: router)
         ))
 

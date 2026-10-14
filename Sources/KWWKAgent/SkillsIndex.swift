@@ -57,21 +57,30 @@ enum SkillsIndex {
                 try validate(entry.path)
                 guard !entry.name.isEmpty, !entry.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { throw Invalid.format }
-                return Skill(name: entry.name, description: entry.description,
-                             path: root.appendingPathComponent(entry.path).path,
-                             body: entry.body, disableModelInvocation: entry.disableModelInvocation)
+                return Skill(
+                    name: entry.name,
+                    description: entry.description,
+                    path: root.appendingPathComponent(entry.path).path,
+                    body: entry.body,
+                    disableModelInvocation: entry.disableModelInvocation
+                )
             }
             let diagnostics = try doc.diagnostics.map { entry in
                 try validate(entry.path)
                 guard let code = SkillDiagnostic.Code(rawValue: entry.code) else { throw Invalid.format }
-                return SkillDiagnostic(code: code, message: entry.message,
-                                       path: root.appendingPathComponent(entry.path).path)
+                return SkillDiagnostic(
+                    code: code,
+                    message: entry.message,
+                    path: root.appendingPathComponent(entry.path).path
+                )
             }
             return (skills, diagnostics)
         } catch {
-            return (nil, [.init(code: .invalidMetadata,
-                               message: "Invalid or unsupported skills.index; falling back to directory scanning",
-                               path: url.path)])
+            return (nil, [.init(
+                code: .invalidMetadata,
+                message: "Invalid or unsupported skills.index; falling back to directory scanning",
+                path: url.path
+            )])
         }
     }
 }
@@ -85,14 +94,25 @@ extension Skills {
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue
         else { throw SkillsIndex.Invalid.path }
         let result = load(directories: [root.path], useIndex: false)
-        let doc = try SkillsIndex.Document(version: 1, skills: result.skills.map {
-            SkillsIndex.Entry(name: $0.name, description: $0.description,
-                              path: try SkillsIndex.relative($0.path, root: root), body: $0.body,
-                              disableModelInvocation: $0.disableModelInvocation)
-        }, diagnostics: result.diagnostics.map {
-            SkillsIndex.Diagnostic(code: $0.code.rawValue, message: $0.message,
-                                   path: try SkillsIndex.relative($0.path, root: root))
-        })
+        let doc = try SkillsIndex.Document(
+            version: 1,
+            skills: result.skills.map {
+                SkillsIndex.Entry(
+                    name: $0.name,
+                    description: $0.description,
+                    path: try SkillsIndex.relative($0.path, root: root),
+                    body: $0.body,
+                    disableModelInvocation: $0.disableModelInvocation
+                )
+            },
+            diagnostics: result.diagnostics.map {
+                SkillsIndex.Diagnostic(
+                    code: $0.code.rawValue,
+                    message: $0.message,
+                    path: try SkillsIndex.relative($0.path, root: root)
+                )
+            }
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(doc)

@@ -21,11 +21,20 @@ struct SessionContextLoadTests {
         try await store.setTitle(id: id, cwd: cwd, title: "before the marker")
         try await store.append(id: id, cwd: cwd, messages: [user("c"), assistant("d"), user("e")])
         try await store.appendCompaction(
-            id: id, cwd: cwd, replacementMessages: [user("summary 1")], messagesCompacted: 5, reason: .compact)
+            id: id,
+            cwd: cwd,
+            replacementMessages: [user("summary 1")],
+            messagesCompacted: 5,
+            reason: .compact
+        )
         try await store.append(id: id, cwd: cwd, messages: [assistant("f"), user("g"), assistant("h")])
         try await store.appendCompaction(
-            id: id, cwd: cwd, replacementMessages: [user("summary 1"), assistant("f")],
-            messagesCompacted: 2, reason: .rewind)
+            id: id,
+            cwd: cwd,
+            replacementMessages: [user("summary 1"), assistant("f")],
+            messagesCompacted: 2,
+            reason: .rewind
+        )
         try await store.appendMeta(id: id, provider: "p2")
         try await store.append(id: id, cwd: cwd, messages: [user("i"), assistant("j")])
 
@@ -61,7 +70,12 @@ struct SessionContextLoadTests {
         let id = "legacy"
         try await store.append(id: id, cwd: "/w", messages: [user("a"), assistant("b"), user("c")])
         try await store.appendCompaction(
-            id: id, cwd: "/w", replacementMessages: [user("a")], messagesCompacted: 2, reason: .rewind)
+            id: id,
+            cwd: "/w",
+            replacementMessages: [user("a")],
+            messagesCompacted: 2,
+            reason: .rewind
+        )
         try await store.append(id: id, cwd: "/w", message: assistant("d"))
         let file = dir.appendingPathComponent("\(id).jsonl")
         let raw = try String(contentsOf: file, encoding: .utf8)
@@ -81,7 +95,12 @@ struct SessionContextLoadTests {
         let id = "lookalike"
         try await store.append(id: id, cwd: "/w", message: user("a"))
         try await store.appendCompaction(
-            id: id, cwd: "/w", replacementMessages: [user("summary")], messagesCompacted: 1, reason: .compact)
+            id: id,
+            cwd: "/w",
+            replacementMessages: [user("summary")],
+            messagesCompacted: 1,
+            reason: .compact
+        )
         try await store.append(id: id, cwd: "/w", messages: [
             user(#"{"type":"compaction"} and "type":"meta" as plain text"#),
             assistant("ok"),
@@ -101,7 +120,12 @@ struct SessionContextLoadTests {
         try await store.append(id: id, cwd: "/w", message: user("a"))
         try appendRaw(#"{"message":"not-an-object","timestamp":1,"type":"message"}"#, id: id, dir: dir)
         try await store.appendCompaction(
-            id: id, cwd: "/w", replacementMessages: [user("summary")], messagesCompacted: 2, reason: .compact)
+            id: id,
+            cwd: "/w",
+            replacementMessages: [user("summary")],
+            messagesCompacted: 2,
+            reason: .compact
+        )
         try await store.append(id: id, cwd: "/w", message: assistant("b"))
 
         let context = try await store.load(id: id, scope: .context)
@@ -118,7 +142,12 @@ struct SessionContextLoadTests {
         let id = "new-corruption"
         try await store.append(id: id, cwd: "/w", message: user("a"))
         try await store.appendCompaction(
-            id: id, cwd: "/w", replacementMessages: [user("summary")], messagesCompacted: 1, reason: .compact)
+            id: id,
+            cwd: "/w",
+            replacementMessages: [user("summary")],
+            messagesCompacted: 1,
+            reason: .compact
+        )
         try appendRaw(#"{"message":"not-an-object","timestamp":1,"type":"message"}"#, id: id, dir: dir)
 
         let url = dir.appendingPathComponent("\(id).jsonl")
@@ -138,7 +167,12 @@ struct SessionContextLoadTests {
         let id = "resume"
         try await store.append(id: id, cwd: "/w", messages: [user("a"), assistant("b")])
         try await store.appendCompaction(
-            id: id, cwd: "/w", replacementMessages: [user("summary")], messagesCompacted: 2, reason: .compact)
+            id: id,
+            cwd: "/w",
+            replacementMessages: [user("summary")],
+            messagesCompacted: 2,
+            reason: .compact
+        )
         try await store.append(id: id, cwd: "/w", message: user("c"))
 
         let resolved = try await store.resolveResume(.id(id), cwd: "/w", scope: .context)

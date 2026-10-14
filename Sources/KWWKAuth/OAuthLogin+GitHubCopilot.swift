@@ -52,7 +52,10 @@ extension OAuthLogin {
         callbacks.onProgress("enter code in your browser: \(userCode)")
         return try await present(verifyURL, callbacks: callbacks) {
             try await pollGitHubCopilot(
-                clientID: clientID, deviceCode: deviceCode, interval: interval, client: client,
+                clientID: clientID,
+                deviceCode: deviceCode,
+                interval: interval,
+                client: client,
                 pollSleep: pollSleep
             )
         }
@@ -175,7 +178,10 @@ extension OAuthLogin {
             headers["x-interaction-type"] = "chat-policy"
             do {
                 let (response, _) = try await client.request(
-                    url: url, method: "POST", headers: headers, body: body
+                    url: url,
+                    method: "POST",
+                    headers: headers,
+                    body: body
                 )
                 if response.statusCode >= 400 {
                     callbacks.onProgress("  · \(id): policy \(response.statusCode) (skipped)")

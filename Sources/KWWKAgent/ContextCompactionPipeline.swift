@@ -209,11 +209,16 @@ enum ContextCompactionPipeline {
               let native = recap.nativeCompaction, !native.canReplay(with: request.contextModel),
               let fallback = native.fallbackMessages, !fallback.isEmpty else { return nil }
         let tail = Array(request.context.messages.dropFirst())
-        return CompactionPlan(previousSummary: nil, previousTurnPrefixSummary: nil,
+        return CompactionPlan(
+            previousSummary: nil,
+            previousTurnPrefixSummary: nil,
             previousRecapForFacts: CompactionPlanner.summaryText(from: .user(recap)),
-            messagesToSummarize: [], turnPrefixToSummarize: [], recentTail: tail,
+            messagesToSummarize: [],
+            turnPrefixToSummarize: [],
+            recentTail: tail,
             firstKeptMessageIndex: 1,
-            estimatedRecentTokens: tail.reduce(0) { $0 + ContextTokenEstimator.estimate(message: $1) })
+            estimatedRecentTokens: tail.reduce(0) { $0 + ContextTokenEstimator.estimate(message: $1) }
+        )
     }
 
     private static func summarizeHistory(
@@ -240,7 +245,9 @@ enum ContextCompactionPipeline {
     }
 
     private static func nativeReplacement(
-        plan: CompactionPlan, request: ContextCompactionPipelineRequest, recapTokenBudget: Int
+        plan: CompactionPlan,
+        request: ContextCompactionPipelineRequest,
+        recapTokenBudget: Int
     ) async throws -> AgentContextCompactionResult? {
         guard request.config.useNativeCompaction,
               request.contextModel.id == request.summaryModel.id,
@@ -265,8 +272,11 @@ enum ContextCompactionPipeline {
         if let transform = request.transformContext { messages = await transform(messages, request.cancellation) }
         if let convert = request.convertToLlm { messages = await convert(messages) }
         messages = messages.map(redactedForPersistence)
-        let context = Context(systemPrompt: request.context.systemPrompt, messages: messages,
-                              tools: request.context.tools.map { $0.toKWWKAITool() })
+        let context = Context(
+            systemPrompt: request.context.systemPrompt,
+            messages: messages,
+            tools: request.context.tools.map { $0.toKWWKAITool() }
+        )
         let instructions = """
         Summarize the earlier conversation for continuation. Preserve the user's goals,
         constraints, decisions, progress, exact file paths, errors and outstanding work.
@@ -275,21 +285,43 @@ enum ContextCompactionPipeline {
         The final \(plan.recentTail.count) transcript records are retained verbatim after
         this summary; summarize only the history preceding that retained tail.
         """
-        let maxTokens = anthropic ? min(recapTokenBudget, CompactionSummaryGenerator.outputTokenReserve(
-            model: model, config: request.config)) : nil
-        let options = StreamOptions(maxTokens: maxTokens, apiKey: auth?.token, sessionId: request.sessionId,
-                                    metadata: auth?.metadata, resolvedAuth: auth,
-                                    reasoning: request.summaryReasoning, cancellation: request.cancellation)
+        let maxTokens = anthropic
+            ? min(
+                recapTokenBudget,
+                CompactionSummaryGenerator.outputTokenReserve(
+                    model: model,
+                    config: request.config
+                )
+            )
+            : nil
+        let options = StreamOptions(
+            maxTokens: maxTokens,
+            apiKey: auth?.token,
+            sessionId: request.sessionId,
+            metadata: auth?.metadata,
+            resolvedAuth: auth,
+            reasoning: request.summaryReasoning,
+            cancellation: request.cancellation
+        )
         guard let native = try await request.config.summaryRetryPolicy.run(cancellation: request.cancellation,
             operation: { try await compact(model, context, instructions, options) }) else { return nil }
-        var replacement = await makeReplacement(plan: plan, historySummary: native.summary,
-            turnPrefixSummary: nil, recapTokenBudget: recapTokenBudget, request: request)
+        var replacement = await makeReplacement(
+            plan: plan,
+            historySummary: native.summary,
+            turnPrefixSummary: nil,
+            recapTokenBudget: recapTokenBudget,
+            request: request
+        )
         if case .user(var recap) = replacement.messages[0] {
             recap.nativeCompaction = native.payload
             replacement.messages[0] = .user(recap)
         }
-        let result = makeResult(replacement: replacement.messages, plan: plan,
-            hasRunningTasksLedger: replacement.hasRunningTasksLedger, request: request)
+        let result = makeResult(
+            replacement: replacement.messages,
+            plan: plan,
+            hasRunningTasksLedger: replacement.hasRunningTasksLedger,
+            request: request
+        )
         if let target = request.targetTokens, let after = result.tokensAfter, after > target {
             // A successful endpoint response is not necessarily small enough.
             // Let the existing local planner meet the required input budget.
@@ -385,7 +417,9 @@ enum ContextCompactionPipeline {
                 // catalog allowance. Only the failed chunk is replayed; keep
                 // the accumulator from all successfully summarized chunks.
                 let sent = CompactionTranscriptSerializer.serialize(
-                    chunk, limits: summaryConfig.transcriptLimits, maxTokens: transcriptBudget
+                    chunk,
+                    limits: summaryConfig.transcriptLimits,
+                    maxTokens: transcriptBudget
                 )
                 let reduced = min(transcriptBudget, ContextTokenEstimator.estimate(text: sent)) / 2
                 guard reduced >= minimumBudget else { throw error }

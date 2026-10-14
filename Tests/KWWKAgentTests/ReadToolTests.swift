@@ -89,9 +89,11 @@ struct ReadToolTests {
         try write(lines, to: file)
 
         let tool = createReadTool(cwd: dir.path)
-        let result = try await tool.execute("call-4",
+        let result = try await tool.execute(
+            "call-4",
             ["path": .string(file.path), "offset": 41, "limit": 20],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(!output.contains("Line 40"))
@@ -113,7 +115,8 @@ struct ReadToolTests {
             _ = try await tool.execute(
                 "call-5",
                 ["path": .string(file.path), "offset": 100],
-                nil, nil
+                nil,
+                nil
             )
         }
     }
@@ -213,7 +216,8 @@ struct WriteToolTests {
         let result = try await tool.execute(
             "call-1",
             ["path": .string(file.path), "content": .string("Test content")],
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result).contains("Successfully wrote"))
         let written = try String(contentsOf: file, encoding: .utf8)
@@ -230,7 +234,8 @@ struct WriteToolTests {
         let result = try await tool.execute(
             "call-2",
             ["path": .string(file.path), "content": .string("hi")],
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result).contains("Successfully wrote"))
         #expect(FileManager.default.fileExists(atPath: file.path))
@@ -248,7 +253,8 @@ struct WriteToolTests {
         _ = try await tool.execute(
             "call-outside",
             ["path": .string(outside.path), "content": .string("outside")],
-            nil, nil
+            nil,
+            nil
         )
         #expect(try String(contentsOf: outside, encoding: .utf8) == "outside")
     }
@@ -310,7 +316,8 @@ struct EditToolTests {
             _ = try await tool.execute(
                 "call-2",
                 .object(["path": .string(file.path), "edits": edits]),
-                nil, nil
+                nil,
+                nil
             )
         }
     }
@@ -329,7 +336,8 @@ struct EditToolTests {
             _ = try await tool.execute(
                 "call-missing-target",
                 .object(["path": .string(missing.path), "edits": edits]),
-                nil, nil
+                nil,
+                nil
             )
             Issue.record("expected missing target to throw")
         } catch {
@@ -351,7 +359,8 @@ struct EditToolTests {
             _ = try await tool.execute(
                 "call-directory-target",
                 .object(["path": .string(dir.path), "edits": edits]),
-                nil, nil
+                nil,
+                nil
             )
             Issue.record("expected directory target to throw")
         } catch {
@@ -378,7 +387,8 @@ struct EditToolTests {
             _ = try await tool.execute(
                 "call-permission-target",
                 .object(["path": .string(file.path), "edits": edits]),
-                nil, nil
+                nil,
+                nil
             )
             Issue.record("expected permission target to throw")
         } catch {
@@ -403,7 +413,8 @@ struct EditToolTests {
         _ = try await tool.execute(
             "call-outside",
             .object(["path": .string(outside.path), "edits": edits]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(try String(contentsOf: outside, encoding: .utf8) == "changed")
     }
@@ -423,7 +434,8 @@ struct EditToolTests {
             _ = try await tool.execute(
                 "call-3",
                 .object(["path": .string(file.path), "edits": edits]),
-                nil, nil
+                nil,
+                nil
             )
         }
     }
@@ -443,7 +455,8 @@ struct EditToolTests {
         let result = try await tool.execute(
             "call-4",
             .object(["path": .string(file.path), "edits": edits]),
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result).contains("Successfully replaced 2 block(s)"))
         let after = try String(contentsOf: file, encoding: .utf8)
@@ -467,7 +480,8 @@ struct EditToolTests {
         let result = try await tool.execute(
             "call-large-gap",
             .object(["path": .string(file.path), "edits": edits]),
-            nil, nil
+            nil,
+            nil
         )
 
         guard case .object(let details) = result.details ?? .null,
@@ -540,7 +554,8 @@ struct BashToolTests {
         let result = try await tool.execute(
             "call-1",
             ["command": .string("echo hello-kw")],
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result).contains("hello-kw"))
     }
@@ -556,7 +571,8 @@ struct BashToolTests {
         let result = try await tool.execute(
             "call-env",
             ["command": .string("printf '<%s>' \"$HOME\"")],
-            nil, nil
+            nil,
+            nil
         )
         #expect(textOutput(result) == "<>")
     }
@@ -573,7 +589,8 @@ struct BashToolTests {
             _ = try await tool.execute(
                 "call-2",
                 ["command": .string("exit 42")],
-                nil, nil
+                nil,
+                nil
             )
         }
     }
@@ -601,7 +618,8 @@ struct BashToolTests {
             _ = try await tool.execute(
                 "call-3",
                 ["command": .string("touch started && sleep 30")],
-                cancel, nil
+                cancel,
+                nil
             )
         }
     }
@@ -620,7 +638,8 @@ struct GrepToolTests {
         let result = try await tool.execute(
             "call-1",
             ["pattern": .string("needle"), "path": .string("")],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("needle one"))
@@ -636,7 +655,10 @@ struct GrepToolTests {
         // nothing matches (the bug Glob.canonicalDirectoryPath fixes).
         let dir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try FileManager.default.createDirectory(at: dir.appendingPathComponent("src/nested"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("src/nested"),
+            withIntermediateDirectories: true
+        )
         try write("needle direct", to: dir.appendingPathComponent("src/direct.swift"))
         try write("needle buried", to: dir.appendingPathComponent("src/nested/buried.swift"))
         try write("needle outside", to: dir.appendingPathComponent("top.swift"))
@@ -649,7 +671,8 @@ struct GrepToolTests {
                 "path": .string(dir.path),
                 "glob": .string("src/*.swift"),
             ],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("needle direct"))
@@ -665,7 +688,10 @@ struct FindToolTests {
     func findsGlob() async throws {
         let dir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("sub"),
+            withIntermediateDirectories: true
+        )
         try write("x", to: dir.appendingPathComponent("one.swift"))
         try write("x", to: dir.appendingPathComponent("sub/two.swift"))
         try write("x", to: dir.appendingPathComponent("three.txt"))
@@ -674,7 +700,8 @@ struct FindToolTests {
         let result = try await tool.execute(
             "call-1",
             ["pattern": .string("**/*.swift"), "path": .string("")],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("one.swift"))
@@ -686,7 +713,10 @@ struct FindToolTests {
     func slashlessPatternRecurses() async throws {
         let dir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub/deep"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("sub/deep"),
+            withIntermediateDirectories: true
+        )
         try write("x", to: dir.appendingPathComponent("top.swift"))
         try write("x", to: dir.appendingPathComponent("sub/mid.swift"))
         try write("x", to: dir.appendingPathComponent("sub/deep/low.swift"))
@@ -696,7 +726,8 @@ struct FindToolTests {
         let result = try await tool.execute(
             "call-1",
             ["pattern": .string("*.swift"), "path": .string(dir.path)],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         // Every .swift, regardless of depth — not just the top-level one.
@@ -710,7 +741,10 @@ struct FindToolTests {
     func slashPatternScopesToDirectory() async throws {
         let dir = makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try FileManager.default.createDirectory(at: dir.appendingPathComponent("src/nested"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("src/nested"),
+            withIntermediateDirectories: true
+        )
         try write("x", to: dir.appendingPathComponent("src/direct.swift"))
         try write("x", to: dir.appendingPathComponent("src/nested/buried.swift"))
 
@@ -718,7 +752,8 @@ struct FindToolTests {
         let result = try await tool.execute(
             "call-1",
             ["pattern": .string("src/*.swift"), "path": .string(dir.path)],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("direct.swift"))
@@ -740,7 +775,8 @@ struct LSToolTests {
         let result = try await tool.execute(
             "call-1",
             ["path": .string("")],
-            nil, nil
+            nil,
+            nil
         )
         let output = textOutput(result)
         #expect(output.contains("a.txt"))
@@ -759,7 +795,8 @@ struct LSToolTests {
         let result = try await tool.execute(
             "call-absolute",
             ["path": .string(outsideDir.path)],
-            nil, nil
+            nil,
+            nil
         )
 
         #expect(textOutput(result).contains("outside.txt"))

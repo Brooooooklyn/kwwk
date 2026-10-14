@@ -165,8 +165,12 @@ struct AskResultTests {
     @Test("multi answer with checked options AND custom input reports both")
     func multiWithCustomKeepsSelections() {
         let answer = AskAnswer(
-            id: "q", question: "Which?", options: [], multi: true,
-            selectedOptions: ["A", "B"], customInput: "also this"
+            id: "q",
+            question: "Which?",
+            options: [],
+            multi: true,
+            selectedOptions: ["A", "B"],
+            customInput: "also this"
         )
         #expect(Ask.answerLine(answer) == "q: [A, B] + \"also this\"")
         #expect(Ask.displayLine(answer) == "Which? → A, B + \"also this\"")
@@ -429,8 +433,12 @@ struct AskModalTests {
 
         let wizard = OutcomeLog()
         let wizardModal = makeModal(
-            prompt(singleQuestion(), allowBack: true, allowForward: true,
-                   previousSelection: ["A"]),
+            prompt(
+                singleQuestion(),
+                allowBack: true,
+                allowForward: true,
+                previousSelection: ["A"]
+            ),
             onComplete: wizard.callback
         )
         wizardModal.left()
@@ -457,8 +465,12 @@ struct AskModalTests {
     func forwardKeepsPrevious() {
         let log = OutcomeLog()
         let modal = makeModal(
-            prompt(singleQuestion(), allowBack: false, allowForward: true,
-                   previousSelection: ["B"]),
+            prompt(
+                singleQuestion(),
+                allowBack: false,
+                allowForward: true,
+                previousSelection: ["B"]
+            ),
             onComplete: log.callback
         )
         modal.right()
@@ -484,12 +496,14 @@ struct AskModalTests {
     func renderLines() {
         let log = OutcomeLog()
         let question = AskQuestion(
-            id: "q", question: "Which auth?",
+            id: "q",
+            question: "Which auth?",
             options: [
                 AskOption(label: "JWT", description: "Bearer tokens"),
                 AskOption(label: "Sessions", description: nil),
             ],
-            multi: false, recommended: 0
+            multi: false,
+            recommended: 0
         )
         let modal = makeModal(prompt(question), onComplete: log.callback)
         let lines = modal.render(maxRows: 20, width: 80)
@@ -510,8 +524,11 @@ struct AskModalTests {
             )
         }
         let question = AskQuestion(
-            id: "q", question: "超长压力测试：如果有超级多选项，列表应当在窗口内滚动而不是撑爆终端?",
-            options: options, multi: true, recommended: 7
+            id: "q",
+            question: "超长压力测试：如果有超级多选项，列表应当在窗口内滚动而不是撑爆终端?",
+            options: options,
+            multi: true,
+            recommended: 7
         )
         let width = 60
         let maxRows = 20
@@ -546,12 +563,14 @@ struct AskModalTests {
     func overTallEntryClamps() {
         let log = OutcomeLog()
         let question = AskQuestion(
-            id: "q", question: "Q?",
+            id: "q",
+            question: "Q?",
             options: [
                 AskOption(label: "Small", description: "short"),
                 AskOption(label: "Huge", description: String(repeating: "很长的描述内容", count: 80)),
             ],
-            multi: false, recommended: nil
+            multi: false,
+            recommended: nil
         )
         let width = 40
         let maxRows = 12

@@ -18,19 +18,33 @@ struct LiveNativeCompactionTests {
                     let model = registered.model
                     let session = UUID().uuidString
                     let auth = try await registered.authResolver?(model, session)
-                    let options = StreamOptions(maxTokens: id == "anthropic" ? 2048 : nil,
-                        transport: .sse, sessionId: session, resolvedAuth: auth)
-                    let filler = String(repeating:
-                        "This is synthetic historical context for a compaction smoke test; it contains no private project data.\n",
-                        count: id == "anthropic" ? 3200 : 100)
+                    let options = StreamOptions(
+                        maxTokens: id == "anthropic" ? 2048 : nil,
+                        transport: .sse,
+                        sessionId: session,
+                        resolvedAuth: auth
+                    )
+                    let filler = String(
+                        repeating: "This is synthetic historical context for a compaction smoke test; it contains no private project data.\n",
+                        count: id == "anthropic" ? 3200 : 100
+                    )
                     let history: [Message] = [
-                        .user(UserMessage(text: "Remember the verification code from the following notes. These are synthetic notes for testing compaction.")),
-                        .assistant(AssistantMessage(content: [.text(TextContent(text: "The verification code is MAPLE-7319.\n" + filler))],
-                            api: model.api, provider: model.provider, model: model.id)),
+                        .user(UserMessage(
+                            text: "Remember the verification code from the following notes. These are synthetic notes for testing compaction."
+                        )),
+                        .assistant(AssistantMessage(
+                            content: [.text(TextContent(text: "The verification code is MAPLE-7319.\n" + filler))],
+                            api: model.api,
+                            provider: model.provider,
+                            model: model.id
+                        )),
                     ]
-                    guard let result = try await compactNative(model: model,
+                    guard let result = try await compactNative(
+                        model: model,
                         context: Context(systemPrompt: "You are a helpful assistant.", messages: history),
-                        instructions: "Summarize the history briefly, retaining the exact verification code.", options: options) else {
+                        instructions: "Summarize the history briefly, retaining the exact verification code.",
+                        options: options
+                    ) else {
                         Issue.record("Native route unexpectedly unavailable: \(id)"); continue
                     }
                     print("Native smoke provider=\(id) model=\(model.id) compact=success items=\(result.payload.items.count)")
@@ -38,9 +52,17 @@ struct LiveNativeCompactionTests {
                     recap.nativeCompaction = result.payload
                     // Persistence round-trip before replay, as a restored session would do.
                     let restored = try JSONDecoder().decode(UserMessage.self, from: JSONEncoder().encode(recap))
-                    let response = try await stream(model: model, context: Context(
-                        systemPrompt: "You are a helpful assistant.", messages: [.user(restored),
-                            .user(UserMessage(text: "What was the verification code? Reply with only the code."))]), options: options)
+                    let response = try await stream(
+                        model: model,
+                        context: Context(
+                            systemPrompt: "You are a helpful assistant.",
+                            messages: [
+                                .user(restored),
+                                .user(UserMessage(text: "What was the verification code? Reply with only the code."))
+                            ]
+                        ),
+                        options: options
+                    )
                     for await _ in response {}
                     let final = await response.result()
                     await closeProviderSession(sessionId: session)

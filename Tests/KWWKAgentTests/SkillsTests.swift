@@ -113,7 +113,13 @@ struct SkillsTests {
     func availableSkillsBlock() {
         let skills = [
             Skill(name: "greeter", description: "Greets people", path: "/s/greeter/SKILL.md", body: "SECRET BODY"),
-            Skill(name: "hidden", description: "Hidden one", path: "/s/hidden/SKILL.md", body: "x", disableModelInvocation: true),
+            Skill(
+                name: "hidden",
+                description: "Hidden one",
+                path: "/s/hidden/SKILL.md",
+                body: "x",
+                disableModelInvocation: true
+            ),
         ]
         let block = Skills.availableSkillsBlock(skills)
         #expect(block.contains("<available_skills>"))

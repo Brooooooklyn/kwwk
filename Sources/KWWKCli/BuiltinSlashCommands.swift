@@ -349,7 +349,9 @@ private func handleLoginCommand(_ ctx: SlashContext, _ args: String) async {
                 modal.close()
                 Task { @MainActor in
                     await runOAuthLoginSuspended(
-                        providerId: entry.id, ctx: ctx, authResolvers: authResolvers
+                        providerId: entry.id,
+                        ctx: ctx,
+                        authResolvers: authResolvers
                     )
                 }
             case .apiKey(let fields, let extrasKeys):

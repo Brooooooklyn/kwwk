@@ -29,14 +29,16 @@ func registerQoder(
 /// envelope names the user id and the machine id the sign-in made, so the
 /// resolver hands those on beside the (refreshed) chat token.
 private func qoderResolver(
-    manager: OAuthManager, site: QoderSite
+    manager: OAuthManager,
+    site: QoderSite
 ) -> @Sendable (Model, String?) async throws -> ResolvedProviderAuth? {
     { _, _ in
         do {
             let token = try await manager.apiKey(for: site.id)
             let extras = try await manager.credentials(for: site.id)?.extras ?? [:]
             return ResolvedProviderAuth(
-                token: token, scheme: .bearer,
+                token: token,
+                scheme: .bearer,
                 metadata: extras.filter { ["uid", "machineId", "name", "email"].contains($0.key) }
             )
         } catch OAuthError.missing, OAuthError.unknownProvider {

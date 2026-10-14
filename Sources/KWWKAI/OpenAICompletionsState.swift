@@ -200,7 +200,8 @@ final class OpenAICompletionsState: @unchecked Sendable {
         lock.withLock {
             for idx in order {
                 guard case .toolUse(let id, let name, let json, let sig) = blocks[idx], id.isEmpty else { continue }
-                let minted = "call_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24))
+                let minted = "call_"
+                    + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24))
                 blocks[idx] = .toolUse(id: minted, name: name, json: json, thoughtSignature: sig)
             }
         }
@@ -246,7 +247,12 @@ final class OpenAICompletionsState: @unchecked Sendable {
             case .thinking(let th):
                 emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
             case .toolUse(let id, let name, let json, let sig):
-                let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]), thoughtSignature: sig)
+                let call = ToolCall(
+                    id: id,
+                    name: name,
+                    arguments: parseJSONObject(json) ?? .object([:]),
+                    thoughtSignature: sig
+                )
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }
             _ = lock.withLock { endedIndices.insert(idx) }

@@ -214,7 +214,9 @@ public actor OAuthStore {
         guard isPersistent else { return }
         let dir = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -227,7 +229,9 @@ public actor OAuthStore {
         // persist best-effort.
         let tmp = dir.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         guard FileManager.default.createFile(
-            atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]
+            atPath: tmp.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
         ) else {
             throw OAuthError.persistFailed("could not create temp store at \(tmp.path)")
         }

@@ -19,10 +19,14 @@ extension MCPOAuth {
             httpClient: httpClient
         )
         guard let response, response.status != 404 else {
-            throw MCPAuthError.requestFailed("Resource server does not implement OAuth 2.0 Protected Resource Metadata.")
+            throw MCPAuthError.requestFailed(
+                "Resource server does not implement OAuth 2.0 Protected Resource Metadata."
+            )
         }
         guard response.isSuccess else {
-            throw MCPAuthError.requestFailed("HTTP \(response.status) trying to load OAuth protected resource metadata.")
+            throw MCPAuthError.requestFailed(
+                "HTTP \(response.status) trying to load OAuth protected resource metadata."
+            )
         }
         do {
             return try JSONDecoder().decode(MCPProtectedResourceMetadata.self, from: response.body)
@@ -47,7 +51,10 @@ extension MCPOAuth {
         components.path = "/.well-known/\(wellKnown)\(path)"
         components.fragment = nil
         guard let pathAware = components.url else { return nil }
-        let response = try await MCPAuthHTTP.send(MCPAuthHTTPRequest(url: pathAware, headers: headers), using: httpClient)
+        let response = try await MCPAuthHTTP.send(
+            MCPAuthHTTPRequest(url: pathAware, headers: headers),
+            using: httpClient
+        )
         let atRoot = path.isEmpty || path == "/"
         let shouldFallBack = !atRoot && ((!response.isSuccess && response.status < 500) || response.status == 502)
         guard shouldFallBack else { return response }
@@ -107,7 +114,9 @@ extension MCPOAuth {
             do {
                 metadata = try JSONDecoder().decode(MCPAuthorizationServerMetadata.self, from: response.body)
             } catch {
-                throw MCPAuthError.requestFailed("Invalid authorization server metadata from \(url.absoluteString): \(error)")
+                throw MCPAuthError.requestFailed(
+                    "Invalid authorization server metadata from \(url.absoluteString): \(error)"
+                )
             }
             if !skipIssuerValidation {
                 let expected = authorizationServerURL

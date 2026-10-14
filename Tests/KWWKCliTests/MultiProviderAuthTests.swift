@@ -74,13 +74,18 @@ struct MultiProviderAuthTests {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             try await store.set(OAuthCredentials(
-                access: "session", refresh: "ghu_test", expires: .max,
+                access: "session",
+                refresh: "ghu_test",
+                expires: .max,
                 extras: ["endpoint": .string("https://api.business.githubcopilot.com")]
             ), for: "github-copilot")
 
             let resolved = try await registerStored(
-                storeId: "github-copilot", store: store, modelOverride: "claude-sonnet-5",
-                context1m: false, primeToken: false
+                storeId: "github-copilot",
+                store: store,
+                modelOverride: "claude-sonnet-5",
+                context1m: false,
+                primeToken: false
             )
             let model = try #require(resolved?.model)
             let entry = try #require(ModelsCatalog.model(provider: "github-copilot", id: "claude-sonnet-5"))
@@ -107,12 +112,17 @@ struct MultiProviderAuthTests {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             try await store.set(OAuthCredentials(
-                access: "sk-or-test", refresh: "", expires: .max,
+                access: "sk-or-test",
+                refresh: "",
+                expires: .max,
                 extras: ["defaultModel": .string("z-ai/glm-5.2")]
             ), for: "openrouter")
 
             let resolved = try await registerStored(
-                storeId: "openrouter", store: store, modelOverride: nil, context1m: false
+                storeId: "openrouter",
+                store: store,
+                modelOverride: nil,
+                context1m: false
             )
             #expect(resolved?.model.id == "z-ai/glm-5.2")
             #expect(resolved?.model.provider == "openrouter")
@@ -142,18 +152,25 @@ struct MultiProviderAuthTests {
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             // No defaultModel stored → sensible default.
             try await store.set(OAuthCredentials(
-                access: "sk-or-test", refresh: "", expires: .max
+                access: "sk-or-test",
+                refresh: "",
+                expires: .max
             ), for: "openrouter")
             let defaulted = try await registerStored(
-                storeId: "openrouter", store: store, modelOverride: nil, context1m: false
+                storeId: "openrouter",
+                store: store,
+                modelOverride: nil,
+                context1m: false
             )
             #expect(defaulted?.model.id == "anthropic/claude-sonnet-5")
 
             // An uncatalogued override still routes through the OpenRouter
             // endpoint with the OpenRouter thinking format.
             let custom = try await registerStored(
-                storeId: "openrouter", store: store,
-                modelOverride: "somelab/brand-new-model", context1m: false
+                storeId: "openrouter",
+                store: store,
+                modelOverride: "somelab/brand-new-model",
+                context1m: false
             )
             #expect(custom?.model.id == "somelab/brand-new-model")
             #expect(custom?.model.baseURL == "https://openrouter.ai/api/v1")
@@ -174,12 +191,16 @@ struct MultiProviderAuthTests {
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             // Never-expiring credentials so registration skips the token refresh.
             try await store.set(OAuthCredentials(
-                access: "cursor-token", refresh: "cursor-key", expires: .max
+                access: "cursor-token",
+                refresh: "cursor-key",
+                expires: .max
             ), for: "cursor")
 
             let resolved = try await registerStored(
-                storeId: "cursor", store: store,
-                modelOverride: "claude-4.6-opus-high", context1m: false
+                storeId: "cursor",
+                store: store,
+                modelOverride: "claude-4.6-opus-high",
+                context1m: false
             )
             let model = try #require(resolved?.model)
             #expect(model.id == "claude-4.6-opus-high")
@@ -205,11 +226,16 @@ struct MultiProviderAuthTests {
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             // Never-expiring credentials so registration skips the token refresh.
             try await store.set(OAuthCredentials(
-                access: "kimi-token", refresh: "kimi-refresh", expires: .max
+                access: "kimi-token",
+                refresh: "kimi-refresh",
+                expires: .max
             ), for: "kimi-coding")
 
             let resolved = try await registerStored(
-                storeId: "kimi-coding", store: store, modelOverride: nil, context1m: false
+                storeId: "kimi-coding",
+                store: store,
+                modelOverride: nil,
+                context1m: false
             )
             #expect(resolved?.model.id == "kimi-for-coding")
             #expect(resolved?.model.provider == "kimi-coding")
@@ -236,8 +262,10 @@ struct MultiProviderAuthTests {
             // An uncatalogued override still routes through the coding
             // endpoint with the Kimi thinking wire shape.
             let custom = try await registerStored(
-                storeId: "kimi-coding", store: store,
-                modelOverride: "kimi-k9-experimental", context1m: false
+                storeId: "kimi-coding",
+                store: store,
+                modelOverride: "kimi-k9-experimental",
+                context1m: false
             )
             #expect(custom?.model.id == "kimi-k9-experimental")
             #expect(custom?.model.baseURL == "https://api.kimi.com/coding")
@@ -258,11 +286,16 @@ struct MultiProviderAuthTests {
             let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
             // Never-expiring credentials so registration skips the token refresh.
             try await store.set(OAuthCredentials(
-                access: "xai-token", refresh: "xai-refresh", expires: .max
+                access: "xai-token",
+                refresh: "xai-refresh",
+                expires: .max
             ), for: "xai")
 
             let resolved = try await registerStored(
-                storeId: "xai", store: store, modelOverride: nil, context1m: false
+                storeId: "xai",
+                store: store,
+                modelOverride: nil,
+                context1m: false
             )
             #expect(resolved?.model.id == "grok-4.3")
             #expect(resolved?.model.provider == "xai")
@@ -283,8 +316,10 @@ struct MultiProviderAuthTests {
             // An uncatalogued override still routes through api.x.ai with the
             // Grok request-shape quirks.
             let custom = try await registerStored(
-                storeId: "xai", store: store,
-                modelOverride: "grok-9-experimental", context1m: false
+                storeId: "xai",
+                store: store,
+                modelOverride: "grok-9-experimental",
+                context1m: false
             )
             #expect(custom?.model.id == "grok-9-experimental")
             #expect(custom?.model.baseURL == "https://api.x.ai/v1")
@@ -306,11 +341,16 @@ struct MultiProviderAuthTests {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let store = try OAuthStore(url: dir.appendingPathComponent("oauth.json"))
                 try await store.set(OAuthCredentials(
-                    access: "zai-key", refresh: "", expires: .max
+                    access: "zai-key",
+                    refresh: "",
+                    expires: .max
                 ), for: storeId)
 
                 let resolved = try await registerStored(
-                    storeId: storeId, store: store, modelOverride: nil, context1m: false
+                    storeId: storeId,
+                    store: store,
+                    modelOverride: nil,
+                    context1m: false
                 )
                 #expect(resolved?.model.id == "glm-5.2")
                 #expect(resolved?.model.provider == storeId)
@@ -324,8 +364,10 @@ struct MultiProviderAuthTests {
                 // An uncatalogued override still routes through the coding
                 // endpoint with the Z.AI thinking format.
                 let custom = try await registerStored(
-                    storeId: storeId, store: store,
-                    modelOverride: "glm-99-experimental", context1m: false
+                    storeId: storeId,
+                    store: store,
+                    modelOverride: "glm-99-experimental",
+                    context1m: false
                 )
                 #expect(custom?.model.id == "glm-99-experimental")
                 #expect(custom?.model.baseURL == base)
@@ -340,8 +382,11 @@ struct MultiProviderAuthTests {
         let provider = OpenAICompletionsProvider(defaultAPIKey: "k")
         let fallback = URL(string: "https://api.openai.com")!
         let zai = Model(
-            id: "glm-5.2", name: "GLM-5.2", api: "openai-completions",
-            provider: "zai", baseURL: "https://api.z.ai/api/coding/paas/v4"
+            id: "glm-5.2",
+            name: "GLM-5.2",
+            api: "openai-completions",
+            provider: "zai",
+            baseURL: "https://api.z.ai/api/coding/paas/v4"
         )
         #expect(
             provider.urlBuilder(zai, nil, fallback).absoluteString
@@ -349,16 +394,22 @@ struct MultiProviderAuthTests {
         )
         // Bare hosts still gain the default /v1; existing /v1 bases don't double it.
         let bare = Model(
-            id: "m", name: "m", api: "openai-completions",
-            provider: "x", baseURL: "https://api.deepseek.com"
+            id: "m",
+            name: "m",
+            api: "openai-completions",
+            provider: "x",
+            baseURL: "https://api.deepseek.com"
         )
         #expect(
             provider.urlBuilder(bare, nil, fallback).absoluteString
                 == "https://api.deepseek.com/v1/chat/completions"
         )
         let v1 = Model(
-            id: "m", name: "m", api: "openai-completions",
-            provider: "x", baseURL: "https://openrouter.ai/api/v1"
+            id: "m",
+            name: "m",
+            api: "openai-completions",
+            provider: "x",
+            baseURL: "https://openrouter.ai/api/v1"
         )
         #expect(
             provider.urlBuilder(v1, nil, fallback).absoluteString
@@ -407,16 +458,20 @@ struct MultiProviderAuthTests {
     func sessionProviders() {
         let sp = SessionProviders()
         let a = ProviderSlot(
-            storeId: "anthropic", catalogProvider: "anthropic",
-            displayName: "Anthropic", template: Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
+            storeId: "anthropic",
+            catalogProvider: "anthropic",
+            displayName: "Anthropic",
+            template: Model(id: "claude", api: "anthropic-messages", provider: "anthropic")
         )
         sp.upsert(a)
         sp.upsert(a)  // re-login overwrites, not duplicates
         #expect(sp.slots.count == 1)
 
         let codex = ProviderSlot(
-            storeId: "openai-codex", catalogProvider: "openai-codex",
-            displayName: "ChatGPT Codex", template: Model(id: "gpt", api: "chatgpt-codex", provider: "chatgpt-codex")
+            storeId: "openai-codex",
+            catalogProvider: "openai-codex",
+            displayName: "ChatGPT Codex",
+            template: Model(id: "gpt", api: "chatgpt-codex", provider: "chatgpt-codex")
         )
         sp.upsert(codex)
         #expect(sp.slots.count == 2)
@@ -435,12 +490,18 @@ struct MultiProviderAuthTests {
         // registered `chatgpt-codex` variant scope + endpoint, and keep the
         // Codex `maxTokens == 0` sentinel.
         let codexTemplate = Model(
-            id: "gpt-5.5", api: "chatgpt-codex", provider: "chatgpt-codex",
-            baseURL: "https://chatgpt.com", maxTokens: 0
+            id: "gpt-5.5",
+            api: "chatgpt-codex",
+            provider: "chatgpt-codex",
+            baseURL: "https://chatgpt.com",
+            maxTokens: 0
         )
         let picked = Model(
-            id: "gpt-5.5-codex", api: "openai-responses", provider: "openai-codex",
-            baseURL: "https://api.openai.com", maxTokens: 128_000
+            id: "gpt-5.5-codex",
+            api: "openai-responses",
+            provider: "openai-codex",
+            baseURL: "https://api.openai.com",
+            maxTokens: 128_000
         )
         let routed = adoptFields(from: codexTemplate, into: picked)
         #expect(routed.id == "gpt-5.5-codex")
@@ -451,11 +512,15 @@ struct MultiProviderAuthTests {
 
         // Same-provider switch (Copilot enterprise) keeps the session baseURL.
         let copilotTemplate = Model(
-            id: "gpt-5.5", api: "openai-responses", provider: "github-copilot",
+            id: "gpt-5.5",
+            api: "openai-responses",
+            provider: "github-copilot",
             baseURL: "https://api.business.githubcopilot.com"
         )
         let copilotPick = Model(
-            id: "claude-opus-4-8", api: "anthropic-messages", provider: "github-copilot",
+            id: "claude-opus-4-8",
+            api: "anthropic-messages",
+            provider: "github-copilot",
             baseURL: "https://api.individual.githubcopilot.com"
         )
         let copilotRouted = adoptFields(from: copilotTemplate, into: copilotPick)
@@ -469,13 +534,18 @@ struct MultiProviderAuthTests {
         var compat = ModelCompat()
         compat.thinkingFormat = "openrouter"
         let template = Model(
-            id: "anthropic/claude-sonnet-5", api: "openai-completions",
-            provider: "openrouter", baseURL: "https://openrouter.ai/api/v1"
+            id: "anthropic/claude-sonnet-5",
+            api: "openai-completions",
+            provider: "openrouter",
+            baseURL: "https://openrouter.ai/api/v1"
         )
         let picked = Model(
-            id: "z-ai/glm-5.2", api: "openai-completions",
-            provider: "openrouter", baseURL: "https://openrouter.ai/api/v1",
-            compat: compat, thinkingLevelMap: ["xhigh": "xhigh"]
+            id: "z-ai/glm-5.2",
+            api: "openai-completions",
+            provider: "openrouter",
+            baseURL: "https://openrouter.ai/api/v1",
+            compat: compat,
+            thinkingLevelMap: ["xhigh": "xhigh"]
         )
         let routed = adoptFields(from: template, into: picked)
         #expect(routed.compat?.thinkingFormat == "openrouter")

@@ -128,7 +128,14 @@ public final class GoalStore: @unchecked Sendable {
         lock.withLock { if _autoContinueCount > 0 { _autoContinueCount -= 1 } }
     }
     public func snapshot() -> GoalSnapshot {
-        lock.withLock { GoalSnapshot(objective: _objective, status: _status, autoContinueCount: _autoContinueCount, tokensUsed: _tokensUsed) }
+        lock.withLock {
+            GoalSnapshot(
+                objective: _objective,
+                status: _status,
+                autoContinueCount: _autoContinueCount,
+                tokensUsed: _tokensUsed
+            )
+        }
     }
     public var isActive: Bool { lock.withLock { _status == .active } }
 }

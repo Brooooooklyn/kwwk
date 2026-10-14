@@ -140,7 +140,8 @@ private final class KiroCallbackHandler: ChannelInboundHandler, @unchecked Senda
                     switch reply {
                     case .page(let succeeded, let title, let message):
                         self.write(
-                            context: bound.value, status: succeeded ? .ok : .badRequest,
+                            context: bound.value,
+                            status: succeeded ? .ok : .badRequest,
                             html: KiroCallbackServer.page(succeeded: succeeded, title: title, message: message),
                             location: nil
                         )
@@ -159,7 +160,10 @@ private final class KiroCallbackHandler: ChannelInboundHandler, @unchecked Senda
         headers.add(name: "content-length", value: String(bodyBytes.count))
         headers.add(name: "connection", value: "close")
         if let location { headers.add(name: "location", value: location) }
-        context.write(wrapOutboundOut(.head(HTTPResponseHead(version: .http1_1, status: status, headers: headers))), promise: nil)
+        context.write(
+            wrapOutboundOut(.head(HTTPResponseHead(version: .http1_1, status: status, headers: headers))),
+            promise: nil
+        )
         var buffer = context.channel.allocator.buffer(capacity: bodyBytes.count)
         buffer.writeBytes(bodyBytes)
         context.write(wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)

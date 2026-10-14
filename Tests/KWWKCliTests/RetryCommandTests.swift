@@ -60,7 +60,9 @@ struct RetryCommandTests {
         var messages = transcript(text: "first prompt")
         messages.append(.assistant(AssistantMessage(
             content: [.text(TextContent(text: "ok"))],
-            api: "x", provider: "y", model: "z"
+            api: "x",
+            provider: "y",
+            model: "z"
         )))
         messages.append(contentsOf: transcript(text: "second prompt", images: [img]))
 
@@ -97,7 +99,9 @@ struct RetryCommandTests {
         // No user message in the transcript → nothing to arm.
         let none: [Message] = [.assistant(AssistantMessage(
             content: [.text(TextContent(text: "hi"))],
-            api: "x", provider: "y", model: "z"
+            api: "x",
+            provider: "y",
+            model: "z"
         ))]
         #expect(retryArmTarget(summary: nil, aborted: true, trackedActive: true, messages: none) == nil)
     }

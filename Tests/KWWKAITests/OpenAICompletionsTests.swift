@@ -490,10 +490,18 @@ struct OpenAICompletionsTests {
         let client = StubSSEClient(body: Self.textSSE)
         let provider = OpenAICompletionsProvider(client: client, defaultAPIKey: "sk-test")
         let ctx = Context(messages: [
-            .assistant(AssistantMessage(content: [.toolCall(ToolCall(id: "call_1", name: "shot", arguments: .object([:])))],
-                api: "openai-completions", provider: "openai", model: "gpt-4o", stopReason: .toolUse)),
-            .toolResult(ToolResultMessage(toolCallId: "call_1", toolName: "shot",
-                content: [.image(ImageContent(data: "QUJD", mimeType: "image/png"))])),
+            .assistant(AssistantMessage(
+                content: [.toolCall(ToolCall(id: "call_1", name: "shot", arguments: .object([:])))],
+                api: "openai-completions",
+                provider: "openai",
+                model: "gpt-4o",
+                stopReason: .toolUse
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "call_1",
+                toolName: "shot",
+                content: [.image(ImageContent(data: "QUJD", mimeType: "image/png"))]
+            )),
         ])
         _ = provider.stream(model: visionModel, context: ctx, options: nil)
         await Self.waitForRequest(client)
@@ -513,10 +521,18 @@ struct OpenAICompletionsTests {
         let client = StubSSEClient(body: Self.textSSE)
         let provider = OpenAICompletionsProvider(client: client, defaultAPIKey: "sk-test")
         let ctx = Context(messages: [
-            .assistant(AssistantMessage(content: [.toolCall(ToolCall(id: "call_1", name: "shot", arguments: .object([:])))],
-                api: "openai-completions", provider: "openai", model: "gpt-4o-mini", stopReason: .toolUse)),
-            .toolResult(ToolResultMessage(toolCallId: "call_1", toolName: "shot",
-                content: [.image(ImageContent(data: "QUJD", mimeType: "image/png"))])),
+            .assistant(AssistantMessage(
+                content: [.toolCall(ToolCall(id: "call_1", name: "shot", arguments: .object([:])))],
+                api: "openai-completions",
+                provider: "openai",
+                model: "gpt-4o-mini",
+                stopReason: .toolUse
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "call_1",
+                toolName: "shot",
+                content: [.image(ImageContent(data: "QUJD", mimeType: "image/png"))]
+            )),
         ])
         _ = provider.stream(model: Self.model, context: ctx, options: nil)
         await Self.waitForRequest(client)
@@ -559,9 +575,22 @@ struct OpenAICompletionsTests {
         let detail = "{\"type\":\"reasoning.encrypted\",\"id\":\"call_x\",\"data\":\"ENC\"}"
         let ctx = Context(messages: [
             .assistant(AssistantMessage(
-                content: [.toolCall(ToolCall(id: "call_x", name: "f", arguments: .object([:]), thoughtSignature: detail))],
-                api: "openai-completions", provider: "openai", model: "gpt-4o-mini", stopReason: .toolUse)),
-            .toolResult(ToolResultMessage(toolCallId: "call_x", toolName: "f", content: [.text(TextContent(text: "ok"))])),
+                content: [.toolCall(ToolCall(
+                    id: "call_x",
+                    name: "f",
+                    arguments: .object([:]),
+                    thoughtSignature: detail
+                ))],
+                api: "openai-completions",
+                provider: "openai",
+                model: "gpt-4o-mini",
+                stopReason: .toolUse
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "call_x",
+                toolName: "f",
+                content: [.text(TextContent(text: "ok"))]
+            )),
         ])
         _ = provider.stream(model: Self.model, context: ctx, options: nil)
         await Self.waitForRequest(client)
@@ -826,7 +855,11 @@ struct OpenAICompletionsTests {
     @Test("xAI gets a tool's root union folded to an object; other endpoints get it as sent")
     func xaiRootUnionFolded() throws {
         let union: JSONValue = .object(["anyOf": .array([
-            .object(["type": "object", "properties": .object(["a": .object(["type": "string"])]), "required": .array(["a"])]),
+            .object([
+                "type": "object",
+                "properties": .object(["a": .object(["type": "string"])]),
+                "required": .array(["a"])
+            ]),
             .object(["type": "object", "properties": .object(["b": .object(["type": "integer"])])]),
         ])])
         let context = Context(

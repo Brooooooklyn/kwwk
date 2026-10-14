@@ -106,7 +106,10 @@ struct GoalToolTests {
             text: "why does \(goalContinuationMarker) show up in my logs?"))]))
         let assistant = Message.assistant(AssistantMessage(
             content: [.text(TextContent(text: goalContinuationMarker))],
-            api: "anthropic-messages", provider: "anthropic", model: "m"))
+            api: "anthropic-messages",
+            provider: "anthropic",
+            model: "m"
+        ))
         #expect(isHiddenGoalContinuation(hidden) == true)
         #expect(isHiddenGoalContinuation(normal) == false)
         #expect(isHiddenGoalContinuation(quoting) == false)

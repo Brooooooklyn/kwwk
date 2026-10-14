@@ -24,8 +24,12 @@ extension CursorProto {
         while let field = reader.next() {
             guard field.number == 1, let bytes = field.value.asData else { continue }
             var m = UsableModel(
-                modelId: "", displayName: "", displayNameShort: "",
-                displayModelId: "", aliases: [], hasThinking: false
+                modelId: "",
+                displayName: "",
+                displayNameShort: "",
+                displayModelId: "",
+                aliases: [],
+                hasThinking: false
             )
             var inner = ProtoReader(bytes)
             while let f = inner.next() {

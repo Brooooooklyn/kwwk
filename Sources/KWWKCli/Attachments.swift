@@ -436,7 +436,9 @@ private func buildPrompt(
             """)
             counts.file += 1
         case .binaryFile(let path, let size):
-            attachBlocks.append("<file path=\"\(xmlEscape(path))\" size=\"\(size)\" note=\"binary / too large to inline\" />")
+            attachBlocks.append(
+                "<file path=\"\(xmlEscape(path))\" size=\"\(size)\" note=\"binary / too large to inline\" />"
+            )
             counts.file += 1
         case .folder(let path, let listing):
             attachBlocks.append("""

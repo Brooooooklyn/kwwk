@@ -26,13 +26,25 @@ struct MCPCommandTests {
         var cwd: String { root.appendingPathComponent("project").path }
 
         init() throws {
-            try FileManager.default.createDirectory(atPath: root.appendingPathComponent("home").path, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(atPath: root.appendingPathComponent("project").path, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                atPath: root.appendingPathComponent("home").path,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                atPath: root.appendingPathComponent("project").path,
+                withIntermediateDirectories: true
+            )
         }
 
         func run(_ arguments: [String], environment: [String: String] = [:]) async -> (Int32, Output) {
             let output = Output()
-            let code = await MCPCommand.run(arguments, cwd: cwd, homeDirectory: home, environment: environment, io: output.io)
+            let code = await MCPCommand.run(
+                arguments,
+                cwd: cwd,
+                homeDirectory: home,
+                environment: environment,
+                io: output.io
+            )
             return (code, output)
         }
 
@@ -55,7 +67,8 @@ struct MCPCommandTests {
         #expect(output.out.contains("kwwk mcp login linear"))
 
         (code, output) = await box.run([
-            "add", "-e", "TOKEN=${GH_TOKEN}", "--description=GitHub", "github", "--", "npx", "-y", "server-github", "--model", "x",
+            "add", "-e", "TOKEN=${GH_TOKEN}", "--description=GitHub", "github",
+            "--", "npx", "-y", "server-github", "--model", "x",
         ])
         #expect(code == 0, "\(output.err)")
 
@@ -76,7 +89,12 @@ struct MCPCommandTests {
         )
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
 
-        let loaded = MCPConfigFile.load(cwd: box.cwd, homeDirectory: box.home, trustProject: false, environment: ["GH_TOKEN": "g"])
+        let loaded = MCPConfigFile.load(
+            cwd: box.cwd,
+            homeDirectory: box.home,
+            trustProject: false,
+            environment: ["GH_TOKEN": "g"]
+        )
         #expect(loaded.warnings.isEmpty)
         #expect(loaded.entries.map(\.server.name) == ["api", "github", "linear"])
         #expect(loaded.entries.first { $0.server.name == "linear" }?.oauth?.clientName == "Codex")
@@ -109,7 +127,8 @@ struct MCPCommandTests {
         let box = try Sandbox()
         defer { try? FileManager.default.removeItem(at: box.root) }
         var (code, output) = await box.run([
-            "add-json", "--scope", "project", "docs", #"{"type":"http","url":"https://docs.example/mcp","headers":{"X-Api-Key":"secret"}}"#,
+            "add-json", "--scope", "project", "docs",
+            #"{"type":"http","url":"https://docs.example/mcp","headers":{"X-Api-Key":"secret"}}"#,
         ])
         #expect(code == 0)
         #expect(output.out.contains("KWWK_ALLOW_PROJECT_MCP=1"))

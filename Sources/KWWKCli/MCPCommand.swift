@@ -230,10 +230,13 @@ enum MCPCommand {
                 }
                 index += 1
             }
-            guard let name = positional.first else { throw UsageError(message: "missing server name\n\n\(MCPCommand.usage)") }
+            guard let name = positional.first else {
+                throw UsageError(message: "missing server name\n\n\(MCPCommand.usage)")
+            }
             let target = command ?? Array(positional.dropFirst())
             guard !target.isEmpty else { throw UsageError(message: "missing URL or -- command for \(name)") }
-            let isURL = target.count == 1 && ["http", "https"].contains(URL(string: target[0])?.scheme?.lowercased() ?? "")
+            let isURL = target.count == 1
+                && ["http", "https"].contains(URL(string: target[0])?.scheme?.lowercased() ?? "")
             let transport = options.transport ?? (isURL && command == nil ? "http" : "stdio")
 
             var entry: [String: JSONValue] = [:]
@@ -245,7 +248,9 @@ enum MCPCommand {
                 entry["url"] = .string(target[0])
                 if !options.headers.isEmpty { entry["headers"] = .object(options.headers.mapValues { .string($0) }) }
                 if options.noOAuth {
-                    guard options.oauth.isEmpty else { throw UsageError(message: "--no-oauth conflicts with OAuth options") }
+                    guard options.oauth.isEmpty else {
+                        throw UsageError(message: "--no-oauth conflicts with OAuth options")
+                    }
                     entry["oauth"] = .bool(false)
                 } else if !options.oauth.isEmpty {
                     entry["oauth"] = .object(options.oauth)
@@ -258,7 +263,9 @@ enum MCPCommand {
                 if target.count > 1 { entry["args"] = .array(target.dropFirst().map { .string($0) }) }
                 if !options.env.isEmpty { entry["env"] = .object(options.env.mapValues { .string($0) }) }
             case "sse":
-                throw UsageError(message: "the legacy SSE transport is not supported; use the server's Streamable HTTP URL")
+                throw UsageError(
+                    message: "the legacy SSE transport is not supported; use the server's Streamable HTTP URL"
+                )
             default:
                 throw UsageError(message: "--transport must be stdio or http")
             }
@@ -281,7 +288,9 @@ enum MCPCommand {
                 }
                 index += 1
             }
-            guard positional.count == 2 else { throw UsageError(message: "usage: kwwk mcp add-json [--scope <scope>] <name> <json>") }
+            guard positional.count == 2 else {
+                throw UsageError(message: "usage: kwwk mcp add-json [--scope <scope>] <name> <json>")
+            }
             let entry: JSONValue
             do {
                 entry = try JSONDecoder().decode(JSONValue.self, from: Data(positional[1].utf8))
@@ -323,7 +332,12 @@ enum MCPCommand {
         // MARK: list / get
 
         func loaded() -> MCPConfigFile.Loaded {
-            MCPConfigFile.load(cwd: cwd, homeDirectory: homeDirectory, trustProject: trustsProject, environment: environment)
+            MCPConfigFile.load(
+                cwd: cwd,
+                homeDirectory: homeDirectory,
+                trustProject: trustsProject,
+                environment: environment
+            )
         }
 
         func list() async {
@@ -339,7 +353,8 @@ enum MCPCommand {
                 let wait = loaded.entries.map(\.server.startupTimeoutSeconds).max() ?? 30
                 await manager.waitForStartup(timeout: wait)
                 let states = Dictionary(
-                    await manager.statuses().map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first }
+                    await manager.statuses().map { ($0.name, $0) },
+                    uniquingKeysWith: { first, _ in first }
                 )
                 for entry in loaded.entries {
                     let name = entry.server.name
@@ -369,7 +384,9 @@ enum MCPCommand {
         }
 
         func get(_ arguments: [String]) async throws {
-            guard arguments.count == 1, let name = arguments.first else { throw UsageError(message: "usage: kwwk mcp get <name>") }
+            guard arguments.count == 1, let name = arguments.first else {
+                throw UsageError(message: "usage: kwwk mcp get <name>")
+            }
             var found = false
             for scope in MCPConfigScope.allCases {
                 guard let raw = try editor(scope).servers()[name] else { continue }
@@ -377,7 +394,9 @@ enum MCPCommand {
                 io.out("\(name):")
                 io.out("  Scope: \(scope.rawValue) (\(displayPath(scope)))")
                 if scope == .project && !trustsProject {
-                    io.out("  Not loaded: set \(MCPRuntime.allowProjectServersVariable)=1 to trust this project's servers")
+                    io.out(
+                        "  Not loaded: set \(MCPRuntime.allowProjectServersVariable)=1 to trust this project's servers"
+                    )
                 }
                 let fields = raw.cliObject ?? [:]
                 if let url = fields["url"]?.cliString {
@@ -391,7 +410,9 @@ enum MCPCommand {
                     } else if (fields["headers"]?.cliObject ?? [:]).keys.contains(where: { $0.lowercased() == "authorization" }) {
                         io.out("  OAuth: off (sends its own Authorization header)")
                     } else {
-                        let record = MCPOAuthFileStore.readRecords(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory))[name]
+                        let record = MCPOAuthFileStore.readRecords(
+                            url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory)
+                        )[name]
                         let signedIn = record?.serverURL == url && record?.tokens != nil
                         io.out("  OAuth: on, \(signedIn ? "signed in" : "not signed in (kwwk mcp login \(name))")")
                         for (key, value) in (fields["oauth"]?.cliObject ?? [:]).sorted(by: { $0.key < $1.key }) {
@@ -419,7 +440,8 @@ enum MCPCommand {
         /// reference an environment variable.
         static func redacted(_ name: String, _ value: String) -> String {
             let lowered = name.lowercased()
-            let secret = ["token", "secret", "key", "authorization", "password", "cookie"].contains { lowered.contains($0) }
+            let secret = ["token", "secret", "key", "authorization", "password", "cookie"]
+                .contains { lowered.contains($0) }
             guard secret, !value.isEmpty else { return value }
             if value.hasPrefix("${"), value.hasSuffix("}") { return value }
             return "***"
@@ -450,12 +472,15 @@ enum MCPCommand {
                 removed.append(candidate)
             }
             guard !removed.isEmpty else {
-                throw UsageError(message: "no MCP server named \(name)\(scope.map { " in \($0.rawValue) config" } ?? "")")
+                throw UsageError(
+                    message: "no MCP server named \(name)\(scope.map { " in \($0.rawValue) config" } ?? "")"
+                )
             }
             for candidate in removed {
                 io.out("Removed MCP server \(name) from \(candidate.rawValue) config (\(displayPath(candidate))).")
             }
-            try await MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory)).remove(server: name)
+            try await MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory))
+                .remove(server: name)
         }
 
         // MARK: login / logout
@@ -489,9 +514,12 @@ enum MCPCommand {
         }
 
         func logout(_ arguments: [String]) async throws {
-            guard arguments.count == 1, let name = arguments.first else { throw UsageError(message: "usage: kwwk mcp logout <name>") }
+            guard arguments.count == 1, let name = arguments.first else {
+                throw UsageError(message: "usage: kwwk mcp logout <name>")
+            }
             _ = try oauthProvider(name, port: nil)
-            try await MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory)).remove(server: name)
+            try await MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory))
+                .remove(server: name)
             io.out("Signed out of \(name).")
         }
 
@@ -506,9 +534,21 @@ enum MCPCommand {
             let storeURL = MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory)
             let store = MCPOAuthFileStore(url: storeURL)
             let callbackPort = MCPOAuthCLI.callbackPort(
-                server: name, serverURL: url, settings: settings, records: MCPOAuthFileStore.readRecords(url: storeURL)
+                server: name,
+                serverURL: url,
+                settings: settings,
+                records: MCPOAuthFileStore.readRecords(url: storeURL)
             )
-            return (CLIMCPOAuthProvider(server: name, serverURL: url, settings: settings, store: store, callbackPort: callbackPort), store)
+            return (
+                CLIMCPOAuthProvider(
+                    server: name,
+                    serverURL: url,
+                    settings: settings,
+                    store: store,
+                    callbackPort: callbackPort
+                ),
+                store
+            )
         }
     }
 

@@ -13,13 +13,21 @@ struct FormModalTests {
         FormModal(
             title: "OpenAI API key",
             fields: [
-                APIKeyFormField(key: "apiKey", label: "API key",
-                                hint: "sk-…", placeholder: "sk-proj-…", required: true),
-                APIKeyFormField(key: "baseUrl", label: "Base URL",
-                                hint: "(optional)",
-                                placeholder: "https://api.openai.com",
-                                default: "https://api.openai.com",
-                                required: false),
+                APIKeyFormField(
+                    key: "apiKey",
+                    label: "API key",
+                    hint: "sk-…",
+                    placeholder: "sk-proj-…",
+                    required: true
+                ),
+                APIKeyFormField(
+                    key: "baseUrl",
+                    label: "Base URL",
+                    hint: "(optional)",
+                    placeholder: "https://api.openai.com",
+                    default: "https://api.openai.com",
+                    required: false
+                ),
             ],
             onSubmit: onSubmit,
             onCancel: onCancel
@@ -91,8 +99,10 @@ struct FormModalTests {
     func cancelFires() {
         let submitted = Ref<Bool>(false)
         let cancelled = Ref<Bool>(false)
-        let modal = makeModal(onSubmit: { _ in submitted.value = true },
-                              onCancel: { cancelled.value = true })
+        let modal = makeModal(
+            onSubmit: { _ in submitted.value = true },
+            onCancel: { cancelled.value = true }
+        )
         modal.cancel()
         #expect(cancelled.value == true)
         #expect(submitted.value == false)
@@ -276,8 +286,10 @@ struct ModalHostRoutingTests {
         // SessionResumeModal adopts none of the new requirements — the
         // protocol-extension defaults must keep it compiling and inert.
         let modal = SessionResumeModal(
-            sessions: [], currentSessionId: "x",
-            onSelect: { _ in }, onCancel: {}
+            sessions: [],
+            currentSessionId: "x",
+            onSelect: { _ in },
+            onCancel: {}
         )
         modal.tab(); modal.left(); modal.right()
         #expect(modal.handleText("a") == false)

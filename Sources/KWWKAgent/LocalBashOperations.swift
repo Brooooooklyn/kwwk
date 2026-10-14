@@ -110,14 +110,23 @@ public struct LocalBashOperations: BashOperations {
             throw CodingToolError.aborted
         }
         if control.didTimeOut {
-            throw CodingToolError.commandFailed(stderr: "Command timed out after \(timeout ?? 0)ms\n" + stderr, exitCode: -1)
+            throw CodingToolError.commandFailed(
+                stderr: "Command timed out after \(timeout ?? 0)ms\n" + stderr,
+                exitCode: -1
+            )
         }
         // The wait closure always sets `status` before the group completes.
         let code = statusBox.status!.code
         if code != 0 {
             throw CodingToolError.commandFailed(stderr: stderr.isEmpty ? stdout : stderr, exitCode: code)
         }
-        return BashExecutionResult(stdout: stdout, stderr: stderr, exitCode: code, durationMs: duration, timedOut: false)
+        return BashExecutionResult(
+            stdout: stdout,
+            stderr: stderr,
+            exitCode: code,
+            durationMs: duration,
+            timedOut: false
+        )
     }
 }
 

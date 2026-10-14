@@ -114,7 +114,9 @@ public func registerAllStored(
 ) async throws -> ResolvedAuth {
     try await registerAllStored(
         manager: OAuthManager(store: store),
-        modelOverride: modelOverride, context1m: context1m, notice: notice
+        modelOverride: modelOverride,
+        context1m: context1m,
+        notice: notice
     )
 }
 
@@ -141,7 +143,11 @@ public func registerStored(
         return await registerCodex(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
     case "anthropic":
         return await registerAnthropicOAuth(
-            manager: manager, creds: creds, modelOverride: modelOverride, context1m: context1m, primeToken: primeToken
+            manager: manager,
+            creds: creds,
+            modelOverride: modelOverride,
+            context1m: context1m,
+            primeToken: primeToken
         )
     case "anthropic-api-key":
         return await registerAnthropicAPIKey(creds: creds, modelOverride: modelOverride)
@@ -154,23 +160,51 @@ public func registerStored(
     case "openrouter":
         return await registerOpenRouter(creds: creds, modelOverride: modelOverride)
     case "github-copilot":
-        return await registerGitHubCopilot(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
+        return await registerGitHubCopilot(
+            manager: manager,
+            creds: creds,
+            modelOverride: modelOverride,
+            primeToken: primeToken
+        )
     case "cursor":
-        return await registerCursor(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
+        return await registerCursor(
+            manager: manager,
+            creds: creds,
+            modelOverride: modelOverride,
+            primeToken: primeToken
+        )
     case "devin":
         return await registerDevin(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
     case "kiro":
         return await registerKiro(manager: manager, modelOverride: modelOverride, primeToken: primeToken)
     case "qoder", "qoder-cn":
-        return await registerQoder(site: .of(storeId), manager: manager, modelOverride: modelOverride, primeToken: primeToken)
+        return await registerQoder(
+            site: .of(storeId),
+            manager: manager,
+            modelOverride: modelOverride,
+            primeToken: primeToken
+        )
     case WorkBuddySite.china.id, WorkBuddySite.international.id:
         return await registerWorkBuddy(
-            site: WorkBuddySite.site(id: storeId)!, manager: manager, modelOverride: modelOverride, primeToken: primeToken
+            site: WorkBuddySite.site(id: storeId)!,
+            manager: manager,
+            modelOverride: modelOverride,
+            primeToken: primeToken
         )
     case "kimi-coding":
-        return await registerKimiCoding(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
+        return await registerKimiCoding(
+            manager: manager,
+            creds: creds,
+            modelOverride: modelOverride,
+            primeToken: primeToken
+        )
     case "xai":
-        return await registerXaiGrok(manager: manager, creds: creds, modelOverride: modelOverride, primeToken: primeToken)
+        return await registerXaiGrok(
+            manager: manager,
+            creds: creds,
+            modelOverride: modelOverride,
+            primeToken: primeToken
+        )
     case "zai", "zai-coding-cn":
         return await registerZai(storeId: storeId, creds: creds, modelOverride: modelOverride)
     default:
@@ -189,9 +223,12 @@ public func registerStored(
     notice: @escaping @Sendable (String) -> Void = { _ in }
 ) async throws -> ResolvedAuth? {
     try await registerStored(
-        storeId: storeId, manager: OAuthManager(store: store),
-        modelOverride: modelOverride, context1m: context1m,
-        primeToken: primeToken, notice: notice
+        storeId: storeId,
+        manager: OAuthManager(store: store),
+        modelOverride: modelOverride,
+        context1m: context1m,
+        primeToken: primeToken,
+        notice: notice
     )
 }
 
@@ -787,7 +824,10 @@ private func registerOpenAICompatible(
     guard let modelId = modelOverride ?? storedModel, !modelId.isEmpty else {
         throw AuthResolveError.unsupportedProvider("openai-compatible (missing defaultModel)")
     }
-    await APIRegistry.shared.register(OpenAICompletionsProvider(defaultAPIKey: creds.access), scope: "openai-compatible")
+    await APIRegistry.shared.register(
+        OpenAICompletionsProvider(defaultAPIKey: creds.access),
+        scope: "openai-compatible"
+    )
 
     let model = Model(
         id: modelId,

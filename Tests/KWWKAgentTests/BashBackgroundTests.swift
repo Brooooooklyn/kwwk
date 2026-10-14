@@ -462,7 +462,8 @@ struct BashToolBackgroundTests {
                 "run_in_background": .bool(true),
                 "description": .string("echo then cat"),
             ]),
-            nil, nil
+            nil,
+            nil
         )
         guard case .object(let obj) = result.details ?? .null else {
             Issue.record("expected details.object, got \(String(describing: result.details))")
@@ -541,7 +542,8 @@ struct BashToolBackgroundTests {
         let result = try await tool.execute(
             "call-1",
             .object(["command": .string("echo fg-works")]),
-            nil, nil
+            nil,
+            nil
         )
         if case .text(let t) = result.content.first {
             #expect(t.text.contains("fg-works"))
@@ -570,7 +572,8 @@ struct BashToolBackgroundTests {
             _ = try await tool.execute(
                 "call-1",
                 .object(["run_in_background": .bool(true)]),
-                nil, nil
+                nil,
+                nil
             )
         }
     }
@@ -598,7 +601,8 @@ struct BashToolBackgroundTests {
                 "command": .string("while [ ! -f \(shellQuote(releaseFile.path)) ]; do sleep 0.1; done"),
                 "timeout": .int(9999),
             ]),
-            nil, nil
+            nil,
+            nil
         )
         guard case .object(let obj) = result.details ?? .null else {
             Issue.record("expected details.object")
@@ -648,7 +652,8 @@ struct BashToolBackgroundTests {
                 "command": .string("while [ ! -f \(shellQuote(releaseFile.path)) ]; do sleep 0.1; done; printf 'done-after-sleep\\n' | cat"),
                 "description": .string("slow echo"),
             ]),
-            nil, nil
+            nil,
+            nil
         )
         guard case .object(let obj) = result.details ?? .null else {
             Issue.record("expected details.object")

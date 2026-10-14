@@ -88,7 +88,8 @@ public struct URLSessionWebSocketClient: WebSocketClient {
         var failure = ProviderFailure.capture(error)
         guard let http = response as? HTTPURLResponse, http.statusCode >= 400 else { return failure }
         failure.httpStatus = http.statusCode
-        failure.requestId = http.value(forHTTPHeaderField: "x-request-id") ?? http.value(forHTTPHeaderField: "request-id")
+        failure.requestId = http.value(forHTTPHeaderField: "x-request-id")
+            ?? http.value(forHTTPHeaderField: "request-id")
         failure.retryAfterMs = ProviderFailure.retryDelay(response: http)
         if let hint = http.value(forHTTPHeaderField: "x-should-retry")?.lowercased() {
             if hint == "true" { failure.shouldRetry = true }

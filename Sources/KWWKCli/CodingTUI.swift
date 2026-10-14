@@ -1640,7 +1640,8 @@ private func promptMetaLabel(
     }
     let capacity = ANSI.stripEscapes(capacityHint)
     if !capacity.isEmpty {
-        let short = capacity.split(separator: "·").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? capacity
+        let short = capacity.split(separator: "·").first.map { String($0).trimmingCharacters(in: .whitespaces) }
+            ?? capacity
         parts.append(short.hasPrefix("●") ? Theme.paint(short, Theme.warn) : Theme.faintText(short))
     }
     return parts.joined(separator: Theme.faintText(" · "))

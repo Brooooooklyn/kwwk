@@ -134,10 +134,16 @@ struct PromptTemplateDiscoveryTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        try "Do $1".write(to: dir.appendingPathComponent("alpha.md"),
-                          atomically: true, encoding: .utf8)
-        try "ignored".write(to: dir.appendingPathComponent("notes.txt"),
-                            atomically: true, encoding: .utf8)
+        try "Do $1".write(
+            to: dir.appendingPathComponent("alpha.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "ignored".write(
+            to: dir.appendingPathComponent("notes.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let loaded = CustomSlashCommandLoader.loadFromDirectory(dir.path)
         #expect(loaded.count == 1)
@@ -154,8 +160,11 @@ struct PromptTemplateDiscoveryTests {
         defer { try? FileManager.default.removeItem(at: cwd) }
         // Unique name so it can't collide with a real ~/.kwwk/commands entry.
         let name = "proj\(UUID().uuidString.prefix(6))"
-        try "Run $1".write(to: cmds.appendingPathComponent("\(name).md"),
-                           atomically: true, encoding: .utf8)
+        try "Run $1".write(
+            to: cmds.appendingPathComponent("\(name).md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let discovered = CustomSlashCommandLoader.discover(cwd: cwd.path)
         #expect(discovered.contains { $0.name == name })

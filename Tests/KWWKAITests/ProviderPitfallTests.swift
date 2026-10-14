@@ -69,7 +69,10 @@ struct ProviderPitfallTests {
         #expect(merged["required"] == .array([.string("a"), .string("b")]))
 
         // A union below the root is accepted and stays as written.
-        let nested: JSONValue = ["type": "object", "properties": ["a": ["anyOf": [["type": "string"], ["type": "number"]]]]]
+        let nested: JSONValue = [
+            "type": "object",
+            "properties": ["a": ["anyOf": [["type": "string"], ["type": "number"]]]]
+        ]
         #expect(ToolSchemaRoot.objectRoot(nested) == nested)
     }
 
@@ -82,7 +85,11 @@ struct ProviderPitfallTests {
         )
         let history: [Message] = [
             .assistant(assistant),
-            .toolResult(ToolResultMessage(toolCallId: devin, toolName: "bash", content: [.text(TextContent(text: "ok"))])),
+            .toolResult(ToolResultMessage(
+                toolCallId: devin,
+                toolName: "bash",
+                content: [.text(TextContent(text: "ok"))]
+            )),
         ]
         let out = TransformMessages.normalizeToolCallIds(history, model: claude("claude-sonnet-5-5"))
         guard case .assistant(let a) = out[0], case .toolCall(let call)? = a.content.first,

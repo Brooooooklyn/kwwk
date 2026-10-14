@@ -32,7 +32,8 @@ public enum KiroModels {
             "origin": "KIRO_CLI", "profileArn": KiroOAuth.profileArn(credentials) ?? "",
         ])
         let (response, body) = try await client.request(
-            url: URL(string: "\(KiroOAuth.managementURL(region: region))List-Available-Models?\(query)")!, method: "GET",
+            url: URL(string: "\(KiroOAuth.managementURL(region: region))List-Available-Models?\(query)")!,
+            method: "GET",
             headers: ["Authorization": "Bearer \(credentials.access)", "Accept": "application/json"],
             body: nil
         )
@@ -74,7 +75,10 @@ public enum KiroModels {
             if name.isEmpty || name == id { name = id == "auto" ? "Auto" : id }
             let images = (row.supportedInputTypes ?? []).contains { $0.uppercased() == "IMAGE" }
             let model = Model(
-                id: id, name: name, api: api, provider: "kiro",
+                id: id,
+                name: name,
+                api: api,
+                provider: "kiro",
                 baseURL: runtimeURL(region: region),
                 reasoning: thinks(id),
                 input: images ? [.text, .image] : [.text],
@@ -150,7 +154,8 @@ func kiroAuthResolver(
             var metadata: [String: JSONValue] = [:]
             if let profile = KiroOAuth.profileArn(credentials) { metadata["profileArn"] = .string(profile) }
             return ResolvedProviderAuth(
-                token: token, scheme: .bearer,
+                token: token,
+                scheme: .bearer,
                 baseURL: KiroModels.runtimeURL(region: KiroOAuth.apiRegion(credentials)),
                 metadata: metadata
             )

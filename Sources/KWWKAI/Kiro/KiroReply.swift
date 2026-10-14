@@ -317,7 +317,8 @@ struct KiroReply {
         usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
         if toolCount == 0, stop.uppercased() == "CONTENT_FILTERED" {
             return failed(ProviderFailure(
-                message: "Kiro: the reply was filtered (CONTENT_FILTERED)", rawStopReason: "content_filtered"
+                message: "Kiro: the reply was filtered (CONTENT_FILTERED)",
+                rawStopReason: "content_filtered"
             ))
         }
         return snapshot()
@@ -333,8 +334,13 @@ struct KiroReply {
         var usage = usage
         usage.cost = calculateCost(model: model, usage: usage)
         return AssistantMessage(
-            content: blocks, api: api, provider: model.provider, model: model.id,
-            usage: usage, stopReason: stopReason, timestamp: Timestamp.now()
+            content: blocks,
+            api: api,
+            provider: model.provider,
+            model: model.id,
+            usage: usage,
+            stopReason: stopReason,
+            timestamp: Timestamp.now()
         )
     }
 

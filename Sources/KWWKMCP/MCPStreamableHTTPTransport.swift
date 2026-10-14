@@ -78,7 +78,11 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             self.authProvider = provider
         case .oauth(let provider, let interactive):
             self.authProvider = MCPOAuthAdapter(
-                provider: provider, serverURL: url, interactive: interactive, httpClient: authHTTP, gate: authGate
+                provider: provider,
+                serverURL: url,
+                interactive: interactive,
+                httpClient: authHTTP,
+                gate: authGate
             )
         case nil:
             self.authProvider = nil
@@ -131,7 +135,12 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             let text = await Self.collectText(bytes, limit: 4_000)
             if status == 401 {
                 try await noteRefusal(of: token) {
-                    try await handleUnauthorized(response: response, body: text, rejectedToken: token, isAuthRetry: isAuthRetry)
+                    try await handleUnauthorized(
+                        response: response,
+                        body: text,
+                        rejectedToken: token,
+                        isAuthRetry: isAuthRetry
+                    )
                 }
                 try checkStillWanted()
                 return try await send(message, isAuthRetry: true, stepUpRetries: stepUpRetries)
@@ -214,7 +223,12 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
     }
 
     /// A 401: remember the challenge, then let the provider recover once.
-    private func handleUnauthorized(response: HTTPURLResponse, body: String, rejectedToken: String?, isAuthRetry: Bool) async throws {
+    private func handleUnauthorized(
+        response: HTTPURLResponse,
+        body: String,
+        rejectedToken: String?,
+        isAuthRetry: Bool
+    ) async throws {
         let challenge = MCPAuthChallenge(header: response.value(forHTTPHeaderField: "WWW-Authenticate"))
         lock.withLock {
             if let metadataURL = challenge.resourceMetadataURL { resourceMetadataURL = metadataURL }
@@ -237,7 +251,10 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
     /// when that union exceeds what the token was granted.
     private func stepUp(challenge: MCPAuthChallenge, retries: Int) async throws {
         guard let provider = auth?.oauthProvider, retries < maxStepUpRetries else {
-            throw MCPAuthError.insufficientScope(requiredScope: challenge.scope, description: challenge.errorDescription)
+            throw MCPAuthError.insufficientScope(
+                requiredScope: challenge.scope,
+                description: challenge.errorDescription
+            )
         }
         let tokens = try await provider.tokens(nil)
         let (union, metadataURL): (String?, URL?) = lock.withLock {
@@ -300,8 +317,12 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
         }
         let deleteHeaders = baseHeaders(token: storedToken)
         if let (_, bytes) = try? await httpClient.stream(
-            url: url, method: "DELETE", headers: deleteHeaders, body: nil,
-            cancellation: nil, timeoutSeconds: 5
+            url: url,
+            method: "DELETE",
+            headers: deleteHeaders,
+            body: nil,
+            cancellation: nil,
+            timeoutSeconds: 5
         ) {
             do { for try await _ in bytes {} } catch {}
         }
@@ -344,8 +365,12 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             var requestHeaders = baseHeaders(token: token)
             requestHeaders["Accept"] = "text/event-stream"
             let (response, bytes) = try await httpClient.stream(
-                url: url, method: "GET", headers: requestHeaders, body: nil,
-                cancellation: lifetime, timeoutSeconds: 24 * 60 * 60
+                url: url,
+                method: "GET",
+                headers: requestHeaders,
+                body: nil,
+                cancellation: lifetime,
+                timeoutSeconds: 24 * 60 * 60
             )
             if response.statusCode == 401, authProvider != nil, !isAuthRetry {
                 let text = await Self.collectText(bytes, limit: 4_000)

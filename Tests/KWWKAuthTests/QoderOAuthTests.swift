@@ -59,14 +59,18 @@ struct QoderSiteTests {
 @Suite("Qoder sign-in")
 struct QoderLoginTests {
     private func login(
-        site: QoderSite = .global, _ answers: [QueuedHTTPClient.Answer]
+        site: QoderSite = .global,
+        _ answers: [QueuedHTTPClient.Answer]
     ) async throws -> (OAuthCredentials, QueuedHTTPClient, URL) {
         let client = QueuedHTTPClient(answers)
         let presenter = RecordingPresenter()
         var callbacks = quietCallbacksBase
         callbacks.browser = presenter
         let credentials = try await OAuthLogin.loginQoder(
-            site: site, callbacks: callbacks, client: client, pollIntervalMs: 1
+            site: site,
+            callbacks: callbacks,
+            client: client,
+            pollIntervalMs: 1
         )
         return (credentials, client, try #require(presenter.shown.first))
     }
@@ -173,7 +177,10 @@ struct QoderLoginTests {
     @Test("Qoder CN signs in on qoder.cn with its CLI's client id and stays on its own hosts")
     func cnFlow() async throws {
         let (credentials, client, page) = try await login(site: .cn, [
-            .response(status: 200, body: #"{"token":"dt-cn","refresh_token":"drt-cn","user_id":"u-cn","user_name":"CN","expires_in":7200}"#),
+            .response(
+                status: 200,
+                body: #"{"token":"dt-cn","refresh_token":"drt-cn","user_id":"u-cn","user_name":"CN","expires_in":7200}"#
+            ),
             .response(status: 200, body: #"{"token":"jt-cn","refresh_token":"rt-cn","expires_in":3600000}"#),
             .response(status: 200, body: #"{"id":"u-cn","email":"cn@x","name":"CN"}"#),
         ])
@@ -200,7 +207,10 @@ struct QoderLoginTests {
     @Test("When qoder.cn won't make a job token the device token signs the model calls, as its CLI's does")
     func cnDeviceChat() async throws {
         let (credentials, _, _) = try await login(site: .cn, [
-            .response(status: 200, body: #"{"token":"dt-cn","refresh_token":"drt-cn","user_id":"u-cn","user_name":"CN","expires_in":7200}"#),
+            .response(
+                status: 200,
+                body: #"{"token":"dt-cn","refresh_token":"drt-cn","user_id":"u-cn","user_name":"CN","expires_in":7200}"#
+            ),
             .response(status: 403, body: #"{"message":"client not allowed"}"#),
             .response(status: 200, body: #"{"id":"u-cn","email":"cn@x","name":"CN"}"#),
         ])
@@ -227,7 +237,9 @@ struct QoderLoginTests {
 @Suite("Qoder refresh")
 struct QoderRefreshTests {
     private let stale = OAuthCredentials(
-        access: "jt-one", refresh: "rt-one", expires: 0,
+        access: "jt-one",
+        refresh: "rt-one",
+        expires: 0,
         extras: ["uid": "one", "machineId": "machine-one", "deviceToken": "dt-one", "deviceRefresh": "drt-one"]
     )
 
@@ -332,7 +344,9 @@ struct QoderRefreshTests {
         ])
         let refreshed = try await QoderOAuthProvider(site: .cn).refresh(
             OAuthCredentials(
-                access: "dt-1", refresh: "drt-1", expires: 0,
+                access: "dt-1",
+                refresh: "drt-1",
+                expires: 0,
                 extras: ["uid": "u", "deviceToken": "dt-1", "deviceRefresh": "drt-1", "deviceChat": true]
             ),
             using: client
@@ -363,7 +377,10 @@ struct QoderRefreshTests {
 @Suite("Qoder usage")
 struct QoderUsageTests {
     private let credentials = OAuthCredentials(
-        access: "jt-one", refresh: "rt-one", expires: .max, extras: ["uid": "one", "deviceToken": "dt-one"]
+        access: "jt-one",
+        refresh: "rt-one",
+        expires: .max,
+        extras: ["uid": "one", "deviceToken": "dt-one"]
     )
 
     // magpie TestQoderLoginUsage's answer.
@@ -416,7 +433,10 @@ struct QoderUsageTests {
     @Test("Qoder CN's usage stays on its account host, and a device-chat login asks with its chat token")
     func cnAndDeviceChat() async throws {
         let client = QueuedHTTPClient([
-            .response(status: 200, body: #"{"displayMode":"qoder","qoderUsage":{"userType":"pro","userQuota":{"total":100,"used":25}}}"#),
+            .response(
+                status: 200,
+                body: #"{"displayMode":"qoder","qoderUsage":{"userType":"pro","userQuota":{"total":100,"used":25}}}"#
+            ),
         ])
         let windows = try await QoderUsageReader(site: .cn).usage(
             OAuthCredentials(access: "dt-cn", refresh: "drt-cn", expires: .max, extras: ["deviceChat": true]),
@@ -430,16 +450,21 @@ struct QoderUsageTests {
     @Test("A refused or unreadable account page is usage unavailable, never a login failure")
     func failures() async throws {
         await #expect(throws: OAuthUsageError.unavailable(providerId: "qoder", status: 401, detail: "")) {
-            _ = try await QoderUsageReader().usage(credentials, using: QueuedHTTPClient([.response(status: 401, body: "")]))
+            _ = try await QoderUsageReader().usage(
+                credentials,
+                using: QueuedHTTPClient([.response(status: 401, body: "")])
+            )
         }
         await #expect(throws: OAuthUsageError.unavailable(providerId: "qoder", status: 200, detail: "missing quota data")) {
             _ = try await QoderUsageReader().usage(
-                credentials, using: QueuedHTTPClient([.response(status: 200, body: #"{"displayMode":"qoder"}"#)])
+                credentials,
+                using: QueuedHTTPClient([.response(status: 200, body: #"{"displayMode":"qoder"}"#)])
             )
         }
         await #expect(throws: OAuthUsageError.self) {
             _ = try await QoderUsageReader().usage(
-                OAuthCredentials(access: "jt", refresh: "rt", expires: .max), using: QueuedHTTPClient([])
+                OAuthCredentials(access: "jt", refresh: "rt", expires: .max),
+                using: QueuedHTTPClient([])
             )
         }
     }

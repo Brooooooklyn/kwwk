@@ -122,7 +122,10 @@ final class MemoryOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
     func clientInformation(_ context: MCPOAuthStorageContext?) async throws -> MCPOAuthClientInformation? {
         lock.withLock { client }
     }
-    func saveClientInformation(_ information: MCPOAuthClientInformation, context: MCPOAuthStorageContext?) async throws {
+    func saveClientInformation(
+        _ information: MCPOAuthClientInformation,
+        context: MCPOAuthStorageContext?
+    ) async throws {
         lock.withLock { client = information }
     }
     func tokens(_ context: MCPOAuthStorageContext?) async throws -> MCPOAuthTokens? { lock.withLock { storedTokens } }
@@ -152,7 +155,9 @@ final class MemoryOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
 }
 
 private func query(_ url: URL) -> [String: String] {
-    FakeAuthServer.parseForm(URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery.map { Data($0.utf8) })
+    FakeAuthServer.parseForm(
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery.map { Data($0.utf8) }
+    )
 }
 
 @Suite("MCP OAuth")
@@ -176,7 +181,10 @@ struct MCPOAuthTests {
     func fullFlow() async throws {
         let server = FakeAuthServer()
         let provider = MemoryOAuthProvider()
-        let result = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(serverURL: serverURL, httpClient: server))
+        let result = try await MCPOAuth.auth(
+            provider,
+            options: MCPOAuthOptions(serverURL: serverURL, httpClient: server)
+        )
         #expect(result == .redirect)
 
         let register = try #require(server.requests.first { $0.request.url.path == "/register" })
@@ -230,20 +238,31 @@ struct MCPOAuthTests {
         _ = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(serverURL: serverURL, httpClient: server))
         await #expect(throws: MCPAuthError.issuerMismatch(kind: "authorization response", expected: "https://auth.example.com", actual: nil)) {
             try await MCPOAuth.finishAuthorization(
-                provider, serverURL: serverURL, callbackParameters: ["code": "c"], httpClient: server
+                provider,
+                serverURL: serverURL,
+                callbackParameters: ["code": "c"],
+                httpClient: server
             )
         }
         await #expect(throws: MCPAuthError.issuerMismatch(kind: "authorization response", expected: "https://auth.example.com", actual: "https://evil.example")) {
             try await MCPOAuth.finishAuthorization(
-                provider, serverURL: serverURL, callbackParameters: ["code": "c", "iss": "https://evil.example"], httpClient: server
+                provider,
+                serverURL: serverURL,
+                callbackParameters: ["code": "c", "iss": "https://evil.example"],
+                httpClient: server
             )
         }
         #expect(!server.requests.contains { $0.request.url.path == "/token" })
         // An error callback is surfaced only after its iss checks out.
         await #expect(throws: MCPAuthError.oauth(MCPOAuthErrorResponse(code: "access_denied", description: "no"))) {
             try await MCPOAuth.finishAuthorization(
-                provider, serverURL: serverURL,
-                callbackParameters: ["error": "access_denied", "error_description": "no", "iss": "https://auth.example.com"],
+                provider,
+                serverURL: serverURL,
+                callbackParameters: [
+                    "error": "access_denied",
+                    "error_description": "no",
+                    "iss": "https://auth.example.com"
+                ],
                 httpClient: server
             )
         }
@@ -274,9 +293,20 @@ struct MCPOAuthTests {
     func refresh() async throws {
         let server = FakeAuthServer()
         let provider = MemoryOAuthProvider()
-        provider.client = MCPOAuthClientInformation(clientID: "client-1", clientSecret: "secret-1", issuer: "https://auth.example.com")
-        provider.storedTokens = MCPOAuthTokens(accessToken: "old", refreshToken: "refresh-1", issuer: "https://auth.example.com")
-        let result = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(serverURL: serverURL, httpClient: server))
+        provider.client = MCPOAuthClientInformation(
+            clientID: "client-1",
+            clientSecret: "secret-1",
+            issuer: "https://auth.example.com"
+        )
+        provider.storedTokens = MCPOAuthTokens(
+            accessToken: "old",
+            refreshToken: "refresh-1",
+            issuer: "https://auth.example.com"
+        )
+        let result = try await MCPOAuth.auth(
+            provider,
+            options: MCPOAuthOptions(serverURL: serverURL, httpClient: server)
+        )
         #expect(result == .authorized)
         #expect(provider.storedTokens?.accessToken == "access-2")
         #expect(provider.storedTokens?.refreshToken == "refresh-1")
@@ -293,8 +323,10 @@ struct MCPOAuthTests {
         let provider = MemoryOAuthProvider()
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
         provider.storedTokens = MCPOAuthTokens(
-            accessToken: "old", refreshToken: "refresh-1",
-            expiresAt: Date().addingTimeInterval(5), issuer: "https://auth.example.com"
+            accessToken: "old",
+            refreshToken: "refresh-1",
+            expiresAt: Date().addingTimeInterval(5),
+            issuer: "https://auth.example.com"
         )
         let adapter = MCPOAuthAdapter(provider: provider, serverURL: serverURL, httpClient: server)
         async let a = adapter.token()
@@ -314,7 +346,9 @@ struct MCPOAuthTests {
         let server = FakeAuthServer()
         let provider = MemoryOAuthProvider()
         let unknown = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(
-            serverURL: serverURL, interactive: false, httpClient: server
+            serverURL: serverURL,
+            interactive: false,
+            httpClient: server
         ))
         #expect(unknown == .authorizationRequired)
         #expect(!server.requests.contains { $0.request.url.path == "/register" })
@@ -323,9 +357,15 @@ struct MCPOAuthTests {
 
         server.refreshError = "invalid_grant"
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
-        provider.storedTokens = MCPOAuthTokens(accessToken: "old", refreshToken: "r", issuer: "https://auth.example.com")
+        provider.storedTokens = MCPOAuthTokens(
+            accessToken: "old",
+            refreshToken: "r",
+            issuer: "https://auth.example.com"
+        )
         let refused = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(
-            serverURL: serverURL, interactive: false, httpClient: server
+            serverURL: serverURL,
+            interactive: false,
+            httpClient: server
         ))
         #expect(refused == .authorizationRequired)
         #expect(provider.redirects.isEmpty)
@@ -333,10 +373,16 @@ struct MCPOAuthTests {
 
         // A transient failure is thrown, not mistaken for needing sign-in.
         server.refreshError = "server_error"
-        provider.storedTokens = MCPOAuthTokens(accessToken: "old", refreshToken: "r", issuer: "https://auth.example.com")
+        provider.storedTokens = MCPOAuthTokens(
+            accessToken: "old",
+            refreshToken: "r",
+            issuer: "https://auth.example.com"
+        )
         await #expect(throws: MCPAuthError.self) {
             _ = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(
-                serverURL: serverURL, interactive: false, httpClient: server
+                serverURL: serverURL,
+                interactive: false,
+                httpClient: server
             ))
         }
         #expect(provider.redirects.isEmpty)
@@ -349,7 +395,10 @@ struct MCPOAuthTests {
         let provider = MemoryOAuthProvider()
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
         provider.storedTokens = MCPOAuthTokens(
-            accessToken: "old", refreshToken: "r", expiresAt: Date().addingTimeInterval(1), issuer: "https://auth.example.com"
+            accessToken: "old",
+            refreshToken: "r",
+            expiresAt: Date().addingTimeInterval(1),
+            issuer: "https://auth.example.com"
         )
         let adapter = MCPOAuthAdapter(provider: provider, serverURL: serverURL, httpClient: server)
         _ = try await adapter.token()
@@ -363,8 +412,15 @@ struct MCPOAuthTests {
         server.refreshError = "invalid_grant"
         let provider = MemoryOAuthProvider()
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
-        provider.storedTokens = MCPOAuthTokens(accessToken: "old", refreshToken: "refresh-1", issuer: "https://auth.example.com")
-        let result = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(serverURL: serverURL, httpClient: server))
+        provider.storedTokens = MCPOAuthTokens(
+            accessToken: "old",
+            refreshToken: "refresh-1",
+            issuer: "https://auth.example.com"
+        )
+        let result = try await MCPOAuth.auth(
+            provider,
+            options: MCPOAuthOptions(serverURL: serverURL, httpClient: server)
+        )
         #expect(result == .redirect)
         #expect(provider.invalidated == [.tokens])
         #expect(provider.storedTokens == nil)
@@ -376,8 +432,15 @@ struct MCPOAuthTests {
         let server = FakeAuthServer()
         let provider = MemoryOAuthProvider()
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
-        provider.storedTokens = MCPOAuthTokens(accessToken: "old", refreshToken: "elsewhere", issuer: "https://other.example")
-        let result = try await MCPOAuth.auth(provider, options: MCPOAuthOptions(serverURL: serverURL, httpClient: server))
+        provider.storedTokens = MCPOAuthTokens(
+            accessToken: "old",
+            refreshToken: "elsewhere",
+            issuer: "https://other.example"
+        )
+        let result = try await MCPOAuth.auth(
+            provider,
+            options: MCPOAuthOptions(serverURL: serverURL, httpClient: server)
+        )
         #expect(result == .redirect)
         #expect(!server.requests.contains { $0.form["refresh_token"] == "elsewhere" })
     }
@@ -403,18 +466,26 @@ struct MCPOAuthTests {
         provider.discovery?.authorizationServerMetadata?.issuer = "https://previous.example"
         await #expect(throws: MCPAuthError.self) {
             try await MCPOAuth.finishAuthorization(
-                provider, serverURL: serverURL,
-                callbackParameters: ["code": "c", "iss": "https://auth.example.com"], httpClient: server
+                provider,
+                serverURL: serverURL,
+                callbackParameters: ["code": "c", "iss": "https://auth.example.com"],
+                httpClient: server
             )
         }
     }
 
     @Test("scope selection, union and superset")
     func scopes() {
-        let metadata = MCPOAuthClientMetadata(redirectURIs: [], scope: "fallback", grantTypes: ["authorization_code", "refresh_token"])
+        let metadata = MCPOAuthClientMetadata(
+            redirectURIs: [],
+            scope: "fallback",
+            grantTypes: ["authorization_code", "refresh_token"]
+        )
         let prm = MCPProtectedResourceMetadata(resource: "https://x", scopesSupported: ["a", "b"])
         let asWithOffline = MCPAuthorizationServerMetadata(
-            issuer: "https://as", authorizationEndpoint: "https://as/a", tokenEndpoint: "https://as/t",
+            issuer: "https://as",
+            authorizationEndpoint: "https://as/a",
+            tokenEndpoint: "https://as/t",
             scopesSupported: ["a", "offline_access"]
         )
         #expect(MCPOAuth.determineScope(requestedScope: "c", resourceMetadata: prm, authorizationServerMetadata: nil, clientMetadata: metadata) == "c")
@@ -430,7 +501,11 @@ struct MCPOAuthTests {
     @Test("client authentication method and resource checks")
     func helpers() {
         let secret = MCPOAuthClientInformation(clientID: "c", clientSecret: "s")
-        let assigned = MCPOAuthClientInformation(clientID: "c", clientSecret: "s", tokenEndpointAuthMethod: "client_secret_post")
+        let assigned = MCPOAuthClientInformation(
+            clientID: "c",
+            clientSecret: "s",
+            tokenEndpointAuthMethod: "client_secret_post"
+        )
         let publicClient = MCPOAuthClientInformation(clientID: "c")
         #expect(MCPOAuth.selectClientAuthMethod(client: secret, supportedMethods: []) == "client_secret_basic")
         #expect(MCPOAuth.selectClientAuthMethod(client: secret, supportedMethods: ["client_secret_post"]) == "client_secret_post")
@@ -452,18 +527,28 @@ struct MCPOAuthTests {
         final class Redirecting: MCPAuthHTTPClient, @unchecked Sendable {
             func send(_ request: MCPAuthHTTPRequest) async throws -> MCPAuthHTTPResponse {
                 switch request.url.absoluteString {
-                case "https://a.example/start": return MCPAuthHTTPResponse(status: 302, headers: ["Location": "/next"], url: request.url)
-                case "https://a.example/next": return MCPAuthHTTPResponse(status: 302, headers: ["Location": "https://b.example/x"], url: request.url)
+                case "https://a.example/start":
+                    return MCPAuthHTTPResponse(status: 302, headers: ["Location": "/next"], url: request.url)
+                case "https://a.example/next":
+                    return MCPAuthHTTPResponse(
+                        status: 302,
+                        headers: ["Location": "https://b.example/x"],
+                        url: request.url
+                    )
                 default: return MCPAuthHTTPResponse(status: 200, body: Data("ok".utf8), url: request.url)
                 }
             }
         }
-        let response = try await MCPAuthHTTP.send(MCPAuthHTTPRequest(url: URL(string: "https://a.example/start")!), using: Redirecting())
+        let response = try await MCPAuthHTTP.send(
+            MCPAuthHTTPRequest(url: URL(string: "https://a.example/start")!),
+            using: Redirecting()
+        )
         // The same-origin hop is followed; the cross-origin one is returned.
         #expect(response.status == 302)
         #expect(response.url.absoluteString == "https://a.example/next")
         let post = try await MCPAuthHTTP.send(
-            MCPAuthHTTPRequest(url: URL(string: "https://a.example/start")!, method: "POST"), using: Redirecting()
+            MCPAuthHTTPRequest(url: URL(string: "https://a.example/start")!, method: "POST"),
+            using: Redirecting()
         )
         #expect(post.url.absoluteString == "https://a.example/start")
     }

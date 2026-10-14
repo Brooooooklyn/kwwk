@@ -46,7 +46,10 @@ public struct AfterToolCallResult: Sendable {
     }
 }
 
-public typealias BeforeToolCallHook = @Sendable (BeforeToolCallContext, CancellationHandle?) async -> BeforeToolCallResult?
+public typealias BeforeToolCallHook = @Sendable (
+    BeforeToolCallContext,
+    CancellationHandle?
+) async -> BeforeToolCallResult?
 public typealias AfterToolCallHook = @Sendable (AfterToolCallContext, CancellationHandle?) async -> AfterToolCallResult?
 
 // MARK: - User-prompt-submit hook
@@ -81,7 +84,10 @@ public struct UserPromptSubmitResult: Sendable {
 /// follow-up drains. Mirrors the SDK's `UserPromptSubmit` hook. Returning
 /// nil leaves the message unchanged; returning a result with `block=true`
 /// drops it; `modifiedMessage` rewrites it in place.
-public typealias UserPromptSubmitHook = @Sendable (UserPromptSubmitContext, CancellationHandle?) async -> UserPromptSubmitResult?
+public typealias UserPromptSubmitHook = @Sendable (
+    UserPromptSubmitContext,
+    CancellationHandle?
+) async -> UserPromptSubmitResult?
 
 /// Transform the message list the LLM sees. Return nil to reuse the default
 /// pass-through behavior. Mirrors pi-agent-core's `convertToLlm` /

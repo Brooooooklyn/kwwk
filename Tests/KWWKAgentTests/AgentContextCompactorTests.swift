@@ -45,7 +45,9 @@ struct AgentContextCompactorTests {
             .user(UserMessage(text: "run the thing")),
             .assistant(AssistantMessage(
                 content: [.toolCall(ToolCall(id: "big", name: "bash", arguments: .object([:])))],
-                api: "faux", provider: "faux", model: "faux"
+                api: "faux",
+                provider: "faux",
+                model: "faux"
             )),
             .toolResult(ToolResultMessage(
                 toolCallId: "big",
@@ -577,12 +579,16 @@ struct AgentContextCompactorTests {
             .user(UserMessage(text: "older update")),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: "older result"))],
-                api: model.api, provider: model.provider, model: model.id
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             )),
             .user(UserMessage(text: "latest exact request")),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: "latest exact response"))],
-                api: model.api, provider: model.provider, model: model.id
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             )),
         ]
         let agent = Agent(options: AgentOptions(
@@ -831,7 +837,9 @@ struct AgentContextCompactorTests {
             .user(UserMessage(text: "make the change")),
             .assistant(AssistantMessage(
                 content: [.toolCall(write)],
-                api: model.api, provider: model.provider, model: model.id,
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
                 stopReason: .toolUse
             )),
             .toolResult(ToolResultMessage(
@@ -841,12 +849,16 @@ struct AgentContextCompactorTests {
             )),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: "change complete"))],
-                api: model.api, provider: model.provider, model: model.id
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             )),
             .user(UserMessage(text: "what next?")),
             .assistant(AssistantMessage(
                 content: [.text(TextContent(text: "run tests"))],
-                api: model.api, provider: model.provider, model: model.id
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             )),
         ]
         let agent = Agent(initialState: AgentInitialState(model: model, messages: messages))
@@ -880,7 +892,9 @@ struct AgentContextCompactorTests {
             .user(UserMessage(text: "inspect the large log")),
             .assistant(AssistantMessage(
                 content: [.toolCall(call)],
-                api: model.api, provider: model.provider, model: model.id,
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
                 stopReason: .toolUse
             )),
             .toolResult(ToolResultMessage(

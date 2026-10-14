@@ -19,7 +19,11 @@ enum ToolSchemaRoot {
 
     private static let unions = ["anyOf", "oneOf", "allOf"]
 
-    private static func fold(_ schema: [String: JSONValue], root: [String: JSONValue], depth: Int) -> [String: JSONValue] {
+    private static func fold(
+        _ schema: [String: JSONValue],
+        root: [String: JSONValue],
+        depth: Int
+    ) -> [String: JSONValue] {
         guard unions.contains(where: { schema[$0] != nil }) else { return schema }
         var out = schema
         var properties = schema["properties"]?.objectValue ?? [:]

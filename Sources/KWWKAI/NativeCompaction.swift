@@ -46,30 +46,55 @@ public struct NativeCompactionResult: Sendable {
 /// Return nil when the route does not support native compaction. Errors from
 /// an available route remain errors so authentication and outages stay visible.
 public protocol NativeCompactionProvider: APIProvider {
-    func compact(model: Model, context: Context, instructions: String,
-                 options: StreamOptions?) async throws -> NativeCompactionResult?
+    func compact(
+        model: Model,
+        context: Context,
+        instructions: String,
+        options: StreamOptions?
+    ) async throws -> NativeCompactionResult?
 }
 
 public typealias NativeCompactionFn = @Sendable (
-    Model, Context, String, StreamOptions?
+    Model,
+    Context,
+    String,
+    StreamOptions?
 ) async throws -> NativeCompactionResult?
 
-public func compactNative(model: Model, context: Context, instructions: String,
-                          options: StreamOptions?) async throws -> NativeCompactionResult? {
+public func compactNative(
+    model: Model,
+    context: Context,
+    instructions: String,
+    options: StreamOptions?
+) async throws -> NativeCompactionResult? {
     guard let provider = await APIRegistry.shared.provider(scope: model.provider, api: model.api)
         as? any NativeCompactionProvider else { return nil }
-    return try await provider.compact(model: model, context: context,
-                                      instructions: instructions, options: options)
+    return try await provider.compact(
+        model: model,
+        context: context,
+        instructions: instructions,
+        options: options
+    )
 }
 
 extension HTTPClient {
     /// Codex V2 must finish and supply exactly one native compaction item.
     /// A partial item followed by EOF must never replace the source history.
-    func compactionSSE(url: URL, headers: [String: String], body: Data,
-                       cancellation: CancellationHandle?) async throws -> JSONValue {
+    func compactionSSE(
+        url: URL,
+        headers: [String: String],
+        body: Data,
+        cancellation: CancellationHandle?
+    ) async throws -> JSONValue {
         try cancellation?.throwIfCancelled()
-        let (response, chunks) = try await stream(url: url, method: "POST", headers: headers,
-            body: body, cancellation: cancellation, timeoutSeconds: 300)
+        let (response, chunks) = try await stream(
+            url: url,
+            method: "POST",
+            headers: headers,
+            body: body,
+            cancellation: cancellation,
+            timeoutSeconds: 300
+        )
         guard (200..<300).contains(response.statusCode) else {
             throw await ProviderFailure.http(response, body: chunks)
         }
@@ -91,18 +116,32 @@ extension HTTPClient {
                 throw ProviderFailure.payload(json["response"] ?? json, fallback: "Native compaction failed")
             }
         }
-        guard completed else { throw ProviderFailure(message: "Native compaction stream closed before response.completed") }
+        guard completed else {
+            throw ProviderFailure(message: "Native compaction stream closed before response.completed")
+        }
         guard items.count == 1, case .string(let encrypted) = items[0]["encrypted_content"], !encrypted.isEmpty else {
-            throw ProviderFailure(message: "Invalid native compaction output: expected exactly one nonempty compaction item")
+            throw ProviderFailure(
+                message: "Invalid native compaction output: expected exactly one nonempty compaction item"
+            )
         }
         return items[0]
     }
 
-    func compactionJSON(url: URL, headers: [String: String], body: Data,
-                        cancellation: CancellationHandle?) async throws -> [String: JSONValue] {
+    func compactionJSON(
+        url: URL,
+        headers: [String: String],
+        body: Data,
+        cancellation: CancellationHandle?
+    ) async throws -> [String: JSONValue] {
         try cancellation?.throwIfCancelled()
-        let (response, chunks) = try await stream(url: url, method: "POST", headers: headers,
-                                                body: body, cancellation: cancellation, timeoutSeconds: 300)
+        let (response, chunks) = try await stream(
+            url: url,
+            method: "POST",
+            headers: headers,
+            body: body,
+            cancellation: cancellation,
+            timeoutSeconds: 300
+        )
         guard (200..<300).contains(response.statusCode) else {
             throw await ProviderFailure.http(response, body: chunks)
         }

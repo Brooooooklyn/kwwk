@@ -53,7 +53,16 @@ struct ToolCallIdCollisionTests {
 
     @Test("ids that differ only in characters Claude refuses stay distinct, each paired with its own result")
     func distinctIdsStayDistinct() throws {
-        let ids = ["Bash:0#ab", "Bash.0#ab", "Bash_0_ab", "Bash 0#ab", "functions.read:0", "functions:read.0", "调用-1", "调用-2"]
+        let ids = [
+            "Bash:0#ab",
+            "Bash.0#ab",
+            "Bash_0_ab",
+            "Bash 0#ab",
+            "functions.read:0",
+            "functions:read.0",
+            "调用-1",
+            "调用-2"
+        ]
         let out = TransformMessages.normalizeToolCallIds(Self.history(ids), model: Self.claude)
         let (calls, results) = Self.pairs(out)
         try #require(calls.count == ids.count)
@@ -125,7 +134,11 @@ struct ToolCallIdCollisionTests {
         let client = StubSSEClient(body: AnthropicToolChoiceTests.minimalSSE)
         let provider = AnthropicProvider(client: client, defaultAPIKey: "test")
         let ids = ["Bash:0#ab", "Bash.0#ab", "Bash_0_ab"]
-        _ = await provider.stream(model: Self.claude, context: Context(messages: Self.history(ids)), options: nil).result()
+        _ = await provider.stream(
+            model: Self.claude,
+            context: Context(messages: Self.history(ids)),
+            options: nil
+        ).result()
         let data = try #require(client.lastRequest?.body)
         let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let messages = try #require(body["messages"] as? [[String: Any]])

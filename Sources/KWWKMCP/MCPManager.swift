@@ -122,7 +122,12 @@ public actor MCPManager {
     public func prepareForSearch(timeout: TimeInterval, cancellation: CancellationHandle? = nil) async -> Bool {
         start()
         let deadline = Date().addingTimeInterval(timeout)
-        var refusedServers: [(name: String, generation: Int, auth: MCPTransportAuth, refused: MCPRefusedCredential?)] = []
+        var refusedServers: [(
+            name: String,
+            generation: Int,
+            auth: MCPTransportAuth,
+            refused: MCPRefusedCredential?
+        )] = []
         for name in order {
             guard let server = servers[name], server.connectTask == nil, server.reconnectTask == nil else { continue }
             switch server.state {
@@ -151,7 +156,10 @@ public actor MCPManager {
                 }
             }
             let renewed = (try? await MCPWait.value(
-                of: check, timeoutSeconds: timeout, cancellation: cancellation, what: "MCP credential check"
+                of: check,
+                timeoutSeconds: timeout,
+                cancellation: cancellation,
+                what: "MCP credential check"
             )) ?? []
             for entry in refusedServers where renewed.contains(entry.name) {
                 // Unless something else happened to the server meanwhile.
@@ -555,12 +563,21 @@ public actor MCPManager {
     /// answer, on a server with an auth provider. An authorization error the
     /// provider raised itself, or a 401 to a server without a provider, is an
     /// ordinary failure.
-    private static func refusal(_ error: Error, capture: MCPRefusalCapture, auth: MCPTransportAuth?) -> MCPRefusedCredential? {
+    private static func refusal(
+        _ error: Error,
+        capture: MCPRefusalCapture,
+        auth: MCPTransportAuth?
+    ) -> MCPRefusedCredential? {
         guard auth != nil, let authError = error as? MCPAuthError, authError.requiresAuthorization else { return nil }
         return capture.refusal
     }
 
-    private func requireAuthorization(_ name: String, client: MCPClient, error: MCPAuthError, refused: MCPRefusedCredential) {
+    private func requireAuthorization(
+        _ name: String,
+        client: MCPClient,
+        error: MCPAuthError,
+        refused: MCPRefusedCredential
+    ) {
         // Only the live connection's own failure counts: a late error from a
         // connection already replaced must not undo a reconnect.
         guard var server = servers[name], server.client === client else { return }

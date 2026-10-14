@@ -35,7 +35,12 @@ struct MCPAuthLifecycleTests {
     let url = URL(string: "https://mcp.example.com/mcp")!
 
     private func transport(_ server: FakeHTTPMCPServer, _ auth: MCPTransportAuth?) -> MCPStreamableHTTPTransport {
-        MCPStreamableHTTPTransport(url: url, headers: ["Authorization": "Bearer static"], httpClient: server, auth: auth)
+        MCPStreamableHTTPTransport(
+            url: url,
+            headers: ["Authorization": "Bearer static"],
+            httpClient: server,
+            auth: auth
+        )
     }
 
     @Test("every request carries the provider's token; a 401 recovers once and retries")
@@ -109,10 +114,16 @@ struct MCPAuthLifecycleTests {
         let provider = MemoryOAuthProvider()
         provider.client = MCPOAuthClientInformation(clientID: "client-1", issuer: "https://auth.example.com")
         provider.storedTokens = MCPOAuthTokens(
-            accessToken: "access-1", refreshToken: "refresh-1", scope: "read write", issuer: "https://auth.example.com"
+            accessToken: "access-1",
+            refreshToken: "refresh-1",
+            scope: "read write",
+            issuer: "https://auth.example.com"
         )
         let transport = MCPStreamableHTTPTransport(
-            url: url, httpClient: mcp, auth: .oauth(provider, interactive: false), authHTTPClient: auth
+            url: url,
+            httpClient: mcp,
+            auth: .oauth(provider, interactive: false),
+            authHTTPClient: auth
         )
         let client = MCPClient(transport: transport)
         try await client.connect(timeoutSeconds: 5)
@@ -150,7 +161,11 @@ struct MCPAuthLifecycleTests {
         await client.close()
     }
 
-    private func manager(_ server: FakeHTTPMCPServer, _ provider: SteppingTokenProvider?, policy: MCPReconnectPolicy = .none) -> MCPManager {
+    private func manager(
+        _ server: FakeHTTPMCPServer,
+        _ provider: SteppingTokenProvider?,
+        policy: MCPReconnectPolicy = .none
+    ) -> MCPManager {
         let url = url
         return MCPManager(
             configs: [MCPServerConfig(name: "remote", transport: .http(url: url), startupTimeoutSeconds: 5)],
@@ -320,7 +335,11 @@ struct MCPAuthLifecycleTests {
             #expect(catalog.registeredTools.count == 2)
         }
         #expect(released == nil)
-        try await manager.addServer(MCPServerConfig(name: "second", transport: .http(url: url), startupTimeoutSeconds: 5))
+        try await manager.addServer(MCPServerConfig(
+            name: "second",
+            transport: .http(url: url),
+            startupTimeoutSeconds: 5
+        ))
         await manager.waitForStartup(timeout: 5)
         #expect(await waitUntil { await manager.observerCount == 0 })
         await manager.shutdown()
@@ -333,7 +352,11 @@ struct MCPAuthLifecycleTests {
         let seen = Collector<[String]>()
         await manager.onToolsChanged { tools in seen.append(tools.map(\.tool.name)) }
         await manager.waitForStartup(timeout: 5)
-        try await manager.addServer(MCPServerConfig(name: "second", transport: .http(url: url), startupTimeoutSeconds: 5))
+        try await manager.addServer(MCPServerConfig(
+            name: "second",
+            transport: .http(url: url),
+            startupTimeoutSeconds: 5
+        ))
         await manager.waitForStartup(timeout: 5)
         #expect(await manager.tools().map(\.server) == ["remote", "remote", "second", "second"])
         await #expect(throws: MCPManagerError.duplicateServer("second")) {
@@ -383,7 +406,9 @@ struct MCPAuthLifecycleTests {
             .image(data: "aGVsbG8=", mimeType: "image/png"),
         ])
         let converted = try await MCPToolAdapter.convert(
-            server: "s", tool: "t", result: result,
+            server: "s",
+            tool: "t",
+            result: result,
             options: MCPResultOptions(maxTokens: 100, imageTokens: 50, spill: spill, files: nil)
         )
         guard case .text(let shown)? = converted.content.first, case .text(let note)? = converted.content.last else {
@@ -398,7 +423,10 @@ struct MCPAuthLifecycleTests {
         #expect(spill.received?.images.count == 1)
         // Within the limit nothing changes.
         let small = try await MCPToolAdapter.convert(
-            server: "s", tool: "t", result: MCPCallToolResult(content: [.text("hi")]), options: .default
+            server: "s",
+            tool: "t",
+            result: MCPCallToolResult(content: [.text("hi")]),
+            options: .default
         )
         #expect(small.content.count == 1)
     }
@@ -408,7 +436,10 @@ struct MCPAuthLifecycleTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("kwwk-spill-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let location = try await MCPDirectoryResultSpill(directory: directory).spill(MCPSpilledResult(
-            server: "s-1", tool: "t", text: "full", images: [(data: "aGVsbG8=", mimeType: "image/png")]
+            server: "s-1",
+            tool: "t",
+            text: "full",
+            images: [(data: "aGVsbG8=", mimeType: "image/png")]
         ))
         let paths = location.components(separatedBy: ", ")
         #expect(paths.count == 2)

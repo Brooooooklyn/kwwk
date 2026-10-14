@@ -113,7 +113,10 @@ struct OAuthLoginShapeTests {
         let opened = LockedBox<[URL]>([])
         _ = try await OAuthLogin.loginGitHubCopilot(
             clientID: "test-client",
-            callbacks: OAuthLogin.Callbacks(onAuthURL: { url in opened.set(opened.get() + [url]) }, onProgress: { _ in }),
+            callbacks: OAuthLogin.Callbacks(
+                onAuthURL: { url in opened.set(opened.get() + [url]) },
+                onProgress: { _ in }
+            ),
             client: client,
             pollSleep: { _ in }
         )
@@ -836,7 +839,10 @@ struct OAuthLoginShapeTests {
     func zaiLoginNoPlan() async throws {
         // A port for each sign-in: the last one's listener may not have let
         // go of its own yet.
-        let lists = [#"{"code":200,"data":[]}"#, #"{"code":200,"data":[{"productName":"GLM Coding Lite","status":"EXPIRED"}]}"#]
+        let lists = [
+            #"{"code":200,"data":[]}"#,
+            #"{"code":200,"data":[{"productName":"GLM Coding Lite","status":"EXPIRED"}]}"#
+        ]
         for (list, port) in zip(lists, [54555, 54557] as [UInt16]) {
             do {
                 _ = try await zaiLogin(
@@ -853,7 +859,11 @@ struct OAuthLoginShapeTests {
 
     @Test("zai login keeps the key when the subscriptions cannot be read, and names the plan when they can")
     func zaiLoginPlanRead() async throws {
-        let unreadable = [(status: 500, body: ""), (status: 200, body: "<html>"), (status: 200, body: #"{"code":500,"msg":"boom"}"#)]
+        let unreadable = [
+            (status: 500, body: ""),
+            (status: 200, body: "<html>"),
+            (status: 200, body: #"{"code":500,"msg":"boom"}"#)
+        ]
         for (unread, port) in zip(unreadable, [54556, 54558, 54559] as [UInt16]) {
             let (creds, _) = try await zaiLogin(
                 port: port, customer: Self.zaiOneProject,

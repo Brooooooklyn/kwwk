@@ -28,7 +28,10 @@ final class QueuedHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     func stream(
-        url: URL, method: String, headers: [String: String], body: Data?,
+        url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?,
         cancellation: CancellationHandle?
     ) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         let answer: Answer = lock.withLock {
@@ -42,7 +45,10 @@ final class QueuedHTTPClient: HTTPClient, @unchecked Sendable {
             var fields = ["content-type": "application/json"]
             for (key, value) in extra { fields[key] = value }
             let response = HTTPURLResponse(
-                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields
+                url: url,
+                statusCode: status,
+                httpVersion: "HTTP/1.1",
+                headerFields: fields
             )!
             let data = Data(body.utf8)
             return (response, AsyncThrowingStream { continuation in

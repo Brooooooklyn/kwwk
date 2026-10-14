@@ -657,7 +657,10 @@ extension Agent {
     }
 
     private func runLifecycle(
-        _ executor: @escaping @Sendable (_ cancellation: CancellationHandle, _ emit: @escaping AgentEventSink) async throws -> Void
+        _ executor: @escaping @Sendable (
+            _ cancellation: CancellationHandle,
+            _ emit: @escaping AgentEventSink
+        ) async throws -> Void
     ) async throws {
         let cancellation = try acquireRun()
         await runOwnedLifecycle(cancellation: cancellation, executor)
@@ -682,7 +685,10 @@ extension Agent {
 
     private func runOwnedLifecycle(
         cancellation: CancellationHandle,
-        _ executor: @escaping @Sendable (_ cancellation: CancellationHandle, _ emit: @escaping AgentEventSink) async throws -> Void
+        _ executor: @escaping @Sendable (
+            _ cancellation: CancellationHandle,
+            _ emit: @escaping AgentEventSink
+        ) async throws -> Void
     ) async {
         let emit: AgentEventSink = { [weak self] event in
             await self?.processEvent(event, cancellation: cancellation)

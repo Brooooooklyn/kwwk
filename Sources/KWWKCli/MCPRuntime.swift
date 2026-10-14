@@ -35,7 +35,9 @@ final class MCPRuntime: Sendable {
         let loaded = MCPConfigFile.load(
             cwd: cwd,
             homeDirectory: homeDirectory,
-            trustProject: ["1", "true", "yes"].contains(environment[Self.allowProjectServersVariable]?.lowercased() ?? ""),
+            trustProject: ["1", "true", "yes"].contains(
+                environment[Self.allowProjectServersVariable]?.lowercased() ?? ""
+            ),
             environment: environment
         )
         // A server whose every tool is hidden contributes nothing: don't run it.
@@ -49,7 +51,12 @@ final class MCPRuntime: Sendable {
         var auth: [String: MCPTransportAuth] = [:]
         for entry in entries {
             guard let settings = entry.oauth, case .http(let url, _) = entry.server.transport else { continue }
-            let port = MCPOAuthCLI.callbackPort(server: entry.server.name, serverURL: url, settings: settings, records: records)
+            let port = MCPOAuthCLI.callbackPort(
+                server: entry.server.name,
+                serverURL: url,
+                settings: settings,
+                records: records
+            )
             let provider = CLIMCPOAuthProvider(
                 server: entry.server.name,
                 serverURL: url,
@@ -194,7 +201,9 @@ func registerMCPSlashCommand(_ registry: SlashCommandRegistry, runtime: MCPRunti
                 case .closed: state = "closed"
                 }
                 let active = loaded.filter { $0 == status.name }.count
-                lines.append(Style.dimmed("    \(status.name) · \(state) · \(status.toolCount) tools, \(active) loaded"))
+                lines.append(
+                    Style.dimmed("    \(status.name) · \(state) · \(status.toolCount) tools, \(active) loaded")
+                )
             }
             lines += runtime.warnings.map { Style.dimmed("    warning: \($0)") }
             ctx.notifyBlock(lines)

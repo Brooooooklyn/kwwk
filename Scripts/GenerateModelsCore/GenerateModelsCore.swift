@@ -11,7 +11,9 @@ public enum GenerateModelsCore {
         let raw = try String(contentsOf: inputURL, encoding: .utf8)
         let overrides = try overridesFile.map { try Data(contentsOf: $0) }
         return try generate(
-            from: raw, resolvingImportsRelativeTo: inputURL.deletingLastPathComponent(), overrides: overrides
+            from: raw,
+            resolvingImportsRelativeTo: inputURL.deletingLastPathComponent(),
+            overrides: overrides
         )
     }
 
@@ -48,7 +50,9 @@ public enum GenerateModelsCore {
     }
 
     private static func generate(
-        from raw: String, resolvingImportsRelativeTo baseURL: URL?, overrides: Data?
+        from raw: String,
+        resolvingImportsRelativeTo baseURL: URL?,
+        overrides: Data?
     ) throws -> ModelGenerationResult {
         let expanded = try inlineImportedModelObjects(in: raw, baseURL: baseURL)
         let json = try convert(expanded)

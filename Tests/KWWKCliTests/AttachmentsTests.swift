@@ -210,7 +210,10 @@ struct BuildPromptTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         for name in ["a.txt", "b.md", "sub"] {
             if name == "sub" {
-                try FileManager.default.createDirectory(at: dir.appendingPathComponent(name), withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: dir.appendingPathComponent(name),
+                    withIntermediateDirectories: true
+                )
             } else {
                 try "x".write(toFile: dir.appendingPathComponent(name).path, atomically: true, encoding: .utf8)
             }

@@ -67,7 +67,11 @@ struct MCPOAuthCLITests {
         let store = MCPOAuthFileStore(url: url)
         let serverURL = URL(string: "https://a.example/mcp")!
         let provider = CLIMCPOAuthProvider(
-            server: "a", serverURL: serverURL, settings: MCPOAuthSettings(), store: store, callbackPort: 4567
+            server: "a",
+            serverURL: serverURL,
+            settings: MCPOAuthSettings(),
+            store: store,
+            callbackPort: 4567
         )
         await store.remember(port: 4567, server: "a")
         try await provider.saveTokens(MCPOAuthTokens(accessToken: "t1", refreshToken: "r1"), context: nil)
@@ -87,7 +91,11 @@ struct MCPOAuthCLITests {
 
         // The same name at another URL starts clean.
         let moved = CLIMCPOAuthProvider(
-            server: "a", serverURL: URL(string: "https://b.example/mcp")!, settings: MCPOAuthSettings(), store: store, callbackPort: 1
+            server: "a",
+            serverURL: URL(string: "https://b.example/mcp")!,
+            settings: MCPOAuthSettings(),
+            store: store,
+            callbackPort: 1
         )
         #expect(try await moved.tokens(nil) == nil)
 
@@ -106,8 +114,11 @@ struct MCPOAuthCLITests {
         settings.clientID = "fixed"
         settings.clientSecret = "shh"
         let provider = CLIMCPOAuthProvider(
-            server: "a", serverURL: URL(string: "https://a.example/mcp")!, settings: settings,
-            store: MCPOAuthFileStore(url: root.appendingPathComponent("s.json")), callbackPort: 1
+            server: "a",
+            serverURL: URL(string: "https://a.example/mcp")!,
+            settings: settings,
+            store: MCPOAuthFileStore(url: root.appendingPathComponent("s.json")),
+            callbackPort: 1
         )
         try await provider.saveClientInformation(MCPOAuthClientInformation(clientID: "dynamic"), context: nil)
         let client = try await provider.clientInformation(nil)

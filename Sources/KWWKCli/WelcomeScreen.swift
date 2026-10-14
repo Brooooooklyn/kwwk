@@ -58,7 +58,10 @@ enum WelcomeScreen {
 
         var lines: [String] = []
         let margin = "  "
-        lines.append(margin + Box.top(width: boxWidth, label: Theme.gradient("kwwk", bold: true) + Theme.faintText(" v\(ctx.version)")))
+        lines.append(margin + Box.top(
+            width: boxWidth,
+            label: Theme.gradient("kwwk", bold: true) + Theme.faintText(" v\(ctx.version)")
+        ))
         lines.append(margin + Box.row("", width: boxWidth))
         for i in 0..<rows {
             let l = i < left.count ? left[i] : ""

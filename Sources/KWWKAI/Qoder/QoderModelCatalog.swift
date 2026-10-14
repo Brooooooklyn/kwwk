@@ -75,7 +75,9 @@ public enum QoderModels {
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> [Model] {
         guard let account = QoderAccount(token: credentials.access, fields: credentials.extras) else {
-            throw ProviderFailure(message: "\(site.name): the stored login carries no account id (run /login \(site.id) again)")
+            throw ProviderFailure(
+                message: "\(site.name): the stored login carries no account id (run /login \(site.id) again)"
+            )
         }
         return try await fetchListing(baseURL: site.api, account: account, client: client)
             .map { model($0, site: site) }
@@ -85,14 +87,24 @@ public enum QoderModels {
     /// same COSY envelope as every `/algo` call, signed over an empty body;
     /// the answer is plain JSON.
     static func fetchListing(
-        baseURL: String, account: QoderAccount, client: HTTPClient, cancellation: CancellationHandle? = nil
+        baseURL: String,
+        account: QoderAccount,
+        client: HTTPClient,
+        cancellation: CancellationHandle? = nil
     ) async throws -> [QoderModelInfo] {
         let url = baseURL + listPath
         let headers = try QoderCosy.headers(
-            url: url, account: account, body: "", timestamp: Int64(Date().timeIntervalSince1970)
+            url: url,
+            account: account,
+            body: "",
+            timestamp: Int64(Date().timeIntervalSince1970)
         )
         let (response, body) = try await client.request(
-            url: URL(string: url)!, method: "GET", headers: headers, body: nil, cancellation: cancellation
+            url: URL(string: url)!,
+            method: "GET",
+            headers: headers,
+            body: nil,
+            cancellation: cancellation
         )
         guard (200..<300).contains(response.statusCode) else {
             throw QoderChatProvider.failure(status: response.statusCode, body: body)
@@ -398,8 +410,11 @@ extension QoderAccount {
         }
         guard !field("uid").isEmpty else { return nil }
         self.init(
-            uid: field("uid"), name: field("name"), email: field("email"),
-            token: token, machineId: field("machineId")
+            uid: field("uid"),
+            name: field("name"),
+            email: field("email"),
+            token: token,
+            machineId: field("machineId")
         )
     }
 }

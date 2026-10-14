@@ -328,7 +328,10 @@ struct CursorHTTPFailureParityTests {
 
     @Test("a Connect error answered over HTTP reads as it does in an end frame")
     func connectErrorOverHTTP() throws {
-        let expired = CursorConnectResponse.failureFromHTTP(status: 401, body: #"{"code":"unauthenticated","message":"token expired"}"#)
+        let expired = CursorConnectResponse.failureFromHTTP(
+            status: 401,
+            body: #"{"code":"unauthenticated","message":"token expired"}"#
+        )
         #expect(expired.message.hasSuffix("token expired"))
         #expect(expired.category == .authentication)
 
@@ -353,11 +356,17 @@ struct CursorHTTPFailureParityTests {
     /// to wait out.
     @Test("a status that is not Connect's rendering of the code is kept")
     func statusTheCodeDoesNotExplain() {
-        let lapsed = CursorConnectResponse.failureFromHTTP(status: 401, body: #"{"code":"unknown","message":"session ended"}"#)
+        let lapsed = CursorConnectResponse.failureFromHTTP(
+            status: 401,
+            body: #"{"code":"unknown","message":"session ended"}"#
+        )
         #expect(lapsed.httpStatus == 401)
         #expect(lapsed.category == .authentication)
 
-        let unpaid = CursorConnectResponse.failureFromHTTP(status: 402, body: #"{"code":"resource_exhausted","message":"Error"}"#)
+        let unpaid = CursorConnectResponse.failureFromHTTP(
+            status: 402,
+            body: #"{"code":"resource_exhausted","message":"Error"}"#
+        )
         #expect(unpaid.httpStatus == 402)
         #expect(unpaid.category == .quota)
         #expect(!unpaid.isRetryable)

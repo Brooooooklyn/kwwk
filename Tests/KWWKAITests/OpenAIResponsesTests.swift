@@ -531,7 +531,11 @@ struct OpenAIResponsesTests {
             context: Context(messages: [
                 .user(UserMessage(text: "compute")),
                 .assistant(assistant),
-                .toolResult(ToolResultMessage(toolCallId: foreign, toolName: "calc", content: [.text(TextContent(text: "1"))])),
+                .toolResult(ToolResultMessage(
+                    toolCallId: foreign,
+                    toolName: "calc",
+                    content: [.text(TextContent(text: "1"))]
+                )),
             ]),
             options: nil
         )

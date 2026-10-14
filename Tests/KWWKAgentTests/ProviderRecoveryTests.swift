@@ -5,7 +5,13 @@ import KWWKAI
 
 @Suite("Structured provider recovery")
 struct ProviderRecoveryTests {
-    private let model = Model(id: "recovery-test", api: "faux", provider: "test", contextWindow: 100_000, maxTokens: 1_000)
+    private let model = Model(
+        id: "recovery-test",
+        api: "faux",
+        provider: "test",
+        contextWindow: 100_000,
+        maxTokens: 1_000
+    )
 
     @Test("committed text and tool calls are never automatically replayed", arguments: [false, true])
     func preventsUnsafeReplay(tool: Bool) async throws {
@@ -19,8 +25,14 @@ struct ProviderRecoveryTests {
                 : .text(TextContent(text: "committed output"))
             let partial = AssistantMessage(content: [block], api: model.api, provider: model.provider, model: model.id)
             pair.continuation.push(.start(partial: partial))
-            let failure = AssistantMessage(content: [], api: model.api, provider: model.provider, model: model.id,
-                                           stopReason: .error, errorMessage: "connection reset")
+            let failure = AssistantMessage(
+                content: [],
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
+                stopReason: .error,
+                errorMessage: "connection reset"
+            )
             pair.continuation.push(.error(reason: .error, error: failure))
             pair.continuation.end(failure)
             return pair.stream
@@ -42,9 +54,15 @@ struct ProviderRecoveryTests {
         let agent = Agent(initialState: .init(model: model), streamFn: { _, _, _ in
             await attempts.record()
             let pair = AssistantMessageStream.makeStream()
-            let message = AssistantMessage(content: [], api: model.api, provider: model.provider, model: model.id,
-                                           stopReason: .error, errorMessage: "503 connection timed out",
-                                           failure: .init(message: "busy", httpStatus: status, shouldRetry: status == 402))
+            let message = AssistantMessage(
+                content: [],
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
+                stopReason: .error,
+                errorMessage: "503 connection timed out",
+                failure: .init(message: "busy", httpStatus: status, shouldRetry: status == 402)
+            )
             pair.continuation.end(message)
             return pair.stream
         })
@@ -58,21 +76,32 @@ struct ProviderRecoveryTests {
         let attempts = RecoveryAttempts()
         let model = model
         let request = CompactionSummaryRequest(
-            messages: [.user(UserMessage(text: "preserve this work"))], model: model, sessionId: "live",
-            config: .init(summaryRetryPolicy: .init(baseDelayMs: 0)), previousSummary: nil, kind: .history,
-            reasoning: nil, authResolver: nil, stream: { _, context, options in
+            messages: [.user(UserMessage(text: "preserve this work"))],
+            model: model,
+            sessionId: "live",
+            config: .init(summaryRetryPolicy: .init(baseDelayMs: 0)),
+            previousSummary: nil,
+            kind: .history,
+            reasoning: nil,
+            authResolver: nil,
+            stream: { _, context, options in
                 let index = await attempts.record(context: context)
                 #expect(options?.sessionId != "live")
                 if index == 1 && thrown { throw URLError(.timedOut) }
                 let pair = AssistantMessageStream.makeStream()
                 pair.continuation.end(AssistantMessage(
                     content: index == 1 ? [] : [.text(TextContent(text: "durable summary"))],
-                    api: model.api, provider: model.provider, model: model.id,
+                    api: model.api,
+                    provider: model.provider,
+                    model: model.id,
                     stopReason: index == 1 ? .error : .stop,
                     errorMessage: index == 1 ? "busy" : nil,
-                    failure: index == 1 ? .init(message: "busy", httpStatus: 503) : nil))
+                    failure: index == 1 ? .init(message: "busy", httpStatus: 503) : nil
+                ))
                 return pair.stream
-            }, cancellation: nil)
+            },
+            cancellation: nil
+        )
         let summary = try await CompactionSummaryGenerator.generate(request)
         #expect(summary == "durable summary")
         #expect(await attempts.count == 2)

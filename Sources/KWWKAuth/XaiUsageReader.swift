@@ -35,7 +35,9 @@ public struct XaiUsageReader: OAuthUsageReader {
         )
         guard let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode, detail: "undecodable body"
+                providerId: providerId,
+                status: response.statusCode,
+                detail: "undecodable body"
             )
         }
         return Self.windows(from: payload)

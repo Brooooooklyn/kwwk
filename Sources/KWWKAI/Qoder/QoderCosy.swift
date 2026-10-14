@@ -27,7 +27,10 @@ enum QoderCosy {
     /// Every header of a Qoder call to `url` whose body, already in its wire
     /// (encoded) form, is `body`. `timestamp` is Unix seconds.
     static func headers(
-        url: String, account: QoderAccount, body: String, timestamp: Int64
+        url: String,
+        account: QoderAccount,
+        body: String,
+        timestamp: Int64
     ) throws -> [String: String] {
         guard !account.machineId.isEmpty else {
             throw ProviderFailure(message: "Qoder: missing account machine id (run /login again)")
@@ -50,7 +53,11 @@ enum QoderCosy {
             options: [.sortedKeys, .withoutEscapingSlashes]
         ).base64EncodedString()
         let sig = signature(
-            payload: payload, key: wrappedKey, timestamp: timestamp, body: body, path: signedPath(url)
+            payload: payload,
+            key: wrappedKey,
+            timestamp: timestamp,
+            body: body,
+            path: signedPath(url)
         )
         return [
             "Accept": "application/json",
@@ -281,7 +288,9 @@ enum QoderRSA {
         }
 
         var bytes: [UInt8] {
-            limbs.reversed().flatMap { limb in (0..<8).reversed().map { UInt8(truncatingIfNeeded: limb >> UInt64($0 * 8)) } }
+            limbs.reversed().flatMap { limb in
+                (0..<8).reversed().map { UInt8(truncatingIfNeeded: limb >> UInt64($0 * 8)) }
+            }
         }
 
         /// Doubles in place; true when a bit fell off the top.

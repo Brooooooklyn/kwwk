@@ -115,8 +115,11 @@ enum Ask {
                 }
             }()
             return AskQuestion(
-                id: id, question: question, options: options,
-                multi: multi, recommended: recommended
+                id: id,
+                question: question,
+                options: options,
+                multi: multi,
+                recommended: recommended
             )
         }
     }

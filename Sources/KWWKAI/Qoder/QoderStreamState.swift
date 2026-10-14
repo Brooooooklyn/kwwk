@@ -83,10 +83,12 @@ struct QoderToolCallSplitter {
     }
 
     private static let function = try! NSRegularExpression(
-        pattern: "\u{3C}function=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/function\u{3E}", options: [.dotMatchesLineSeparators]
+        pattern: "\u{3C}function=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/function\u{3E}",
+        options: [.dotMatchesLineSeparators]
     )
     private static let parameter = try! NSRegularExpression(
-        pattern: "\u{3C}parameter=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/parameter\u{3E}", options: [.dotMatchesLineSeparators]
+        pattern: "\u{3C}parameter=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/parameter\u{3E}",
+        options: [.dotMatchesLineSeparators]
     )
 
     /// Reads one block: a JSON `{name, arguments}`, or the XML
@@ -282,8 +284,13 @@ final class QoderStreamState: @unchecked Sendable {
             var settled = usage
             settled.cost = calculateCost(model: model, usage: settled)
             return AssistantMessage(
-                content: blocks, api: api, provider: model.provider, model: model.id,
-                usage: settled, stopReason: stopReasonOverride ?? derived, timestamp: Timestamp.now()
+                content: blocks,
+                api: api,
+                provider: model.provider,
+                model: model.id,
+                usage: settled,
+                stopReason: stopReasonOverride ?? derived,
+                timestamp: Timestamp.now()
             )
         }
     }

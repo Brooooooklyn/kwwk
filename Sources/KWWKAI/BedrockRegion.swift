@@ -157,7 +157,9 @@ enum BedrockCredentials {
     /// Dummy SigV4 credentials used when `AWS_BEDROCK_SKIP_AUTH=1` and no real
     /// credentials are configured. Mirrors pi's skip-auth dummy creds.
     static let dummy = AWSSigV4.Credentials(
-        accessKeyId: "dummy-access-key", secretAccessKey: "dummy-secret-key")
+        accessKeyId: "dummy-access-key",
+        secretAccessKey: "dummy-secret-key"
+    )
 
     /// Minimal INI parser: returns the key/value pairs under `[<name>]`.
     /// Exposed `internal` for unit tests.

@@ -66,10 +66,12 @@ extension QoderChatProvider {
                 wait = Int(seconds.rounded(.up))
             }
             let model = (queue?["modelKey"] as? String).flatMap { $0.isEmpty ? nil : " for \($0)" } ?? ""
-            let tier = (queue?["queueType"] as? String).flatMap { $0.isEmpty ? nil : " (this plan's queue: \($0))" } ?? ""
+            let tier = (queue?["queueType"] as? String)
+                .flatMap { $0.isEmpty ? nil : " (this plan's queue: \($0))" } ?? ""
             return ProviderFailure(
                 message: "Qoder \(isQueued ? "queued the request" : "is busy")\(model)\(tier); try again in \(wait)s",
-                httpStatus: 503, retryAfterMs: Double(wait) * 1000
+                httpStatus: 503,
+                retryAfterMs: Double(wait) * 1000
             )
         }
         if quotaCodes.contains(code) {

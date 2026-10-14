@@ -5,12 +5,21 @@ import Testing
 
 @Suite("Summary provider overflow recovery")
 struct CompactionOverflowTests {
-    private let model = Model(id: "summary-overflow", api: "faux", provider: "faux",
-                              contextWindow: 40_000, maxTokens: 1_000)
+    private let model = Model(
+        id: "summary-overflow",
+        api: "faux",
+        provider: "faux",
+        contextWindow: 40_000,
+        maxTokens: 1_000
+    )
 
     private var config: AgentContextCompactionConfig {
-        .init(minMessages: 1, keepRecentTokens: 1, messageTextByteLimit: 200_000,
-              summaryRetryPolicy: .init(baseDelayMs: 0))
+        .init(
+            minMessages: 1,
+            keepRecentTokens: 1,
+            messageTextByteLimit: 200_000,
+            summaryRetryPolicy: .init(baseDelayMs: 0)
+        )
     }
 
     @Test("rejected summaries shrink and preserve ordered history", arguments: [false, true], [false, true])
@@ -42,10 +51,14 @@ struct CompactionOverflowTests {
     @Test("an indivisible oversized message is bounded on retry")
     func shrinksSingleMessage() async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "retained tail")),
-        ], log: log, limit: 9_000)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "retained tail")),
+            ],
+            log: log,
+            limit: 9_000
+        )
         guard case .success = result else {
             Issue.record("Expected bounded single-message recovery, got \(result)")
             return
@@ -61,10 +74,15 @@ struct CompactionOverflowTests {
     ])
     func nonOverflowIsTerminal(reason: String) async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 10_000))),
-            .user(UserMessage(text: "tail")),
-        ], log: log, limit: 0, reason: reason)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 10_000))),
+                .user(UserMessage(text: "tail")),
+            ],
+            log: log,
+            limit: 0,
+            reason: reason
+        )
         guard case .failure = result else { Issue.record("Expected failure"); return }
         let calls = await log.calls
         #expect(calls.count == (reason.contains("refusal") ? 1 : 5))
@@ -74,10 +92,15 @@ struct CompactionOverflowTests {
     @Test("Kimi's plan refusal shrinks the summary input like any overflow")
     func kimiPlanRefusalShrinks() async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "retained tail")),
-        ], log: log, limit: 9_000, kimiPlanRefusal: true)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "retained tail")),
+            ],
+            log: log,
+            limit: 9_000,
+            kimiPlanRefusal: true
+        )
         guard case .success = result else {
             Issue.record("Expected recovery from the plan refusal, got \(result)")
             return
@@ -91,10 +114,15 @@ struct CompactionOverflowTests {
     @Test("an empty summary shrinks the chunk and retries")
     func emptySummaryShrinks() async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "retained tail")),
-        ], log: log, limit: 9_000, emptyWhenRejected: true)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "retained tail")),
+            ],
+            log: log,
+            limit: 9_000,
+            emptyWhenRejected: true
+        )
         guard case .success = result else {
             Issue.record("Expected recovery from an empty summary, got \(result)")
             return
@@ -108,10 +136,15 @@ struct CompactionOverflowTests {
     @Test("persistently empty summaries stop at the minimum budget")
     func persistentEmptySummaryStopsAtFloor() async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "tail")),
-        ], log: log, limit: 0, emptyWhenRejected: true)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "tail")),
+            ],
+            log: log,
+            limit: 0,
+            emptyWhenRejected: true
+        )
         guard case .failure(.failed(let reason)) = result else {
             Issue.record("Expected a terminal empty summary, got \(result)")
             return
@@ -127,10 +160,14 @@ struct CompactionOverflowTests {
     @Test("persistent overflow stops at the minimum budget")
     func stopsAtFloor() async {
         let log = OverflowLog()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "tail")),
-        ], log: log, limit: 0)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "tail")),
+            ],
+            log: log,
+            limit: 0
+        )
         guard case .failure = result else { Issue.record("Expected terminal overflow"); return }
         let calls = await log.calls
         #expect(calls.count > 1 && calls.count < 8)
@@ -143,30 +180,44 @@ struct CompactionOverflowTests {
     func cancellationStopsRecovery() async {
         let log = OverflowLog()
         let cancellation = CancellationHandle()
-        let result = await compact([
-            .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
-            .user(UserMessage(text: "tail")),
-        ], log: log, limit: 0, cancelOnResponse: cancellation)
+        let result = await compact(
+            [
+                .user(UserMessage(text: String(repeating: " payload", count: 14_000))),
+                .user(UserMessage(text: "tail")),
+            ],
+            log: log,
+            limit: 0,
+            cancelOnResponse: cancellation
+        )
         guard case .failure = result else { Issue.record("Expected cancellation"); return }
         #expect(await log.calls.count == 1)
     }
 
     private func compact(
-        _ messages: [Message], log: OverflowLog, limit: Int, thrown: Bool = false, nested: Bool = false,
+        _ messages: [Message],
+        log: OverflowLog,
+        limit: Int,
+        thrown: Bool = false,
+        nested: Bool = false,
         reason: String = "This model's maximum prompt length is 500000 but the request contains 536700 tokens.",
-        cancelOnResponse: CancellationHandle? = nil, kimiPlanRefusal: Bool = false,
+        cancelOnResponse: CancellationHandle? = nil,
+        kimiPlanRefusal: Bool = false,
         emptyWhenRejected: Bool = false
     ) async -> Result<AgentContextCompactionResult, AgentContextCompactionFailure> {
         // Completed turns may be evicted; unanswered user messages must stay.
         let history = messages.dropLast().flatMap { message in
             [message, .assistant(AssistantMessage(
                 content: [.text(TextContent(text: "completed"))],
-                api: model.api, provider: model.provider, model: model.id
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             ))]
         } + messages.suffix(1)
         return await AgentContextCompactor.compactContext(
             context: AgentContext(systemPrompt: "", messages: history, tools: []),
-            model: model, sessionId: "overflow-test", config: config,
+            model: model,
+            sessionId: "overflow-test",
+            config: config,
             streamFn: { model, context, _ in
                 let text = context.messages.compactMap { message -> String? in
                     guard case .user(let user) = message else { return nil }
@@ -194,14 +245,18 @@ struct CompactionOverflowTests {
                     // A clean stop with no text, as Kimi k3 answers some summaries.
                     pair.continuation.end(AssistantMessage(
                         content: [.text(TextContent(text: ""))],
-                        api: model.api, provider: model.provider, model: model.id,
+                        api: model.api,
+                        provider: model.provider,
+                        model: model.id,
                         stopReason: .stop
                     ))
                     return pair.stream
                 }
                 pair.continuation.end(AssistantMessage(
                     content: accepted ? [.text(TextContent(text: "durable-summary"))] : [],
-                    api: model.api, provider: model.provider, model: model.id,
+                    api: model.api,
+                    provider: model.provider,
+                    model: model.id,
                     stopReason: accepted ? .stop : .error,
                     errorMessage: accepted ? nil : (failure?.message ?? reason),
                     failure: failure

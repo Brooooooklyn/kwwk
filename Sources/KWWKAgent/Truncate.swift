@@ -172,7 +172,8 @@ public enum Truncate {
 
     /// Truncate a single line to `maxChars` characters, adding a suffix if needed.
     public static func truncateLine(
-        _ line: String, maxChars: Int = grepMaxLineLength
+        _ line: String,
+        maxChars: Int = grepMaxLineLength
     ) -> (text: String, wasTruncated: Bool) {
         if line.count <= maxChars { return (line, false) }
         let idx = line.index(line.startIndex, offsetBy: maxChars)

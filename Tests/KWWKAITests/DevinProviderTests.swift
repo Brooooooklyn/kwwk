@@ -108,7 +108,9 @@ private func devinTestModel(
     )
 }
 
-private func collect(_ stream: AssistantMessageStream) async -> (events: [AssistantMessageEvent], final: AssistantMessage?) {
+private func collect(
+    _ stream: AssistantMessageStream
+) async -> (events: [AssistantMessageEvent], final: AssistantMessage?) {
     var events: [AssistantMessageEvent] = []
     var final: AssistantMessage?
     for await event in stream {
@@ -285,7 +287,12 @@ struct DevinProviderStreamTests {
                           .toolCall(ToolCall(id: "c1", name: "ls", arguments: .object([:])))],
                 api: "devin-agent", provider: "devin", model: "swe-1-6", responseId: "resp-9"
             )),
-            .toolResult(ToolResultMessage(toolCallId: "c1", toolName: "ls", content: [.text(TextContent(text: "a b"))], isError: true)),
+            .toolResult(ToolResultMessage(
+                toolCallId: "c1",
+                toolName: "ls",
+                content: [.text(TextContent(text: "a b"))],
+                isError: true
+            )),
         ]
         let prompts = DevinAgentProvider.chatMessagePrompts(messages, cascadeId: "c", model: model)
         #expect(prompts.count == 3)
@@ -465,7 +472,11 @@ struct DevinProviderStreamTests {
         #expect(thinking.thinking == "Red disc on white is Japan.")
         #expect(thinking.thinkingSignature == "CAIShAQKlw")
 
-        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(message)], cascadeId: "c", model: devinTestModel())
+        let prompts = DevinAgentProvider.chatMessagePrompts(
+            [.assistant(message)],
+            cascadeId: "c",
+            model: devinTestModel()
+        )
         #expect(prompts.first?.thinking == "Red disc on white is Japan.")
         #expect(prompts.first?.signature == "CAIShAQKlw")
     }
@@ -478,7 +489,11 @@ struct DevinProviderStreamTests {
                       .thinking(ThinkingContent(thinking: "b", thinkingSignature: "sig-b"))],
             api: "devin-agent", provider: "devin", model: "swe-1-6", responseId: "resp-1"
         )
-        let prompts = DevinAgentProvider.chatMessagePrompts([.assistant(assistant)], cascadeId: "c", model: devinTestModel())
+        let prompts = DevinAgentProvider.chatMessagePrompts(
+            [.assistant(assistant)],
+            cascadeId: "c",
+            model: devinTestModel()
+        )
         #expect(prompts.first?.thinking == "ab")
         #expect(prompts.first?.signature == "")
     }
@@ -535,7 +550,12 @@ struct DevinProviderStreamTests {
             </tool_descriptions>
             """
         let history: [Message] = [
-            .assistant(AssistantMessage(content: [.text(TextContent(text: "earlier"))], api: "x", provider: "x", model: "x")),
+            .assistant(AssistantMessage(
+                content: [.text(TextContent(text: "earlier"))],
+                api: "x",
+                provider: "x",
+                model: "x"
+            )),
             .user(UserMessage(text: "first")),
             .user(UserMessage(text: "second")),
         ]
@@ -683,7 +703,12 @@ struct DevinModelNormalizationTests {
         c.disabled = disabled
         c.maxTokens = 400_000
         var info = DevinProto.ModelInfo()
-        info.modelFeatures = .init(supportsImages: images, supportsToolCalls: true, supportsParallelToolCalls: true, supportsThinking: thinking)
+        info.modelFeatures = .init(
+            supportsImages: images,
+            supportsToolCalls: true,
+            supportsParallelToolCalls: true,
+            supportsThinking: thinking
+        )
         info.maxOutputTokens = 32_000
         info.displayOption = display
         info.isModelRouter = router
@@ -813,7 +838,10 @@ struct DevinOAuthLoginTests {
         #expect(creds.expires == 4_102_444_800_000 - 5 * 60 * 1000)
 
         let url = try #require(authURL.get())
-        let items = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        let items = Dictionary(
+            uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+                .map { ($0.name, $0.value ?? "") }
+        )
         #expect(url.host == "app.devin.ai")
         #expect(items["redirect_uri"] == "http://127.0.0.1:\(port)/callback")
         #expect(items["code_challenge_method"] == "S256")

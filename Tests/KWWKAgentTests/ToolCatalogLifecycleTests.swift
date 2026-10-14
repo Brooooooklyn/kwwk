@@ -77,7 +77,9 @@ struct ToolCatalogLifecycleTests {
         #expect(Set(catalog.tools.map(\.name)) == ["mcp__a__used", "mcp__a__idle"])
         let call = Message.assistant(AssistantMessage(
             content: [.toolCall(ToolCall(id: "c1", name: "mcp__a__used", arguments: .object([:])))],
-            api: "test", provider: "test", model: "test"
+            api: "test",
+            provider: "test",
+            model: "test"
         ))
         let unloaded = catalog.retainLoaded(usedIn: [.user(UserMessage(text: "hi")), call])
         #expect(unloaded == ["mcp__a__idle"])
@@ -130,7 +132,9 @@ struct ToolCatalogLifecycleTests {
         _ = await catalog.search(query: "alpha", limit: 5)
         let call = Message.assistant(AssistantMessage(
             content: [.toolCall(ToolCall(id: "c1", name: "mcp__gh__used", arguments: .object([:])))],
-            api: model.api, provider: model.provider, model: model.id
+            api: model.api,
+            provider: model.provider,
+            model: model.id
         ))
         let messages: [Message] = [
             .system(SystemMessage(toolsAdded: [
@@ -140,11 +144,17 @@ struct ToolCatalogLifecycleTests {
             .user(UserMessage(text: "please add feature X")),
             call,
             .toolResult(ToolResultMessage(
-                toolCallId: "c1", toolName: "mcp__gh__used", content: [.text(TextContent(text: "ok"))], isError: false
+                toolCallId: "c1",
+                toolName: "mcp__gh__used",
+                content: [.text(TextContent(text: "ok"))],
+                isError: false
             )),
             .user(UserMessage(text: "any update?")),
             .assistant(AssistantMessage(
-                content: [.text(TextContent(text: "step one done"))], api: model.api, provider: model.provider, model: model.id
+                content: [.text(TextContent(text: "step one done"))],
+                api: model.api,
+                provider: model.provider,
+                model: model.id
             )),
         ]
         let agent = Agent(initialState: AgentInitialState(model: model, messages: messages))

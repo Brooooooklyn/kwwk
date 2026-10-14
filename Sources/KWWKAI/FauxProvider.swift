@@ -224,7 +224,11 @@ public func registerFauxProvider(_ options: RegisterFauxProviderOptions = .init(
         tokensPerSecond: options.tokensPerSecond
     )
     let registration = FauxProviderRegistration(
-        api: api, provider: provider, models: models, sourceId: sourceId, impl: impl
+        api: api,
+        provider: provider,
+        models: models,
+        sourceId: sourceId,
+        impl: impl
     )
     await APIRegistry.shared.register(impl, sourceId: sourceId)
     return registration
@@ -321,14 +325,18 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
         let maxTokenSize = self.maxTokenSize
         let tokensPerSecond = self.tokensPerSecond
         let getCached: @Sendable (String) -> String? = { [weak self] id in self?.cachedPrompt(for: id) }
-        let setCached: @Sendable (String, String) -> Void = { [weak self] prompt, id in self?.setCachedPrompt(prompt, for: id) }
+        let setCached: @Sendable (String, String) -> Void = { [weak self] prompt, id in
+            self?.setCachedPrompt(prompt, for: id)
+        }
 
         if tokensPerSecond == nil {
             switch step {
             case nil:
                 var errorMessage = FauxProvider.makeErrorMessage(
                     reason: "No more faux responses queued",
-                    api: api, provider: provider, modelId: model.id
+                    api: api,
+                    provider: provider,
+                    modelId: model.id
                 )
                 errorMessage = FauxProvider.estimateUsage(
                     message: errorMessage,
@@ -343,7 +351,10 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
 
             case .message(let resolved)?:
                 var message = FauxProvider.clone(
-                    resolved, api: api, provider: provider, modelId: model.id
+                    resolved,
+                    api: api,
+                    provider: provider,
+                    modelId: model.id
                 )
                 message = FauxProvider.estimateUsage(
                     message: message,
@@ -370,7 +381,9 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
             guard let step else {
                 var errorMessage = FauxProvider.makeErrorMessage(
                     reason: "No more faux responses queued",
-                    api: api, provider: provider, modelId: model.id
+                    api: api,
+                    provider: provider,
+                    modelId: model.id
                 )
                 errorMessage = FauxProvider.estimateUsage(
                     message: errorMessage,
@@ -392,7 +405,10 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
                     resolved = try await f(context, options, FauxState(callCount: currentCall), model)
                 }
                 var message = FauxProvider.clone(
-                    resolved, api: api, provider: provider, modelId: model.id
+                    resolved,
+                    api: api,
+                    provider: provider,
+                    modelId: model.id
                 )
                 message = FauxProvider.estimateUsage(
                     message: message,
@@ -412,7 +428,9 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
             } catch {
                 let message = FauxProvider.makeErrorMessage(
                     reason: "\(error)",
-                    api: api, provider: provider, modelId: model.id
+                    api: api,
+                    provider: provider,
+                    modelId: model.id
                 )
                 outStream.push(.error(reason: .error, error: message))
                 outStream.end(message)
@@ -431,7 +449,10 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
     }
 
     static func makeErrorMessage(
-        reason: String, api: String, provider: String, modelId: String
+        reason: String,
+        api: String,
+        provider: String,
+        modelId: String
     ) -> AssistantMessage {
         AssistantMessage(
             content: [],
@@ -446,7 +467,10 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
     }
 
     static func clone(
-        _ message: AssistantMessage, api: String, provider: String, modelId: String
+        _ message: AssistantMessage,
+        api: String,
+        provider: String,
+        modelId: String
     ) -> AssistantMessage {
         var m = message
         m.api = api

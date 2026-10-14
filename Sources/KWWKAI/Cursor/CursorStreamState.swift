@@ -133,7 +133,10 @@ final class CursorStreamState: @unchecked Sendable {
             toolCallArgsBuffer = ""
             toolCallIsMcp = false
             blocks.append(.toolCall(ToolCall(
-                id: id, name: "todo", arguments: arguments, cursorExecResolved: true
+                id: id,
+                name: "todo",
+                arguments: arguments,
+                cursorExecResolved: true
             )))
             return idx
         }
@@ -167,7 +170,8 @@ final class CursorStreamState: @unchecked Sendable {
             guard let idx = toolCallIndex, case .toolCall(var call) = blocks[idx] else { return nil }
             if toolCallIsMcp {
                 let streamed = (try? JSONDecoder().decode(
-                    JSONValue.self, from: Data(toolCallArgsBuffer.utf8)
+                    JSONValue.self,
+                    from: Data(toolCallArgsBuffer.utf8)
                 )) ?? JSONValue.object([:])
                 call.arguments = Self.mergeMcpArgs(streamed: streamed, completion: completionArgs)
             } else if let completionArgs {
@@ -187,7 +191,10 @@ final class CursorStreamState: @unchecked Sendable {
     /// executed over the exec channel (native bridge, or an MCP exec without a
     /// matching streamed block). Marked resolved so the agent loop skips it.
     func synthesizeResolvedToolCall(
-        id: String, name: String, arguments: JSONValue, emit: (AssistantMessageEvent) -> Void
+        id: String,
+        name: String,
+        arguments: JSONValue,
+        emit: (AssistantMessageEvent) -> Void
     ) {
         endText(emit: emit)
         endThinking(emit: emit)
@@ -315,7 +322,8 @@ final class CursorStreamState: @unchecked Sendable {
             if !unreadUpdates.isEmpty { parts.append("updates not read: \(list(unreadUpdates))") }
             if !unreadMessages.isEmpty { parts.append("messages not read: \(list(unreadMessages))") }
             return ProviderFailure(
-                message: "Cursor sent an empty reply (\(parts.joined(separator: "; ")))", shouldRetry: true
+                message: "Cursor sent an empty reply (\(parts.joined(separator: "; ")))",
+                shouldRetry: true
             )
         }
     }
@@ -332,8 +340,13 @@ final class CursorStreamState: @unchecked Sendable {
     func snapshot() -> AssistantMessage {
         lock.withLock {
             AssistantMessage(
-                content: blocks, api: api, provider: model.provider, model: model.id,
-                usage: usageLocked(), stopReason: stopReason, timestamp: Timestamp.now()
+                content: blocks,
+                api: api,
+                provider: model.provider,
+                model: model.id,
+                usage: usageLocked(),
+                stopReason: stopReason,
+                timestamp: Timestamp.now()
             )
         }
     }

@@ -18,7 +18,11 @@ public enum TransformMessages {
     /// per-message content first; surrogate sanitization cleans the resulting
     /// text; the error-skip + orphan-synthesis pass then reshapes the message
     /// sequence so tool calls and tool results stay balanced.
-    public static func normalize(_ messages: [Message], model: Model, preserveAnthropicFallback: Bool = false) -> [Message] {
+    public static func normalize(
+        _ messages: [Message],
+        model: Model,
+        preserveAnthropicFallback: Bool = false
+    ) -> [Message] {
         var result = downgradeUnsupportedImages(expandNativeCompaction(messages, model: model), model: model)
         result = stripCrossModelThinking(result, model: model, preserveAnthropicFallback: preserveAnthropicFallback)
         result = fillEmptyToolCallIds(result)
@@ -113,7 +117,11 @@ public enum TransformMessages {
     /// - Cross model: redacted thinking is opaque encrypted content and is
     ///   dropped entirely; non-empty thinking is downgraded to plain text;
     ///   empty thinking is dropped.
-    public static func stripCrossModelThinking(_ messages: [Message], model: Model, preserveAnthropicFallback: Bool = false) -> [Message] {
+    public static func stripCrossModelThinking(
+        _ messages: [Message],
+        model: Model,
+        preserveAnthropicFallback: Bool = false
+    ) -> [Message] {
         messages.map { message in
             guard case .assistant(var a) = message else { return message }
             let isSameModel = a.provider == model.provider && a.api == model.api

@@ -114,7 +114,10 @@ public enum KiroOAuth {
     /// The profile a sign-in that doesn't name one uses: Builder ID's, or the
     /// first Kiro lists in either of its regions (magpie `kiroProfile`).
     static func resolveProfile(
-        access: String, authMethod: String, provider: String, client: HTTPClient
+        access: String,
+        authMethod: String,
+        provider: String,
+        client: HTTPClient
     ) async throws -> String {
         if provider.lowercased() == "builderid" { return builderIDProfile }
         var last = "Kiro has no profile for this sign-in"
@@ -231,8 +234,13 @@ extension OAuthLogin {
         callbacks.onProgress("Sign in to Kiro in your browser — waiting for the callback on \(redirect)…")
         return try await present(comps.url!, callbacks: callbacks) {
             try await kiroAwaitSignIn(
-                listener: listener, port: port, redirect: redirect, state: state,
-                verifier: pkce.verifier, callbacks: callbacks, client: client
+                listener: listener,
+                port: port,
+                redirect: redirect,
+                state: state,
+                verifier: pkce.verifier,
+                callbacks: callbacks,
+                client: client
             )
         }
     }
@@ -293,7 +301,8 @@ extension OAuthLogin {
                 } else if query["state"] != state {
                     // Not ours: someone else's page, or a stale tab.
                     callback.reply(.page(
-                        succeeded: false, title: "This link isn't from kwwk's sign-in",
+                        succeeded: false,
+                        title: "This link isn't from kwwk's sign-in",
                         message: "Start it again from kwwk."
                     ))
                     continue
@@ -337,10 +346,12 @@ extension OAuthLogin {
                         }
                         let pkce = PKCE.random()
                         let step = KiroAWSStep(
-                            region: region, clientId: clientId,
+                            region: region,
+                            clientId: clientId,
                             clientSecret: registered["clientSecret"] as? String ?? "",
                             provider: option == "builderid" ? "BuilderId" : option == "awsidc" ? "Enterprise" : "Internal",
-                            state: PKCE.randomHex(bytes: 24), verifier: pkce.verifier
+                            state: PKCE.randomHex(bytes: 24),
+                            verifier: pkce.verifier
                         )
                         aws = step
                         var authorize = URLComponents(string: KiroOAuth.oidcURL(region: region) + "/authorize")!
@@ -373,11 +384,15 @@ extension OAuthLogin {
                 extras["provider"] = .string(provider)
                 if extras["profileArn"] == nil {
                     extras["profileArn"] = .string(try await KiroOAuth.resolveProfile(
-                        access: access, authMethod: authMethod, provider: provider, client: client
+                        access: access,
+                        authMethod: authMethod,
+                        provider: provider,
+                        client: client
                     ))
                 }
                 callback.reply(.page(
-                    succeeded: true, title: "You're signed in",
+                    succeeded: true,
+                    title: "You're signed in",
                     message: "Kiro is added to kwwk. You can close this tab."
                 ))
                 return OAuthCredentials(
@@ -388,7 +403,8 @@ extension OAuthLogin {
                 )
             } catch {
                 callback.reply(.page(
-                    succeeded: false, title: "Sign-in didn't finish",
+                    succeeded: false,
+                    title: "Sign-in didn't finish",
                     message: (error as? LocalizedError)?.errorDescription ?? String(describing: error)
                 ))
                 throw error
@@ -398,10 +414,13 @@ extension OAuthLogin {
 
     /// Posts JSON to Kiro's auth service or AWS's sign-in, as the IDE.
     private static func kiroSignInPost(
-        _ url: String, body: [String: Any], client: HTTPClient
+        _ url: String,
+        body: [String: Any],
+        client: HTTPClient
     ) async throws -> [String: Any] {
         let (response, data) = try await client.request(
-            url: URL(string: url)!, method: "POST",
+            url: URL(string: url)!,
+            method: "POST",
             headers: [
                 "Content-Type": "application/json",
                 "Accept": "application/json",
@@ -438,7 +457,8 @@ public struct KiroOAuthProvider: OAuthProvider {
     public init() {}
 
     public func refresh(
-        _ credentials: OAuthCredentials, using client: HTTPClient
+        _ credentials: OAuthCredentials,
+        using client: HTTPClient
     ) async throws -> OAuthCredentials {
         let region = KiroOAuth.signInRegion(credentials)
         var extras = credentials.extras
@@ -460,13 +480,18 @@ public struct KiroOAuthProvider: OAuthProvider {
             body = ["refreshToken": credentials.refresh]
         }
         let (response, data) = try await OAuthRefreshError.post(
-            provider: id, url: URL(string: url)!, headers: headers,
-            body: try JSONSerialization.data(withJSONObject: body), client: client
+            provider: id,
+            url: URL(string: url)!,
+            headers: headers,
+            body: try JSONSerialization.data(withJSONObject: body),
+            client: client
         )
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let access = object["accessToken"] as? String, !access.isEmpty else {
             throw OAuthRefreshError(
-                providerId: id, kind: .unavailable, status: response.statusCode,
+                providerId: id,
+                kind: .unavailable,
+                status: response.statusCode,
                 detail: "kiro refresh missing accessToken"
             )
         }
@@ -498,7 +523,9 @@ public struct KiroUsageReader: OAuthUsageReader {
     public func usage(_ credentials: OAuthCredentials, using client: HTTPClient) async throws -> [OAuthUsageWindow] {
         guard let profile = KiroOAuth.profileArn(credentials) else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: nil, detail: "the Kiro login names no profile"
+                providerId: providerId,
+                status: nil,
+                detail: "the Kiro login names no profile"
             )
         }
         let query = OAuth.urlEncodedForm([
@@ -516,7 +543,9 @@ public struct KiroUsageReader: OAuthUsageReader {
         )
         guard let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
             throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode, detail: "undecodable body"
+                providerId: providerId,
+                status: response.statusCode,
+                detail: "undecodable body"
             )
         }
         return Self.windows(from: payload)
@@ -539,7 +568,8 @@ public struct KiroUsageReader: OAuthUsageReader {
                         usedPercent: 100 * number(trial["currentUsageWithPrecision"]) / limit,
                         resetsAt: millis(number(trial["freeTrialExpiry"])),
                         windowSeconds: nil,
-                        limitID: "free_trial", limitName: "Free trial"
+                        limitID: "free_trial",
+                        limitName: "Free trial"
                     ))
                 }
             }

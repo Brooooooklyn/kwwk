@@ -32,7 +32,9 @@ struct MCPProtocolTests {
         #expect(throws: MCPError.self) { try JSONRPCMessage.decodeAll(Data("nope".utf8)) }
         #expect(throws: MCPError.self) { try JSONRPCMessage.decodeAll(Data(#"{"jsonrpc":"2.0"}"#.utf8)) }
         // A null id on an error response is allowed.
-        let error = try JSONRPCMessage.decodeAll(Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"bad"}}"#.utf8))
+        let error = try JSONRPCMessage.decodeAll(
+            Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"bad"}}"#.utf8)
+        )
         #expect(error == [.error(id: nil, error: JSONRPCErrorObject(code: -32700, message: "bad"))])
     }
 
@@ -150,7 +152,11 @@ struct MCPProtocolTests {
             try MCPToolAdapter.convert(server: "s", tool: "t", result: result)
         }
         do {
-            _ = try MCPToolAdapter.convert(server: "s", tool: "t", result: MCPCallToolResult(content: [], isError: true))
+            _ = try MCPToolAdapter.convert(
+                server: "s",
+                tool: "t",
+                result: MCPCallToolResult(content: [], isError: true)
+            )
         } catch {
             #expect(error.localizedDescription == "MCP tool s/t returned an error")
         }

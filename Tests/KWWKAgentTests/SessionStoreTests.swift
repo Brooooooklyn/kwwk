@@ -10,13 +10,25 @@ struct SessionStoreTests {
     func fallbackSurvivesSessionRestore() async throws {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let message = AssistantMessage(content: [
-            .thinking(ThinkingContent(thinking: "before", thinkingSignature: "fable-sig")),
-            .fallback(AnthropicFallbackContent(from: "claude-fable-5-1", to: "claude-opus-4-8")),
-            .thinking(ThinkingContent(thinking: "after", thinkingSignature: "opus-sig")),
-            .text(TextContent(text: "done")),
-        ], api: "anthropic-messages", provider: "anthropic", model: "claude-fable-5-1", responseModel: "claude-opus-4-8")
-        try await store.append(id: "fallback", cwd: "/tmp", message: .assistant(message), model: message.model, provider: message.provider)
+        let message = AssistantMessage(
+            content: [
+                .thinking(ThinkingContent(thinking: "before", thinkingSignature: "fable-sig")),
+                .fallback(AnthropicFallbackContent(from: "claude-fable-5-1", to: "claude-opus-4-8")),
+                .thinking(ThinkingContent(thinking: "after", thinkingSignature: "opus-sig")),
+                .text(TextContent(text: "done")),
+            ],
+            api: "anthropic-messages",
+            provider: "anthropic",
+            model: "claude-fable-5-1",
+            responseModel: "claude-opus-4-8"
+        )
+        try await store.append(
+            id: "fallback",
+            cwd: "/tmp",
+            message: .assistant(message),
+            model: message.model,
+            provider: message.provider
+        )
         let reopened = SessionStore(directory: dir)
         let restored = try await reopened.load(id: "fallback")
         #expect(restored.messages == [.assistant(message)])
@@ -117,8 +129,13 @@ struct SessionStoreTests {
 
         let id = "sess-rt"
         let cwd = "/tmp/project"
-        try await store.append(id: id, cwd: cwd, message: userMsg("hello"),
-                                model: "claude-test", provider: "anthropic")
+        try await store.append(
+            id: id,
+            cwd: cwd,
+            message: userMsg("hello"),
+            model: "claude-test",
+            provider: "anthropic"
+        )
         try await store.append(id: id, cwd: cwd, message: assistantMsg("hi there"))
         try await store.append(id: id, cwd: cwd, message: toolResultMsg("exit 0"))
 
@@ -222,8 +239,13 @@ struct SessionStoreTests {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        try await store.append(id: "a", cwd: "/x", message: userMsg("one"),
-                               model: "m1", provider: "p1")
+        try await store.append(
+            id: "a",
+            cwd: "/x",
+            message: userMsg("one"),
+            model: "m1",
+            provider: "p1"
+        )
         try await store.append(id: "a", cwd: "/x", message: assistantMsg("reply"))
         // Nudge mtimes apart so ordering is deterministic.
         try await store.append(id: "b", cwd: "/y", message: userMsg("two"))
@@ -272,8 +294,13 @@ struct SessionStoreTests {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let id = "sess-meta"
-        try await store.append(id: id, cwd: "/w", message: userMsg("hi"),
-                               model: "m1", provider: "p1")
+        try await store.append(
+            id: id,
+            cwd: "/w",
+            message: userMsg("hi"),
+            model: "m1",
+            provider: "p1"
+        )
         try await store.appendMeta(id: id, model: "m2", thinkingLevel: "high")
 
         let loaded = try await store.load(id: id)
@@ -597,8 +624,13 @@ struct SessionStoreTests {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        try await store.append(id: "s1", cwd: "/proj", message: userMsg("hello"),
-                               model: "m1", provider: "p1")
+        try await store.append(
+            id: "s1",
+            cwd: "/proj",
+            message: userMsg("hello"),
+            model: "m1",
+            provider: "p1"
+        )
         try await store.append(id: "s1", cwd: "/proj", message: assistantMsg("world"))
 
         let resolved = try await store.resolveResume(.latestForCwd, cwd: "/proj")
@@ -628,8 +660,11 @@ struct SessionStoreTests {
 
         let id = "sess-rec"
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1"
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1"
         )
         await recorder.ensureCreated()
 
@@ -749,8 +784,11 @@ struct SessionStoreTests {
 
         let id = "sess-rec-retry-append"
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1"
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1"
         )
         await recorder.ensureCreated()
 
@@ -820,8 +858,11 @@ struct SessionStoreTests {
 
         let id = "sess-rec-retry-redaction"
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1"
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1"
         )
         await recorder.ensureCreated()
 
@@ -859,8 +900,11 @@ struct SessionStoreTests {
 
         let id = "sess-rec-compact"
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1"
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1"
         )
         await recorder.ensureCreated()
 
@@ -904,8 +948,11 @@ struct SessionStoreTests {
 
         let id = "sess-rec-retry-compact"
         let recorder = SessionRecorder(
-            store: store, sessionId: id, cwd: "/w",
-            model: "m1", provider: "p1"
+            store: store,
+            sessionId: id,
+            cwd: "/w",
+            model: "m1",
+            provider: "p1"
         )
         await recorder.ensureCreated()
 

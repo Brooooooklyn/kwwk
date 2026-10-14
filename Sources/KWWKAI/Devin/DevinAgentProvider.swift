@@ -81,16 +81,26 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             var assignment: DevinProto.ModelAssignment?
             if model.compat?.modelRouter == true {
                 let assigned = try await assignModel(
-                    model: model, apiKey: auth.apiKey, cascadeId: cascadeId,
-                    messages: messages, baseURL: chatBaseURL, cancellation: cancellation
+                    model: model,
+                    apiKey: auth.apiKey,
+                    cascadeId: cascadeId,
+                    messages: messages,
+                    baseURL: chatBaseURL,
+                    cancellation: cancellation
                 )
                 assignment = assigned
                 state.setResponseModel(assigned.modelUid)
             }
 
             let request = Self.buildChatRequest(
-                model: model, context: context, messages: messages, options: options,
-                apiKey: auth.apiKey, userJwt: auth.userJwt, cascadeId: cascadeId, assignment: assignment
+                model: model,
+                context: context,
+                messages: messages,
+                options: options,
+                apiKey: auth.apiKey,
+                userJwt: auth.userJwt,
+                cascadeId: cascadeId,
+                assignment: assignment
             )
             let requestBytes = request.encode()
             let compressed = try Gzip.compress(requestBytes)
@@ -110,7 +120,11 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
 
             let url = URL(string: chatBaseURL + DevinWire.getChatMessagePath)!
             let (response, body) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: frame, cancellation: cancellation
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: frame,
+                cancellation: cancellation
             )
             if response.statusCode >= 400 {
                 throw await Self.httpFailure(operation: "API", response: response, body: body)
@@ -119,7 +133,10 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             out.push(.start(partial: state.snapshot()))
             let driveTask = Task {
                 try await self.drive(
-                    body: body, state: state, out: out, cancellation: cancellation,
+                    body: body,
+                    state: state,
+                    out: out,
+                    cancellation: cancellation,
                     historyBytes: { Self.shrinkableHistoryBytes(request: request, context: context) }
                 )
             }
@@ -240,8 +257,12 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
     /// authorizes it. A router uid is never a legal `chatModelUid`, so a failed
     /// assignment fails the turn.
     private func assignModel(
-        model: Model, apiKey: String, cascadeId: String, messages: [Message],
-        baseURL: String, cancellation: CancellationHandle?
+        model: Model,
+        apiKey: String,
+        cascadeId: String,
+        messages: [Message],
+        baseURL: String,
+        cancellation: CancellationHandle?
     ) async throws -> DevinProto.ModelAssignment {
         let lastUser = messages.last(where: { if case .user = $0 { return true }; return false })
         var prompt: DevinProto.ChatMessagePrompt?
@@ -250,7 +271,9 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
             baseURL + DevinWire.assignModelPath,
             body: DevinProto.encodeAssignModelRequest(
                 metadata: DevinWire.cliMetadata(apiKey: apiKey),
-                modelRouterUid: model.id, cascadeId: cascadeId, prompt: prompt
+                modelRouterUid: model.id,
+                cascadeId: cascadeId,
+                prompt: prompt
             ),
             cancellation: cancellation
         )
@@ -265,11 +288,16 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
     }
 
     private func unary(
-        _ urlString: String, body: Data, cancellation: CancellationHandle?
+        _ urlString: String,
+        body: Data,
+        cancellation: CancellationHandle?
     ) async throws -> (HTTPURLResponse, Data) {
         try await client.request(
-            url: URL(string: urlString)!, method: "POST",
-            headers: DevinWire.unaryHeaders, body: body, cancellation: cancellation
+            url: URL(string: urlString)!,
+            method: "POST",
+            headers: DevinWire.unaryHeaders,
+            body: body,
+            cancellation: cancellation
         )
     }
 
@@ -291,7 +319,9 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
         }
         var failure = ProviderFailure(message: text, providerCode: code.isEmpty ? nil : code.lowercased())
         let lower = message.lowercased()
-        let isLimit = code.lowercased() == "resource_exhausted" || lower.contains("quota") || lower.contains("rate limit")
+        let isLimit = code.lowercased() == "resource_exhausted"
+            || lower.contains("quota")
+            || lower.contains("rate limit")
         if !isLimit, lower.contains("content policy") {
             // Devin refuses a prompt it screens out as `permission_denied`
             // "Your request was blocked by our content policy" (measured
@@ -321,7 +351,9 @@ public final class DevinAgentProvider: APIProvider, @unchecked Sendable {
     }
 
     static func httpFailure(
-        operation: String, response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>
+        operation: String,
+        response: HTTPURLResponse,
+        body: AsyncThrowingStream<Data, Error>
     ) async -> ProviderFailure {
         let bytes = await ProviderFailure.readBoundedBody(body)
         return unaryFailure(operation: operation, response: response, body: bytes)

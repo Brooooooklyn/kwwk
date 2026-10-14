@@ -174,7 +174,10 @@ public enum EditDiff {
         let newContent: String
         if usedFuzzy {
             newContent = try applyReplacementsPreservingUnchangedLines(
-                original: normalizedContent, base: replacementBase, matches: matches, path: path
+                original: normalizedContent,
+                base: replacementBase,
+                matches: matches,
+                path: path
             )
         } else {
             var utf8 = Array(replacementBase.utf8)
@@ -208,7 +211,10 @@ public enum EditDiff {
     /// verbatim from the original. Ported from pi
     /// `applyReplacementsPreservingUnchangedLines`. All offsets are UTF-8 bytes.
     private static func applyReplacementsPreservingUnchangedLines(
-        original: String, base: String, matches: [Match], path: String
+        original: String,
+        base: String,
+        matches: [Match],
+        path: String
     ) throws -> String {
         let originalBytes = Array(original.utf8)
         let baseBytes = Array(base.utf8)
@@ -278,7 +284,9 @@ public enum EditDiff {
     }
 
     private static func replacementLineRange(
-        _ spans: [(start: Int, end: Int)], _ rep: Match, path: String
+        _ spans: [(start: Int, end: Int)],
+        _ rep: Match,
+        path: String
     ) throws -> (start: Int, end: Int) {
         let repStart = rep.matchIndex
         let repEnd = rep.matchIndex + rep.matchLength

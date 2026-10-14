@@ -156,7 +156,10 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
 
         do {
             let (response, stream) = try await client.stream(
-                url: url, method: "POST", headers: headers, body: body,
+                url: url,
+                method: "POST",
+                headers: headers,
+                body: body,
                 cancellation: options?.cancellation
             )
             if response.statusCode >= 400 {
@@ -170,7 +173,9 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
             state.signal = options?.cancellation
             // Bridge external cancellation to the in-flight request (see
             // AnthropicProvider.run for the rationale).
-            let driveTask = Task { try await self.drive(events: parseAWSEventStream(bytes: stream), out: out, state: state) }
+            let driveTask = Task {
+                try await self.drive(events: parseAWSEventStream(bytes: stream), out: out, state: state)
+            }
             let cancelReg = options?.cancellation?.onCancel { _ in driveTask.cancel() }
             defer { cancelReg?.cancel() }
             try await driveTask.value
@@ -340,7 +345,10 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
     private static let emptyTextPlaceholder = "<empty>"
 
     private static func encodeBody(
-        model: Model, context: Context, options: StreamOptions?, env: [String: String] = [:]
+        model: Model,
+        context: Context,
+        options: StreamOptions?,
+        env: [String: String] = [:]
     ) throws -> Data {
         let retention = options?.cacheRetention ?? CacheRetention.none
         let cachePoint: [String: Any]? = retention != .none && supportsPromptCaching(model: model, env: env)
@@ -405,7 +413,10 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         [model.id, model.name].flatMap { value -> [String] in
             let lower = value.lowercased()
             let normalized = lower.replacingOccurrences(
-                of: "[\\s_.:]+", with: "-", options: .regularExpression)
+                of: "[\\s_.:]+",
+                with: "-",
+                options: .regularExpression
+            )
             return [lower, normalized]
         }
     }
@@ -450,7 +461,9 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
     /// the caller requested reasoning, the model declares `reasoning`, and it is
     /// an Anthropic Claude model. Mirrors pi `buildAdditionalModelRequestFields`.
     static func buildAdditionalModelRequestFields(
-        model: Model, options: StreamOptions?, env: [String: String]
+        model: Model,
+        options: StreamOptions?,
+        env: [String: String]
     ) -> [String: Any]? {
         guard let reasoning = options?.reasoning, model.reasoning else { return nil }
         guard isAnthropicClaudeModel(model) else { return nil }
@@ -502,7 +515,9 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
     }
 
     private static func encodeMessages(
-        model: Model, context: Context, cachePoint: [String: Any]? = nil
+        model: Model,
+        context: Context,
+        cachePoint: [String: Any]? = nil
     ) -> [[String: Any]] {
         var out: [[String: Any]] = []
         var index = 0

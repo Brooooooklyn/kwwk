@@ -292,18 +292,32 @@ struct CursorProtoTests {
             content: [
                 .thinking(ThinkingContent(thinking: "hm")),
                 .text(TextContent(text: "I'll look.")),
-                .toolCall(ToolCall(id: "c1", name: "bash", arguments: ["command": "ls /tmp"], cursorExecResolved: true)),
+                .toolCall(ToolCall(
+                    id: "c1",
+                    name: "bash",
+                    arguments: ["command": "ls /tmp"],
+                    cursorExecResolved: true
+                )),
                 .toolCall(ToolCall(id: "c2", name: "lookup", arguments: ["id": 9007199254740993])),
                 .text(TextContent(text: "Found it.")),
             ],
-            api: "cursor-agent", provider: "cursor", model: "auto"
+            api: "cursor-agent",
+            provider: "cursor",
+            model: "auto"
         )
         let (run, blobStore) = buildRequest(messages: [
             .user(UserMessage(text: "look")),
             .assistant(assistant),
-            .toolResult(ToolResultMessage(toolCallId: "c1", toolName: "bash", content: [.text(TextContent(text: "note.txt"))])),
             .toolResult(ToolResultMessage(
-                toolCallId: "c2", toolName: "lookup", content: [.text(TextContent(text: "no such id"))], isError: true
+                toolCallId: "c1",
+                toolName: "bash",
+                content: [.text(TextContent(text: "note.txt"))]
+            )),
+            .toolResult(ToolResultMessage(
+                toolCallId: "c2",
+                toolName: "lookup",
+                content: [.text(TextContent(text: "no such id"))],
+                isError: true
             )),
             .user(UserMessage(text: "and now?")),
         ], systemPrompt: "")
@@ -374,7 +388,9 @@ struct CursorProtoTests {
     func promptBeforeDeclaration() throws {
         let (run, _) = buildRequest(messages: [
             .user(UserMessage(text: "do something")),
-            .system(SystemMessage(toolsAdded: [Tool(name: "noop", description: "noop", parameters: ["type": "object"])])),
+            .system(SystemMessage(toolsAdded: [
+                Tool(name: "noop", description: "noop", parameters: ["type": "object"])
+            ])),
         ])
         // ConversationAction { user_message_action=1 }.
         let action = field(run, 2)!

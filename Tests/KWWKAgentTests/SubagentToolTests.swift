@@ -488,7 +488,10 @@ struct SubagentToolTests {
             },
         ])
         let readOnly = SubagentDefinition(
-            name: "ro", description: "Use for read-only test work.", prompt: "Answer.", tools: .readOnly
+            name: "ro",
+            description: "Use for read-only test work.",
+            prompt: "Answer.",
+            tools: .readOnly
         )
         let parent = await makeCodingAgent(CodingAgentConfig(
             model: faux.getModel(),
@@ -500,7 +503,9 @@ struct SubagentToolTests {
         defer { Task { await parent.detachBackground?() } }
         let catalog = ToolCatalog(instructions: "<servers>issue tracker</servers>")
         catalog.setTools([AgentTool(
-            name: "mcp__t__search_issues", label: "search", description: "Search issues",
+            name: "mcp__t__search_issues",
+            label: "search",
+            description: "Search issues",
             parameters: ["type": "object"]
         ) { _, _, _, _ in AgentToolResult(content: [.text(TextContent(text: "ok"))]) }])
         catalog.bind(to: parent.agent)
