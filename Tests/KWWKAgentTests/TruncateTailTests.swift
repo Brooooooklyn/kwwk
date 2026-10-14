@@ -35,6 +35,39 @@ struct TruncateTailTests {
         #expect(r.content.hasSuffix("line 100"))
     }
 
+    @Test("keeps the tail of a single line larger than the byte budget")
+    func singleLongLine() {
+        let content = String(repeating: "x", count: 100) + "é final error"
+        let r = Truncate.truncateTail(content, maxLines: 10_000, maxBytes: 20)
+        #expect(r.truncated)
+        #expect(r.truncatedBy == "bytes")
+        #expect(r.lastLinePartial)
+        #expect(r.outputLines == 1)
+        #expect(r.outputBytes <= 20)
+        #expect(r.content.hasSuffix("final error"))
+        #expect(content.hasSuffix(r.content))
+    }
+
+    @Test("keeps the partial tail of a long last line after earlier lines")
+    func longLastLineAfterShortLines() {
+        let content = "first\nsecond\n" + String(repeating: "y", count: 100) + "done"
+        let r = Truncate.truncateTail(content, maxLines: 10_000, maxBytes: 20)
+        #expect(r.lastLinePartial)
+        #expect(r.outputLines == 1)
+        #expect(r.totalLines == 3)
+        #expect(r.content.hasSuffix("done"))
+        #expect(!r.content.contains("\n"))
+    }
+
+    @Test("boundBashOutput keeps the tail of one-line output")
+    func boundSingleLine() {
+        let big = String(repeating: "z", count: 120 * 1024) + " EXIT 1"
+        let bounded = boundBashOutput(big)
+        #expect(bounded.hasPrefix("[output truncated:"))
+        #expect(bounded.contains("showing last 1 of 1 lines"))
+        #expect(bounded.hasSuffix("z EXIT 1"))
+    }
+
     @Test("boundBashOutput prepends a notice only when truncated")
     func boundNotice() {
         #expect(boundBashOutput("hello") == "hello")

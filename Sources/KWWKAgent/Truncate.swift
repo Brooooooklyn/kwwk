@@ -141,6 +141,7 @@ public enum Truncate {
         var kept: [String] = []
         var outBytes = 0
         var truncatedBy = "lines"
+        var lastLinePartial = false
         for line in lines.reversed() {
             if kept.count >= maxLines {
                 truncatedBy = "lines"
@@ -149,6 +150,16 @@ public enum Truncate {
             let lineBytes = line.utf8.count + (kept.isEmpty ? 0 : 1)
             if outBytes + lineBytes > maxBytes {
                 truncatedBy = "bytes"
+                // The last line alone is over budget (minified JSON, a
+                // \r-only progress bar): keep its tail rather than nothing,
+                // since that is where the final status or error lands.
+                if kept.isEmpty {
+                    let partial = suffix(line, fittingUTF8Bytes: maxBytes)
+                    if !partial.isEmpty {
+                        kept.append(partial)
+                        lastLinePartial = true
+                    }
+                }
                 break
             }
             kept.append(line)
@@ -163,11 +174,29 @@ public enum Truncate {
             totalBytes: totalBytes,
             outputLines: kept.count,
             outputBytes: output.utf8.count,
-            lastLinePartial: false,
+            lastLinePartial: lastLinePartial,
             firstLineExceedsLimit: false,
             maxLines: maxLines,
             maxBytes: maxBytes
         )
+    }
+
+    /// The longest suffix of `text` that fits in `limit` UTF-8 bytes, cut on
+    /// a Character boundary.
+    private static func suffix(_ text: String, fittingUTF8Bytes limit: Int) -> String {
+        guard limit > 0 else { return "" }
+        var used = 0
+        var start = text.endIndex
+        var index = text.endIndex
+        while index > text.startIndex {
+            let previous = text.index(before: index)
+            let bytes = text[previous..<index].utf8.count
+            if used + bytes > limit { break }
+            used += bytes
+            start = previous
+            index = previous
+        }
+        return String(text[start...])
     }
 
     /// Truncate a single line to `maxChars` characters, adding a suffix if needed.
