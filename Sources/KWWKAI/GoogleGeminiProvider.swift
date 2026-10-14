@@ -254,7 +254,14 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                             if case .string(let s) = p["thoughtSignature"] ?? .null { return s }
                             return nil
                         }()
-                        let index = state.appendToolCall(name: name, args: argsValue, signature: signature)
+                        // Gemini names its calls (`functionCall.id`) on newer
+                        // models and Claude/gpt-oss through it; that id is the
+                        // one the call must go back by (magpie codeassist.go).
+                        let callId: String? = {
+                            if case .string(let v) = fc["id"] ?? .null, !v.isEmpty { return v }
+                            return nil
+                        }()
+                        let index = state.appendToolCall(id: callId, name: name, args: argsValue, signature: signature)
                         if !emittedStart {
                             out.push(.start(partial: state.snapshot()))
                             emittedStart = true
@@ -525,8 +532,26 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         id.hasPrefix("claude-") || id.hasPrefix("gpt-oss-")
     }
 
+    /// Prefix of the id kwwk makes up for a call Gemini sent without one.
+    static let mintedIdPrefix = "gemini-tool-"
+
+    /// The id a call goes to Gemini with, on its `functionCall` and on its
+    /// result's `functionResponse` alike, or nil to send neither. A model
+    /// that requires ids (claude- / gpt-oss-) gets every call's; any other
+    /// model gets back the id Gemini gave the call itself, but never one
+    /// kwwk made up for a call Gemini sent without one, nor another
+    /// model's.
+    private static func wireToolCallId(_ id: String, from a: AssistantMessage, model: Model) -> String? {
+        guard !id.isEmpty else { return nil }
+        if requiresToolCallId(model.id) { return id }
+        guard a.api == model.api, a.provider == model.provider, !id.hasPrefix(mintedIdPrefix) else { return nil }
+        return id
+    }
+
     private static func encodeContents(context: Context, model: Model) -> [[String: Any]] {
         var out: [[String: Any]] = []
+        // the calls sent with an id: their results go with the same one
+        var sentIds: Set<String> = []
         for message in context.messages {
             switch message {
             case .system:
@@ -579,12 +604,15 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                             parts.append(part)
                         }
                     case .toolCall(let tc):
-                        var part: [String: Any] = [
-                            "functionCall": [
-                                "name": tc.name,
-                                "args": anyFromJSONValue(tc.arguments) ?? [:] as Any,
-                            ],
+                        var call: [String: Any] = [
+                            "name": tc.name,
+                            "args": anyFromJSONValue(tc.arguments) ?? [:] as Any,
                         ]
+                        if let id = wireToolCallId(tc.id, from: a, model: model) {
+                            call["id"] = id
+                            sentIds.insert(id)
+                        }
+                        var part: [String: Any] = ["functionCall": call]
                         if let sig = resolveSig(tc.thoughtSignature) {
                             part["thoughtSignature"] = sig
                         }
@@ -629,7 +657,12 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
                     ? ["error": responseValue]
                     : ["output": responseValue]
                 if hasImages && multimodal { fnResp["parts"] = imageParts }
-                if requiresToolCallId(model.id) { fnResp["id"] = tr.toolCallId }
+                // A result names its call only by the id the call went with;
+                // an id its call never had is one Gemini can't pair.
+                if sentIds.contains(tr.toolCallId)
+                    || (requiresToolCallId(model.id) && !tr.toolCallId.isEmpty) {
+                    fnResp["id"] = tr.toolCallId
+                }
                 let fnPart: [String: Any] = ["functionResponse": fnResp]
 
                 // Merge consecutive functionResponses into the trailing user
@@ -820,10 +853,10 @@ final class GoogleGeminiState: @unchecked Sendable {
         }
     }
 
-    func appendToolCall(name: String, args: JSONValue, signature: String?) -> Int {
+    func appendToolCall(id given: String? = nil, name: String, args: JSONValue, signature: String?) -> Int {
         lock.withLock {
             let idx = order.count
-            let id = "gemini-tool-\(idx)-\(Int(Date().timeIntervalSince1970 * 1000))"
+            let id = given ?? "\(GoogleGeminiProvider.mintedIdPrefix)\(idx)-\(Int(Date().timeIntervalSince1970 * 1000))"
             let call = ToolCall(id: id, name: name, arguments: args, thoughtSignature: signature)
             order.append(idx)
             blocks[idx] = .toolUse(id: id, call: call)

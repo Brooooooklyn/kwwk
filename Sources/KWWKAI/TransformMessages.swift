@@ -21,6 +21,7 @@ public enum TransformMessages {
     public static func normalize(_ messages: [Message], model: Model, preserveAnthropicFallback: Bool = false) -> [Message] {
         var result = downgradeUnsupportedImages(expandNativeCompaction(messages, model: model), model: model)
         result = stripCrossModelThinking(result, model: model, preserveAnthropicFallback: preserveAnthropicFallback)
+        result = fillEmptyToolCallIds(result)
         result = normalizeToolCallIds(result, model: model)
         result = sanitizeSurrogates(result)
         result = repairToolFlow(result)
@@ -237,6 +238,40 @@ public enum TransformMessages {
                 if let mapped = idMap[t.toolCallId] {
                     t.toolCallId = mapped
                 }
+                return .toolResult(t)
+            case .user, .system:
+                return message
+            }
+        }
+    }
+
+    /// Gives each tool call stored with an empty id (a session saved before
+    /// the Chat decoder minted one, or any other source that sent none) an
+    /// id, and each tool result with an empty id the id of the call it
+    /// answers: the first call of the turn still unanswered with the same
+    /// tool name, else the first one unanswered. The id goes by the call's
+    /// place in the transcript, so it is the same on every request. Calls
+    /// that share `""` can't otherwise be told apart, and Anthropic refuses
+    /// an empty `tool_use.id` outright.
+    public static func fillEmptyToolCallIds(_ messages: [Message]) -> [Message] {
+        var pending: [(id: String, name: String)] = []
+        return messages.enumerated().map { index, message in
+            switch message {
+            case .assistant(var a):
+                pending = []
+                guard a.content.contains(where: { if case .toolCall(let tc) = $0 { return tc.id.isEmpty }; return false })
+                else { return message }
+                a.content = a.content.enumerated().map { position, block in
+                    guard case .toolCall(var tc) = block, tc.id.isEmpty else { return block }
+                    tc.id = "call_unnamed_\(index)_\(position)"
+                    pending.append((tc.id, tc.name))
+                    return .toolCall(tc)
+                }
+                return .assistant(a)
+            case .toolResult(var t):
+                guard t.toolCallId.isEmpty, !pending.isEmpty else { return message }
+                let match = pending.firstIndex { $0.name == t.toolName } ?? 0
+                t.toolCallId = pending.remove(at: match).id
                 return .toolResult(t)
             case .user, .system:
                 return message
