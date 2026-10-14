@@ -574,7 +574,7 @@ struct OpenAICompletionsTests {
 
     // MARK: - Feature 3: tool-call-id normalization
 
-    @Test("pipe-delimited tool-call id is split, sanitized, truncated; result id kept consistent")
+    @Test("pipe-delimited tool-call id is split, encoded, within 40; result id kept consistent")
     func toolCallIdNormalization() async throws {
         let longTail = String(repeating: "a/+=", count: 50)
         let rawId = "call_ab+cd|\(longTail)"
@@ -591,7 +591,8 @@ struct OpenAICompletionsTests {
         let asst = messages.first { $0["role"] as? String == "assistant" }!
         let calls = asst["tool_calls"] as! [[String: Any]]
         let normId = calls.first!["id"] as! String
-        #expect(normId == "call_ab_cd")
+        // "call_ab+cd" as the mark and its base64url: no other id shares it
+        #expect(normId == "kw_Y2FsbF9hYitjZA")
         #expect(normId.count <= 40)
         let tool = messages.first { $0["role"] as? String == "tool" }!
         #expect(tool["tool_call_id"] as? String == normId)
