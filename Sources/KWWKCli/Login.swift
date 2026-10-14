@@ -270,8 +270,11 @@ func terminalLoginCallbacks() -> OAuthLogin.Callbacks {
         onProgress: { msg in
             FileHandle.standardError.write(Data("\(msg)\n".utf8))
         },
-        onUserCode: { code, _ in
-            if Clipboard.copy(code) {
+        onDeviceCode: { deviceCode in
+            // A page that arrives with the code needs only a confirm; one
+            // that does not (GitHub) needs it pasted.
+            guard !deviceCode.pageHoldsCode else { return }
+            if Clipboard.copy(deviceCode.code) {
                 FileHandle.standardError.write(Data("code copied to the clipboard\n".utf8))
             }
         }

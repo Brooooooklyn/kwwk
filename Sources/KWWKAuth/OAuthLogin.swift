@@ -22,8 +22,13 @@ public enum OAuthLogin {
         public var onAuthURL: @Sendable (URL) -> Void
         public var onProgress: @Sendable (String) -> Void
         /// Called once per device flow, before its verification page opens,
-        /// with the code the user confirms there.
+        /// with the code the user confirms there. `onDeviceCode` says more.
         public var onUserCode: (@Sendable (_ code: String, _ verificationURL: URL) async -> Void)?
+        /// Called once per device flow, before its verification page opens.
+        /// Unlike `onUserCode`, it says whether that page will hold the code:
+        /// when it will not (GitHub), the user has to enter it, so a host
+        /// should keep it visible beside the page or put it on the clipboard.
+        public var onDeviceCode: (@Sendable (DeviceCode) async -> Void)?
         /// Shows pages and runs the flow's waiting work beside them. Nil runs
         /// the work after handing the page to `onAuthURL`.
         public var browser: (any OAuthBrowserPresenter)?
@@ -35,15 +40,43 @@ public enum OAuthLogin {
             onAuthURL: @escaping @Sendable (URL) -> Void = { _ in },
             onProgress: @escaping @Sendable (String) -> Void = { _ in },
             onUserCode: (@Sendable (_ code: String, _ verificationURL: URL) async -> Void)? = nil,
+            onDeviceCode: (@Sendable (DeviceCode) async -> Void)? = nil,
             browser: (any OAuthBrowserPresenter)? = nil,
             loopback: @escaping OAuthLoopbackFactory = OAuthLogin.nioLoopback
         ) {
             self.onAuthURL = onAuthURL
             self.onProgress = onProgress
             self.onUserCode = onUserCode
+            self.onDeviceCode = onDeviceCode
             self.browser = browser
             self.loopback = loopback
         }
+    }
+
+    /// A device flow's code, as the user meets it.
+    public struct DeviceCode: Sendable, Equatable {
+        public let code: String
+        /// The page the flow opens for the user to approve on.
+        public let verificationURL: URL
+        /// Whether that page arrives with the code already in it, so the user
+        /// only confirms it. True when the provider names a page that carries
+        /// the code (RFC 8628 `verification_uri_complete`: Kimi, xAI). False
+        /// for GitHub, which names only its bare page and ignores a code in
+        /// the link (seen in AirBuild's sign-in sheet, 2026-10-14): there the
+        /// user types or pastes it, and a page that covers the app hides it.
+        public let pageHoldsCode: Bool
+
+        public init(code: String, verificationURL: URL, pageHoldsCode: Bool) {
+            self.code = code
+            self.verificationURL = verificationURL
+            self.pageHoldsCode = pageHoldsCode
+        }
+    }
+
+    /// Tells the host about a device flow's code, through both callbacks.
+    static func announce(_ deviceCode: DeviceCode, callbacks: Callbacks) async {
+        await callbacks.onUserCode?(deviceCode.code, deviceCode.verificationURL)
+        await callbacks.onDeviceCode?(deviceCode)
     }
 
     // MARK: - Anthropic
@@ -318,7 +351,9 @@ public enum OAuthLogin {
         let verifyURL = gitHubVerificationURL(plainVerifyURL, userCode: userCode)
         let interval = (obj["interval"] as? Int) ?? 5
 
-        await callbacks.onUserCode?(userCode, verifyURL)
+        // GitHub never answers `verification_uri_complete`, and its page
+        // ignores the code in the link: the user enters it.
+        await announce(DeviceCode(code: userCode, verificationURL: verifyURL, pageHoldsCode: false), callbacks: callbacks)
         callbacks.onProgress("enter code in your browser: \(userCode)")
         return try await present(verifyURL, callbacks: callbacks) {
             try await pollGitHubCopilot(
@@ -328,8 +363,10 @@ public enum OAuthLogin {
         }
     }
 
-    /// GitHub's answer names the bare page; its `user_code` query fills the
-    /// code in, so the user confirms it instead of typing it.
+    /// GitHub's answer names the bare page. The code rides along as a
+    /// `user_code` query in case GitHub starts reading it; today its page
+    /// ignores it (AirBuild's sign-in sheet, 2026-10-14), which is why the
+    /// flow reports `pageHoldsCode: false`.
     static func gitHubVerificationURL(_ url: URL, userCode: String) -> URL {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
         var items = components.queryItems ?? []
@@ -516,6 +553,9 @@ public enum OAuthLogin {
         let userCode: String
         let deviceCode: String
         let verificationURL: URL
+        /// Whether the provider named a page that carries the code
+        /// (`verification_uri_complete`), the one opened.
+        let pageHoldsCode: Bool
         /// Seconds between polls. RFC 8628 allows 0 (no minimum wait); only
         /// negative or malformed values fall back to the default.
         let interval: Int
@@ -534,6 +574,7 @@ public enum OAuthLogin {
             self.userCode = userCode
             self.deviceCode = deviceCode
             self.verificationURL = verifyURL
+            self.pageHoldsCode = obj["verification_uri_complete"] is String
             self.interval = (obj["interval"] as? Int).flatMap { $0 >= 0 ? $0 : nil } ?? 5
             self.expiresIn = (obj["expires_in"] as? Int) ?? 15 * 60
         }
@@ -551,7 +592,9 @@ public enum OAuthLogin {
         callbacks: Callbacks,
         client: HTTPClient
     ) async throws -> OAuthCredentials {
-        await callbacks.onUserCode?(grant.userCode, grant.verificationURL)
+        await announce(DeviceCode(
+            code: grant.userCode, verificationURL: grant.verificationURL, pageHoldsCode: grant.pageHoldsCode
+        ), callbacks: callbacks)
         callbacks.onProgress("enter code in your browser: \(grant.userCode)")
         let form = Data(OAuth.urlEncodedForm([
             "client_id": clientID,
