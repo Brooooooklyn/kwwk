@@ -77,9 +77,12 @@ extension InputComponent {
             // (0x0A); terminals emit it even without any keyboard
             // protocol support. Shift+Enter and Ctrl+Enter require
             // a terminal that tags Enter with modifiers (for example
-            // Kitty/Ghostty keyboard protocol support).
+            // Kitty/Ghostty keyboard protocol support). Alt+Enter
+            // arrives as ESC + CR on legacy terminals or CSI 13;3u
+            // under the Kitty protocol; both parse to alt+enter.
             case ("j", true, false): insert("\n")
             case ("enter", true, false): insert("\n")
+            case ("enter", false, true): insert("\n")
             default: break
             }
             return

@@ -936,7 +936,7 @@ private func handleHotkeysCommand(_ ctx: SlashContext, _ args: String) async {
         ("typing", "filter the /model list by model id (Esc clears the filter)"),
         ("↑ / ↓", "move by line · recall history when empty · move in popups"),
         ("Alt/Option+↑", "pop a queued prompt back into the input to edit"),
-        ("Ctrl+J", "insert a newline (or Shift+Enter if the terminal sends it)"),
+        ("Ctrl+J", "insert a newline (also Alt+Enter, or Shift+Enter if sent)"),
         ("Esc", "close a popup/modal · clear the input · then stop the agent"),
         ("Ctrl+L", "repaint the screen"),
         ("Ctrl+C", "stop the agent, else clear the input · press again to exit"),

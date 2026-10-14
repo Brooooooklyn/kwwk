@@ -80,6 +80,7 @@ struct NewSlashCommandTests {
         await runCommand("hotkeys", ctx: ctx)
         #expect(notifier.joined.contains("clear the input · press again to exit"))
         #expect(notifier.joined.contains("Ctrl+J"))
+        #expect(notifier.joined.contains("Alt+Enter"))
     }
 
     @MainActor

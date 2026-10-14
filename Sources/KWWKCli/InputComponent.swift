@@ -44,6 +44,7 @@ private enum WordNavKind {
 ///
 ///   - Shift+Enter (Kitty/Ghostty keyboard protocol)
 ///   - Ctrl+Enter  (terminals that send a modifier-tagged Enter)
+///   - Alt+Enter   (ESC + CR, or Kitty CSI 13;3u)
 ///   - Ctrl+J      (raw LF — 0x0A; always works)
 ///
 /// Plain Enter is left alone so the owning view (CodingTUI) can bind

@@ -75,12 +75,19 @@ struct InputComponentTests {
         #expect(input.cursor == 3)
     }
 
-    @Test("Alt+Enter does not insert a newline") func altEnterDoesNotInsertNewline() {
+    @Test("Alt+Enter inserts a newline") func altEnterInsertsNewline() {
         let input = InputComponent(initial: "ab")
-        // ESC + CR == alt+enter in the parser, but newline insertion is
-        // bound to Shift+Enter now.
+        // ESC + CR == alt+enter in the parser (legacy terminals).
         input.handleInput("\u{1B}\r")
-        #expect(input.value == "ab")
+        #expect(input.value == "ab\n")
+        #expect(input.cursor == 3)
+    }
+
+    @Test("Kitty CSI-u Alt+Enter inserts a newline") func kittyAltEnterInsertsNewline() {
+        let input = InputComponent(initial: "ab")
+        // Kitty keyboard protocol: CSI 13 ; 3 u == alt+enter.
+        input.handleInput("\u{1B}[13;3u")
+        #expect(input.value == "ab\n")
     }
 
     @Test("Shift+Enter inserts a newline") func shiftEnterInsertsNewline() {
