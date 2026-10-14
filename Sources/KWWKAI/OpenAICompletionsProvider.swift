@@ -1239,8 +1239,25 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// `finalizeStreamingBlocks`/`finalize`.
     func snapshot() -> AssistantMessage { buildMessage(parseToolArgs: false) }
 
-    private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
+    /// Gives each tool call the stream never named an id for one of its
+    /// own. llama.cpp, Ollama and some relays send none, and a call kept at
+    /// `""` can't be told from another one, nor paired with its result, and
+    /// Anthropic refuses it outright after a switch (magpie mints
+    /// `call_<id>` the same way, gateway/chat.go). The id is minted once and
+    /// kept, so the end event, the final message and the tool result agree.
+    private func settleEmptyToolCallIds() {
         lock.withLock {
+            for idx in order {
+                guard case .toolUse(let id, let name, let json, let sig) = blocks[idx], id.isEmpty else { continue }
+                let minted = "call_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24))
+                blocks[idx] = .toolUse(id: minted, name: name, json: json, thoughtSignature: sig)
+            }
+        }
+    }
+
+    private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
+        if parseToolArgs { settleEmptyToolCallIds() }
+        return lock.withLock {
             AssistantMessage(
                 content: order.compactMap { idx -> AssistantBlock? in
                     switch blocks[idx] {
@@ -1266,6 +1283,7 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// Emit `text_end` / `thinking_end` / `toolcall_end` once per block when
     /// the stream reports a finish reason or runs out of events.
     func finalizeStreamingBlocks(emit: (AssistantMessageEvent) -> Void) {
+        settleEmptyToolCallIds()
         let indices = lock.withLock { order }
         for idx in indices {
             if endedIndices.contains(idx) { continue }
