@@ -55,10 +55,16 @@ public final class SSEParser: @unchecked Sendable {
 
     public func ingest(_ text: String) {
         lineBuffer += text
-        while let newlineRange = lineBuffer.range(of: "\n") {
-            var line = String(lineBuffer[..<newlineRange.lowerBound])
-            lineBuffer = String(lineBuffer[newlineRange.upperBound...])
-            if line.hasSuffix("\r") { line.removeLast() }
+        // Search by Unicode scalar: "\r\n" is one Character, and a Character
+        // search for "\n" does not find the newline inside it (Swift 6.4
+        // Foundation), so a CRLF-framed stream — Gemini's
+        // streamGenerateContent — never split into lines and every reply
+        // ended as "stream ended without a finish reason".
+        while let newline = lineBuffer.unicodeScalars.firstIndex(of: "\n") {
+            let scalars = lineBuffer.unicodeScalars
+            var line = String(scalars[..<newline])
+            lineBuffer = String(scalars[scalars.index(after: newline)...])
+            if line.unicodeScalars.last == "\r" { line.unicodeScalars.removeLast() }
             handle(line: line)
         }
     }
