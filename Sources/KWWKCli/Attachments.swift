@@ -157,15 +157,7 @@ func normalizePastePath(_ body: String, cwd: String) -> String {
         }
     }
     if t.hasPrefix("~/") {
-        // iOS Foundation does not expose homeDirectoryForCurrentUser at all.
-        // NSHomeDirectory() is how the rest of the package already reaches the
-        // same path (see OAuth.defaultURL and SessionStore.defaultDirectory).
-        #if targetEnvironment(macCatalyst) || os(iOS)
-        let home = NSHomeDirectory()
-        #else
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        #endif
-        t = home + String(t.dropFirst(1))
+        t = cliHomeDirectory() + String(t.dropFirst(1))
     }
     if !t.hasPrefix("/") {
         // Resolve relative to cwd without calling realpath — the user

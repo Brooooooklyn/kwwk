@@ -9,7 +9,7 @@ extension KWWK {
         await MCPCommand.run(
             arguments,
             cwd: FileManager.default.currentDirectoryPath,
-            homeDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
+            homeDirectory: cliHomeDirectory(),
             environment: ProcessInfo.processInfo.environment,
             io: .standard
         )
