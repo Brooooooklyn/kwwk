@@ -235,6 +235,16 @@ public actor OAuthStore {
         try persist()
     }
 
+    /// Re-read one entry from disk, adopting what another process wrote
+    /// since this store loaded. Used before a forced refresh, where acting on
+    /// a stale in-memory copy would spend a refresh token already rotated
+    /// elsewhere. No-op for an in-memory store or an unreadable file.
+    public func reloadEntry(_ providerId: String) throws {
+        guard isPersistent, FileManager.default.fileExists(atPath: url.path) else { return }
+        let disk = try JSONDecoder().decode([String: OAuthCredentials].self, from: Data(contentsOf: url))
+        if let entry = disk[providerId] { credentials[providerId] = entry }
+    }
+
     public func remove(_ providerId: String) throws {
         credentials.removeValue(forKey: providerId)
         try persist()
