@@ -47,3 +47,41 @@ jobs:
         run: .build/debug/kwwk --self-test
       - name: swift test
         run: swift test
+
+  build-ios:
+    # The libraries and the `kwwk` CLI cross-compiled for iOS at the
+    # Package.swift floor, on the oldest and newest supported toolchains.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select Swift 6.1 toolchain
+        if: matrix.os == 'macos-15'
+        run: sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+      - name: swift build (iOS 15, kwwk CLI)
+        # There is no Swift SDK bundle for iOS, so each stage gets the
+        # iPhoneOS sysroot by hand: frontend, C, link driver and ld. The native
+        # build system keeps the -Xcc target out of the host tools libpng
+        # builds, which swiftbuild would compile for iOS and link for macOS.
+        run: |
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          swift build --build-system native --product kwwk \
+            --scratch-path .build-ios \
+            --triple arm64-apple-ios15.0 \
+            -Xswiftc -sdk -Xswiftc "$sdk" \
+            -Xcc -isysroot -Xcc "$sdk" \
+            -Xswiftc -Xclang-linker -Xswiftc -isysroot \
+            -Xswiftc -Xclang-linker -Xswiftc "$sdk" \
+            -Xlinker -syslibroot -Xlinker "$sdk"
+          bin="$(find .build-ios -path '*/debug/kwwk' -type f | head -n1)"
+          vtool -show-build "$bin"
+          vtool -show-build "$bin" | grep -qE '^ *platform (IOS|2)$'
+          vtool -show-build "$bin" | grep -qE '^ *minos 15\.0$'
+      - name: xcodebuild (Mac Catalyst 15, libraries)
+        run: |
+          xcodebuild build -scheme KWWKMCP \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath .build-catalyst CODE_SIGNING_ALLOWED=NO
