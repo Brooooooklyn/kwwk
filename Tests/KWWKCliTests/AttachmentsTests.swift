@@ -65,6 +65,14 @@ struct AtTokenExtractionTests {
     func bareAt() {
         #expect(extractAtTokens(from: "email me at @ later").isEmpty)
     }
+
+    @Test("ignores @ in the middle of a word")
+    func midWordAt() {
+        #expect(extractAtTokens(from: "send it to bob@example.com").isEmpty)
+        #expect(extractAtTokens(from: "git show HEAD@{1}").isEmpty)
+        let tokens = extractAtTokens(from: "mail a@b.c about (@/tmp/x.png)")
+        #expect(tokens == ["/tmp/x.png"])
+    }
 }
 
 // MARK: - AttachmentStore

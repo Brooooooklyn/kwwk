@@ -211,7 +211,9 @@ func extractAtTokens(from text: String) -> [String] {
     let scalars = Array(text.unicodeScalars)
     var i = 0
     while i < scalars.count {
-        if scalars[i] == "@" {
+        // An `@` glued to a preceding letter or digit is part of a word
+        // (`bob@example.com`, `HEAD@{1}`), not an attachment reference.
+        if scalars[i] == "@", i == 0 || !CharacterSet.alphanumerics.contains(scalars[i - 1]) {
             // Token body starts at i+1, runs until the next whitespace.
             var j = i + 1
             while j < scalars.count, !scalars[j].properties.isWhitespace {
