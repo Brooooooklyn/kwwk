@@ -166,7 +166,12 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         if status == 401 || status == 403 {
             // Kimi refuses an over-plan context as 401; it is an input
             // rejection, so it takes the shrinking path, not a login error.
-            return ProviderContextLimit.isPlanContextLimit(text) ? .contextOverflow : .authentication
+            if ProviderContextLimit.isPlanContextLimit(text) { return .contextOverflow }
+            // Kimi Code reports a spent 5-hour / weekly / monthly plan window
+            // as 403 "You've reached your … usage limit". The login is fine;
+            // treating it as authentication would send the user to sign in again.
+            if Self.isPlanUsageLimit(text) { return .quota }
+            return .authentication
         }
         if status == nil || status == 400 || status == 413,
            ProviderContextLimit.isInputOverflow(text) { return .contextOverflow }
@@ -260,6 +265,106 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
     private static func isCurlTransferInterrupted(_ text: String) -> Bool {
         ["transfer closed with", "was not closed cleanly", "stream error in the http/2 framing layer"]
             .contains(where: text.contains)
+    }
+
+    /// What a failure means for the person who hit it, in terms a host can
+    /// show and act on without knowing any provider's wire. kwwk owns every
+    /// provider quirk that decides this (Kimi's over-plan 401 is a context
+    /// limit, its spent plan window a quota, xAI's and Kiro's 403 a refused
+    /// login, Anthropic's organization 403 an account limit, Cursor's region
+    /// refusal a rejected request); a host maps these cases to its own copy
+    /// and never reads statuses or provider codes itself.
+    public enum Outcome: String, Codable, Sendable, CaseIterable {
+        /// The provider refused the login itself: sign in again.
+        case signInRequired
+        /// Signed in, but this account may not do this (plan, organization
+        /// policy, model entitlement). Signing in again does not help.
+        case accessDenied
+        /// The account's allowance or credit is spent.
+        case quotaExhausted
+        /// A short-window limit; asking again later works.
+        case rateLimited
+        /// The conversation is too long for the model or the plan.
+        case contextTooLong
+        /// The provider refused this request as made.
+        case requestRejected
+        /// The provider is down or overloaded.
+        case serviceUnavailable
+        case timeout
+        /// The connection to the provider failed.
+        case network
+        /// The provider declined the content.
+        case contentRefused
+        case cancelled
+        case unknown
+    }
+
+    /// Conservative on purpose, since a host turns it into a sentence the
+    /// user acts on: prose alone (no status, code, stop reason or transport
+    /// code) names no cause; a 5xx is the provider's outage whatever code
+    /// rides along (504 a timeout); and transport evidence alone only says
+    /// network, timeout or cancelled. `category` stays the retry signal.
+    public var outcome: Outcome {
+        if httpStatus == nil, providerCode == nil, rawStopReason == nil, transportCode == nil { return .unknown }
+        if let status = httpStatus, (500...599).contains(status) { return status == 504 ? .timeout : .serviceUnavailable }
+        if httpStatus == nil, providerCode == nil, rawStopReason == nil {
+            switch category {
+            case .transport: return .network
+            case .timeout: return .timeout
+            case .cancelled: return .cancelled
+            default: return .unknown
+            }
+        }
+        return switch category {
+        case .authentication: isCredentialRejection ? .signInRequired : .accessDenied
+        case .contextOverflow: .contextTooLong
+        case .quota: .quotaExhausted
+        case .rateLimit: .rateLimited
+        case .invalidRequest: .requestRejected
+        case .server: .serviceUnavailable
+        case .timeout: .timeout
+        case .transport: .network
+        case .refusal: .contentRefused
+        case .cancelled: .cancelled
+        case .unknown: .unknown
+        }
+    }
+
+    /// Whether this failure says the credential itself was refused, so that
+    /// renewing the login could help. Narrower than `.authentication`: a 401
+    /// or a gRPC `unauthenticated` is a refused credential, but a 403 (or
+    /// `permission_denied`, or an auth word in bare text) is believed only
+    /// with evidence about the token, and never when it names a policy. A
+    /// 403 for a model the plan lacks, an organization that disallows OAuth,
+    /// or a region is about the account, and renewing the login there would
+    /// only spend a refresh, or tell the user to sign in for nothing.
+    /// xAI and Kiro do refuse a bad token with 403, hence the evidence check
+    /// instead of excluding 403 outright.
+    public var isCredentialRejection: Bool {
+        guard category == .authentication else { return false }
+        let status = httpStatus ?? Self.legacyStatus(message)
+        let code = providerCode?.lowercased()
+        if status == 401 || (status == nil && code == "unauthenticated") { return true }
+        let text = [providerCode, rawStopReason, message, upstreamMessage].compactMap { $0 }.joined(separator: " ").lowercased()
+        let policy = ["not allowed", "not supported", "not available", "not enabled", "does not have access", "do not have access",
+                      "doesn't have access", "your plan", "upgrade", "region", "country", "subscription"]
+        if policy.contains(where: text.contains) { return false }
+        let credential = ["unauthenticated", "unauthorized", "bad-credentials", "bad credentials", "invalid_token", "invalid token",
+                          "token is invalid", "token_expired", "token expired", "token has expired", "expired token", "expiredtoken",
+                          "could not be validated", "invalid api key", "invalid_api_key", "invalid authentication",
+                          "invalid_authentication", "authentication_error", "authentication failed", "authentication token",
+                          "access token", "bearer token", "security token", "revoked", "unrecognizedclient"]
+        return credential.contains(where: text.contains)
+    }
+
+    /// Plan-window exhaustion wording delivered on 401/403 (Kimi Code:
+    /// https://www.kimi.com/code/docs/en/kimi-code/error-reference.html).
+    /// Concurrency caps on 403 are not included: they are not spent quota.
+    static func isPlanUsageLimit(_ text: String) -> Bool {
+        guard !text.contains("concurrent request limit") else { return false }
+        return Self.match(#"\b(reached your [a-z0-9() -]{0,40}usage limit)\b"#, in: text) != nil
+            || text.contains("quota will reset")
+            || text.contains("quota will be refreshed")
     }
 
     private static func isTransientLimit(_ text: String) -> Bool {

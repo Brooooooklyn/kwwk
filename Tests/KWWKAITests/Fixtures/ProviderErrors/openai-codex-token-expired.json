@@ -1,0 +1,21 @@
+{
+  "capturedAt": "2026-10-14T09:40:00.000Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true,
+    "outcome": "signInRequired"
+  },
+  "parser": "http",
+  "provider": "openai-codex",
+  "request": {
+    "method": "POST",
+    "url": "https://chatgpt.com/backend-api/codex/responses"
+  },
+  "response": {
+    "body": "{\n  \"error\": {\n    \"message\": \"Your authentication token has expired. Please try refreshing it.\",\n    \"type\": \"invalid_request_error\",\n    \"code\": \"token_expired\",\n    \"param\": null\n  },\n  \"status\": 401,\n  \"detail\": {\n    \"code\": \"token_expired\",\n    \"message\": \"Your authentication token has expired. Please try refreshing it.\"\n  }\n}",
+    "bodyTruncated": false,
+    "headers": {},
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): the stored Codex token, refused 118h before its recorded expiry; headers not kept"
+}

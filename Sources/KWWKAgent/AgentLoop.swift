@@ -754,20 +754,48 @@ public enum AgentLoop {
         )
 
         let bridgeContext = context
-        let resolvedAuth = try await config.authResolver?(config.model, config.sessionId)
+        var resolvedAuth = try await config.authResolver?(config.model, config.sessionId)
         var requestModel = config.model
-        if let baseURL = resolvedAuth?.baseURL, !baseURL.isEmpty {
-            requestModel.baseURL = baseURL
+        var mergedMetadata: [String: JSONValue]?
+        func applyResolvedAuth() {
+            requestModel = config.model
+            if let baseURL = resolvedAuth?.baseURL, !baseURL.isEmpty {
+                requestModel.baseURL = baseURL
+            }
+            mergedMetadata = resolvedAuth?.metadata.isEmpty == false ? resolvedAuth?.metadata : nil
         }
-        let mergedMetadata: [String: JSONValue]? = {
-            guard let authMetadata = resolvedAuth?.metadata, !authMetadata.isEmpty else { return nil }
-            return authMetadata
-        }()
+        applyResolvedAuth()
         var lastError: Error?
         let retryPolicy = ProviderRetryPolicy(baseDelayMs: config.retryBaseDelayMs,
                                               maxRetryDelayMs: config.maxRetryDelayMs)
 
-        for attemptIndex in 0..<retryPolicy.maxAttempts {
+        // An OAuth token the provider refuses before its recorded expiry
+        // (revoked upstream, signed out elsewhere) is reported back to its
+        // source once per response: the source renews it (or says the login
+        // is dead, which throws `OAuthCredentialSourceError`), and the
+        // request is replayed once with the new token. That replay does not
+        // spend the transient-retry budget. Only a refusal of the credential
+        // itself is reported (`isCredentialRejection`): Kimi's over-plan 401,
+        // Cursor's region refusal and a 403 naming a plan or policy are not.
+        var credentialRetried = false
+        func rejectedCredential(_ failure: ProviderFailure) -> CredentialRejection? {
+            guard !credentialRetried, failure.isCredentialRejection else { return nil }
+            return resolvedAuth?.onRejected
+        }
+        func renewRejectedCredential(_ rejection: CredentialRejection) async throws -> Bool {
+            credentialRetried = true
+            guard try await rejection.report() else { return false }
+            resolvedAuth = try await config.authResolver?(config.model, config.sessionId)
+            applyResolvedAuth()
+            return true
+        }
+        let credentialRetryReason = "The provider refused the stored login; retrying once with a renewed token"
+
+        for attemptSlot in 0...retryPolicy.maxAttempts {
+            // The credential replay reuses its attempt's index, so the slot
+            // past the budget only runs when that replay happened.
+            let attemptIndex = credentialRetried ? attemptSlot - 1 : attemptSlot
+            guard attemptIndex < retryPolicy.maxAttempts else { break }
             if cancellation?.isCancelled == true {
                 throw AgentError.aborted
             }
@@ -880,6 +908,24 @@ public enum AgentLoop {
                     )
                 }
 
+                if final.stopReason == .error,
+                   !replayUnsafe, !final.hasReplayUnsafeContent,
+                   let failure = final.providerFailure,
+                   let rejection = rejectedCredential(failure),
+                   try await renewRejectedCredential(rejection),
+                   inlineAttempt.preventInvocationsForReplay() {
+                    await inlineAttempt.invalidateAndWait(reason: "credential-renewed-retry")
+                    let discarded = cursorResults.drain()
+                    turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
+                    turnToolState.resetPollGateForRetry()
+                    if emittedStart {
+                        await emit(.streamRewind)
+                    }
+                    await emit(.streamRetry(attempt: attemptIndex, delayMs: 0, reason: credentialRetryReason))
+                    lastError = AgentError.maxRetriesExceeded
+                    continue
+                }
+
                 // Retry only before output/tool effects are committed. Close
                 // the inline invocation gate atomically with the safety check.
                 if final.stopReason == .error,
@@ -913,6 +959,17 @@ public enum AgentLoop {
 
             } catch {
                 await inlineAttempt.invalidateAndWait(reason: "cursor-attempt-error")
+                // A failed credential source is the user's to fix — a
+                // deleted or parked login. Retrying cannot change its
+                // answer, and the copy such errors carry ("connect your …
+                // login") reads like a network failure to the string
+                // classifier below. Checked first: a renewal refused while
+                // handling a rejected token lands here too.
+                if error is OAuthCredentialSourceError {
+                    let discarded = cursorResults.drain()
+                    turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
+                    throw error
+                }
                 if let overflow = error as? ProviderContextOverflow {
                     let discarded = cursorResults.drain()
                     turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
@@ -939,14 +996,15 @@ public enum AgentLoop {
                         emittedStart: emittedStart
                     )
                 }
-                // A failed credential source is the user's to fix — a
-                // deleted or parked login. Retrying cannot change its
-                // answer, and the copy such errors carry ("connect your …
-                // login") reads like a network failure to the string
-                // classifier below.
-                if error is OAuthCredentialSourceError {
+                if !replayUnsafe, !inlineAttempt.hasInvokedTools,
+                   let rejection = rejectedCredential(.capture(error)) {
                     let discarded = cursorResults.drain()
                     turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
+                    if try await renewRejectedCredential(rejection) {
+                        turnToolState.resetPollGateForRetry()
+                        await emit(.streamRetry(attempt: attemptIndex, delayMs: 0, reason: credentialRetryReason))
+                        continue
+                    }
                     throw error
                 }
                 if !replayUnsafe, !inlineAttempt.hasInvokedTools,

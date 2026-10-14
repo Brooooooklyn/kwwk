@@ -40,6 +40,12 @@ import KWWKCli
 struct KwwkCLI {
     static func main() async {
         var args = Array(CommandLine.arguments.dropFirst())
+        // Keep provider error bodies verbatim next to the logins, so a
+        // refusal can be read again and become a fixture
+        // (`KWWK_PROVIDER_ERROR_DIR` redirects it, `off` disables it).
+        ProviderErrorCapture.enable(
+            directory: OAuthStore.defaultURL().deletingLastPathComponent().appendingPathComponent("provider-errors")
+        )
         // `kwwk mcp` takes its arguments verbatim: a stdio server's own flags
         // (after `--`) must not be read as kwwk's global options.
         if args.first == "mcp" {
