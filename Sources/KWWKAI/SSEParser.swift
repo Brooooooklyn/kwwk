@@ -109,6 +109,14 @@ public final class SSEParser: @unchecked Sendable {
     /// Close parser — emits any trailing message that lacked a final blank
     /// line (rare, but observed from some servers).
     public func finish() -> [SSEMessage] {
+        // A last field line the server sent without a newline is still a
+        // line; without this it stays in `lineBuffer` and is lost.
+        if !lineBuffer.isEmpty {
+            var line = lineBuffer
+            lineBuffer = ""
+            if line.unicodeScalars.last == "\r" { line.unicodeScalars.removeLast() }
+            handle(line: line)
+        }
         if !dataLines.isEmpty || event != "message" {
             pending.append(SSEMessage(event: event, data: dataLines.joined(separator: "\n"), id: id))
             dataLines.removeAll()
