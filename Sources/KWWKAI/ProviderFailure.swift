@@ -112,7 +112,8 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
                     requestId: string(root["request_id"]) ?? string(error["request_id"]), upstreamMessage: upstream)
     }
 
-    static func http(_ response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>) async -> Self {
+    /// The first 4096 bytes of an error body.
+    static func readBoundedBody(_ body: AsyncThrowingStream<Data, Error>) async -> Data {
         var bytes = Data()
         // A truncated/broken error body must never erase an already received status.
         do {
@@ -121,15 +122,18 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
                 if bytes.count >= 4096 { break }
             }
         } catch { /* status and headers remain authoritative */ }
+        return bytes
+    }
+
+    static func http(_ response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>) async -> Self {
+        let bytes = await readBoundedBody(body)
         let text = String(decoding: bytes, as: UTF8.self)
         var failure = parseJSONObject(text).map { payload($0, fallback: text) }
             ?? Self(message: text.isEmpty ? "HTTP \(response.statusCode)" : text)
         failure.httpStatus = response.statusCode
         failure.requestId = response.value(forHTTPHeaderField: "x-request-id")
             ?? response.value(forHTTPHeaderField: "request-id") ?? failure.requestId
-        failure.retryAfterMs = retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
-            if let key = entry.key as? String { result[key.lowercased()] = String(describing: entry.value) }
-        })
+        failure.retryAfterMs = retryDelay(response: response)
         switch response.value(forHTTPHeaderField: "x-should-retry")?.lowercased() {
         case "true": failure.shouldRetry = true
         case "false": failure.shouldRetry = false
@@ -148,6 +152,12 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
         return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now) * 1000) }
+    }
+
+    static func retryDelay(response: HTTPURLResponse) -> Double? {
+        retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
+            if let key = entry.key as? String { result[key] = String(describing: entry.value) }
+        })
     }
 
     public var category: Category {
@@ -317,5 +327,34 @@ public extension AssistantMessage {
 
     var providerFailure: ProviderFailure? {
         failure ?? (stopReason == .error ? ProviderFailure(message: errorMessage ?? "Unknown provider error") : nil)
+    }
+}
+
+extension AssistantMessage {
+    static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
+        AssistantMessage(
+            content: [],
+            api: api,
+            provider: model.provider,
+            model: model.id,
+            usage: Usage(),
+            stopReason: .error,
+            errorMessage: text,
+            failure: failure ?? ProviderFailure(message: text),
+            timestamp: Timestamp.now()
+        )
+    }
+
+    static func makeAborted(api: String, model: Model) -> AssistantMessage {
+        AssistantMessage(
+            content: [],
+            api: api,
+            provider: model.provider,
+            model: model.id,
+            usage: Usage(),
+            stopReason: .aborted,
+            errorMessage: "Request was aborted",
+            timestamp: Timestamp.now()
+        )
     }
 }

@@ -71,18 +71,16 @@ struct GenerateModels {
         root: [String: Any]
     ) {
         let providers = root.keys.sorted()
-        let totalModels = providers.reduce(0) { total, provider in
-            total + ((root[provider] as? [String: Any])?.count ?? 0)
-        }
+        let counts = providers.map { (root[$0] as? [String: Any])?.count ?? 0 }
+        let totalModels = counts.reduce(0, +)
 
         print("generated \(outputPath) (\(outputBytes) bytes)")
         print("  providers: \(providers.count)")
         print("  models:    \(totalModels)")
 
         print("  by provider:")
-        let width = providers.map(\.count).max() ?? 10
-        for provider in providers {
-            let count = (root[provider] as? [String: Any])?.count ?? 0
+        let width = providers.map(\.count).max() ?? 0
+        for (provider, count) in zip(providers, counts) {
             let pad = String(repeating: " ", count: max(0, width - provider.count))
             print("    \(provider)\(pad)  \(count)")
         }
@@ -140,16 +138,7 @@ private struct Options {
     }
 }
 
-private enum GenerateError: Error, CustomStringConvertible {
+private enum GenerateError: Error {
     case help
     case usage(String)
-
-    var description: String {
-        switch self {
-        case .help:
-            return GenerateModels.usage
-        case .usage(let text):
-            return text
-        }
-    }
 }

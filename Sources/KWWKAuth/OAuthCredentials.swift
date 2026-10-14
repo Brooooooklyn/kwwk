@@ -52,11 +52,7 @@ public struct OAuthCredentials: Codable, Sendable, Hashable {
     }
 }
 
-/// A single OAuth provider's refresh flow. `login()` (device flow + local
-/// callback server) is intentionally NOT in this protocol — it requires
-/// browser + HTTP server integration that's out of scope for kw's runtime.
-/// Callers obtain initial credentials elsewhere (e.g. via pi's CLI or by
-/// hand) and drop them in the `OAuthStore`. We handle the refresh path.
+/// A single OAuth provider's refresh flow; sign-in lives in `OAuthLogin`.
 public protocol OAuthProvider: Sendable {
     /// Stable identifier used as the store key: `"anthropic"`,
     /// `"github-copilot"`, etc.
@@ -67,9 +63,8 @@ public protocol OAuthProvider: Sendable {
     /// credentials for the caller to persist.
     func refresh(_ credentials: OAuthCredentials, using client: HTTPClient) async throws -> OAuthCredentials
 
-    /// Convert credentials to the api-key string the provider expects. For
-    /// most vendors this is just `credentials.access`; GitHub Copilot
-    /// exchanges it for a short-lived session token on every call.
+    /// Convert credentials to the api-key string the provider expects.
+    /// Defaults to `credentials.access`.
     func apiKey(from credentials: OAuthCredentials, using client: HTTPClient) async throws -> String
 }
 

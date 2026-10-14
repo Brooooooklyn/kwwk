@@ -97,7 +97,7 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
             creds = (await credentialsProvider()) ?? BedrockCredentials.dummy
         } else {
             guard let resolved = await credentialsProvider() else {
-                let msg = Self.makeError(api: api, model: model, text: "AWS credentials unavailable")
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "AWS credentials unavailable")
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return
@@ -109,7 +109,7 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         let modelPath = model.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model.id
         let path = "/model/\(modelPath)/converse-stream"
         guard let url = URL(string: "https://\(host)\(path)") else {
-            let msg = Self.makeError(api: api, model: model, text: "Invalid Bedrock URL")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Invalid Bedrock URL")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return
@@ -119,7 +119,7 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         do {
             body = try Self.encodeBody(model: model, context: context, options: options, env: environment)
         } catch {
-            let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return
@@ -161,7 +161,7 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
             )
             if response.statusCode >= 400 {
                 let failure = await ProviderFailure.http(response, body: stream)
-                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return
@@ -176,11 +176,11 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
             try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
-                let aborted = Self.makeAborted(api: api, model: model)
+                let aborted = AssistantMessage.makeAborted(api: api, model: model)
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = Self.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -714,33 +714,6 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         default: return (.error, raw.isEmpty ? nil : raw)
         }
     }
-
-    private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .error,
-            errorMessage: text,
-            failure: failure ?? ProviderFailure(message: text),
-            timestamp: Timestamp.now()
-        )
-    }
-
-    private static func makeAborted(api: String, model: Model) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .aborted,
-            errorMessage: "Request was aborted",
-            timestamp: Timestamp.now()
-        )
-    }
 }
 
 // MARK: - Mutable state
@@ -847,7 +820,7 @@ final class BedrockStreamState: @unchecked Sendable {
         case .thinking(let th):
             emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
         case .toolUse(let id, let name, let json):
-            let call = ToolCall(id: id, name: name, arguments: parseArgs(json))
+            let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
             emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
         }
         _ = lock.withLock { endedIndices.insert(idx) }
@@ -864,7 +837,7 @@ final class BedrockStreamState: @unchecked Sendable {
             case .thinking(let th):
                 emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
             case .toolUse(let id, let name, let json):
-                let call = ToolCall(id: id, name: name, arguments: parseArgs(json))
+                let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }
             _ = lock.withLock { endedIndices.insert(idx) }
@@ -898,7 +871,7 @@ final class BedrockStreamState: @unchecked Sendable {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json):
-                        let args: JSONValue = parseToolArgs ? parseArgs(json) : .object([:])
+                        let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
                         return .toolCall(ToolCall(id: id, name: name, arguments: args))
                     case .none: return nil
                     }
@@ -926,14 +899,5 @@ final class BedrockStreamState: @unchecked Sendable {
         stopReason = .error
         errorMessage = text
         return snapshot()
-    }
-
-    private func parseArgs(_ json: String) -> JSONValue {
-        if json.isEmpty { return .object([:]) }
-        if let data = json.data(using: .utf8),
-           let v = try? JSONDecoder().decode(JSONValue.self, from: data) {
-            return v
-        }
-        return .object([:])
     }
 }

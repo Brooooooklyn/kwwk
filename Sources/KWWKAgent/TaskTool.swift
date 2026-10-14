@@ -1,6 +1,10 @@
 import Foundation
 import KWWKAI
 
+private let taskListLimitRange = 1...50
+private let taskReadLimitRange = 1...32_768
+private let taskPollTimeoutRange = 1...300
+
 private func taskDeliveryConsumer(
     sessionId: String?,
     explicit: BackgroundTaskDeliveryConsumer?
@@ -95,8 +99,8 @@ private func makeTaskListTool(
             "limit": optionalTaskParameter(
                 [
                     "type": .string("integer"),
-                    "minimum": .int(1),
-                    "maximum": .int(50),
+                    "minimum": .int(taskListLimitRange.lowerBound),
+                    "maximum": .int(taskListLimitRange.upperBound),
                 ],
                 description: "Maximum tasks to return."
             ),
@@ -130,7 +134,7 @@ private func makeTaskListTool(
                 field: "limit",
                 toolName: "task_list",
                 defaultValue: 20,
-                range: 1...50
+                range: taskListLimitRange
             )
             let page = await manager.listPage(
                 sessionId: sessionId,
@@ -163,8 +167,8 @@ private func makeTaskReadTool(
             "limit": optionalTaskParameter(
                 [
                     "type": .string("integer"),
-                    "minimum": .int(1),
-                    "maximum": .int(32_768),
+                    "minimum": .int(taskReadLimitRange.lowerBound),
+                    "maximum": .int(taskReadLimitRange.upperBound),
                 ],
                 description: "Maximum bytes to return."
             ),
@@ -197,7 +201,7 @@ private func makeTaskReadTool(
                 field: "limit",
                 toolName: "task_read",
                 defaultValue: 8_192,
-                range: 1...32_768
+                range: taskReadLimitRange
             )
             do {
                 let chunk = try await manager.readOutput(
@@ -313,8 +317,8 @@ private func makeTaskPollTool(
             "timeout_seconds": optionalTaskParameter(
                 [
                     "type": .string("integer"),
-                    "minimum": .int(1),
-                    "maximum": .int(300),
+                    "minimum": .int(taskPollTimeoutRange.lowerBound),
+                    "maximum": .int(taskPollTimeoutRange.upperBound),
                 ],
                 description: "Maximum wait in seconds."
             ),
@@ -584,26 +588,14 @@ private func taskBoundedInteger(
     range: ClosedRange<Int>
 ) throws -> Int {
     guard let value, !isBlankToolArgument(value) else { return defaultValue }
-    let raw: Int
+    // `Int(exactly:)` rejects NaN, infinity, fractions and values outside `Int`.
+    let raw: Int?
     switch value {
-    case .int(let integer):
-        raw = integer
-    case .double(let double):
-        guard double.isFinite,
-              double.rounded(.towardZero) == double,
-              double >= Double(range.lowerBound),
-              double <= Double(range.upperBound) else {
-            throw CodingToolError.invalidArgument(
-                "\(toolName): `\(field)` must be an integer from \(range.lowerBound) through \(range.upperBound)"
-            )
-        }
-        raw = Int(double)
-    default:
-        throw CodingToolError.invalidArgument(
-            "\(toolName): `\(field)` must be an integer from \(range.lowerBound) through \(range.upperBound)"
-        )
+    case .int(let integer): raw = integer
+    case .double(let double): raw = Int(exactly: double)
+    default: raw = nil
     }
-    guard range.contains(raw) else {
+    guard let raw, range.contains(raw) else {
         throw CodingToolError.invalidArgument(
             "\(toolName): `\(field)` must be an integer from \(range.lowerBound) through \(range.upperBound)"
         )
@@ -613,28 +605,17 @@ private func taskBoundedInteger(
 
 private func taskTimeout(_ value: JSONValue?) throws -> Int {
     guard let value, !isBlankToolArgument(value) else { return 30 }
-    let raw: Int
+    let range = taskPollTimeoutRange
+    // `Int(exactly:)` rejects NaN, infinity, fractions and values outside `Int`.
+    let raw: Int?
     switch value {
-    case .int(let integer):
-        raw = integer
-    case .double(let double):
-        guard double.isFinite,
-              double.rounded(.towardZero) == double,
-              double >= 1,
-              double <= 300 else {
-            throw CodingToolError.invalidArgument(
-                "task_poll: `timeout_seconds` must be a finite integer from 1 through 300"
-            )
-        }
-        raw = Int(double)
-    default:
-        throw CodingToolError.invalidArgument(
-            "task_poll: `timeout_seconds` must be a finite integer from 1 through 300"
-        )
+    case .int(let integer): raw = integer
+    case .double(let double): raw = Int(exactly: double)
+    default: raw = nil
     }
-    guard (1...300).contains(raw) else {
+    guard let raw, range.contains(raw) else {
         throw CodingToolError.invalidArgument(
-            "task_poll: `timeout_seconds` must be a finite integer from 1 through 300"
+            "task_poll: `timeout_seconds` must be a finite integer from \(range.lowerBound) through \(range.upperBound)"
         )
     }
     return raw

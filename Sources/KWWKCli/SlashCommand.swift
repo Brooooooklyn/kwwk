@@ -122,7 +122,7 @@ final class SlashContext {
     /// draft, open modal, busy frame). Nil in headless / test contexts.
     var idleCompactVeto: (@Sendable () async -> Bool)?
 
-    init(
+    convenience init(
         agent: Agent,
         modal: ModalHost,
         backgroundManager: BackgroundTaskManager,
@@ -140,22 +140,24 @@ final class SlashContext {
         setCompacting: @MainActor @escaping (_ active: Bool) -> Void = { _ in },
         setShaking: @MainActor @escaping (_ active: Bool) -> Void = { _ in }
     ) {
-        self.agentProvider = { agent }
-        self.modal = modal
-        self.backgroundManager = backgroundManager
-        self.sessionIdProvider = { sessionId }
-        self.notifyBlock = notifyBlock
-        self.commitScrollback = commitScrollback
-        self.refreshTranscript = refreshTranscript
-        self.recordCompaction = recordCompaction
-        self.persistShake = persistShake
-        self.setSessionTitle = setSessionTitle
-        self.sessionProviders = sessionProviders
-        self.authResolvers = authResolvers
-        self.context1m = context1m
-        self.withSuspendedTUI = withSuspendedTUI
-        self.setCompacting = setCompacting
-        self.setShaking = setShaking
+        self.init(
+            agentProvider: { agent },
+            modal: modal,
+            backgroundManager: backgroundManager,
+            sessionIdProvider: { sessionId },
+            notifyBlock: notifyBlock,
+            commitScrollback: commitScrollback,
+            refreshTranscript: refreshTranscript,
+            recordCompaction: recordCompaction,
+            persistShake: persistShake,
+            setSessionTitle: setSessionTitle,
+            sessionProviders: sessionProviders,
+            authResolvers: authResolvers,
+            context1m: context1m,
+            withSuspendedTUI: withSuspendedTUI,
+            setCompacting: setCompacting,
+            setShaking: setShaking
+        )
     }
 
     /// Runtime-backed variant used by the interactive TUI, whose `/new` and
@@ -367,12 +369,20 @@ func slashCompletion(for input: String, commandNames: [String]) -> SlashCompleti
     slashCompletion(for: input, commands: commandNames.map { SlashCommandInfo(name: $0) })
 }
 
-func slashCompletion(for input: String, commands: [SlashCommandInfo]) -> SlashCompletion? {
+/// The command name typed so far when `input` is a bare `/query` (a leading
+/// slash and no whitespace yet), else `nil`. The slash popup and Tab/ghost
+/// completion both use this, so they agree on when a query is active.
+func bareSlashQuery(_ input: String) -> String? {
     guard input.hasPrefix("/") else { return nil }
     let body = String(input.dropFirst())
     guard !body.contains(where: { $0 == " " || $0 == "\t" || $0 == "\n" }) else {
         return nil
     }
+    return body
+}
+
+func slashCompletion(for input: String, commands: [SlashCommandInfo]) -> SlashCompletion? {
+    guard let body = bareSlashQuery(input) else { return nil }
 
     // Share the popup's ranker so the ghost/Tab target is always the popup's
     // top row.

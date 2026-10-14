@@ -87,7 +87,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         do {
             body = try Self.encodeBody(model: model, context: context, options: options)
         } catch {
-            let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return
@@ -112,7 +112,7 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             )
             if response.statusCode >= 400 {
                 let failure = await ProviderFailure.http(response, body: stream)
-                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return
@@ -127,11 +127,11 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
             try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
-                let aborted = Self.makeAborted(api: api, model: model)
+                let aborted = AssistantMessage.makeAborted(api: api, model: model)
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = Self.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -715,33 +715,6 @@ public final class GoogleGeminiProvider: APIProvider, @unchecked Sendable {
         case "MALFORMED_FUNCTION_CALL": return .error
         default: return .stop
         }
-    }
-
-    private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .error,
-            errorMessage: text,
-            failure: failure ?? ProviderFailure(message: text),
-            timestamp: Timestamp.now()
-        )
-    }
-
-    private static func makeAborted(api: String, model: Model) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .aborted,
-            errorMessage: "Request was aborted",
-            timestamp: Timestamp.now()
-        )
     }
 }
 

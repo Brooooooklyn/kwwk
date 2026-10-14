@@ -1007,7 +1007,7 @@ extension Agent {
             context: measuredContext,
             model: model
         )
-        let inputBudget = automaticInputBudget(for: model)
+        let inputBudget = AgentRequestBudget.inputTokens(for: model)
         let isBlockingPreflight: Bool = {
             guard case .preflight(let pendingMessages) = trigger else { return false }
             return pendingMessages.isEmpty && usage.tokens >= inputBudget
@@ -1160,13 +1160,9 @@ extension Agent {
             1,
             min(
                 Int(Double(window) * triggerRatio * recoveryRatio),
-                automaticInputBudget(for: model)
+                AgentRequestBudget.inputTokens(for: model)
             )
         )
-    }
-
-    private func automaticInputBudget(for model: Model) -> Int {
-        AgentRequestBudget.inputTokens(for: model)
     }
 
     private func emitSynthetic(_ event: AgentEvent, cancellation: CancellationHandle?) async {

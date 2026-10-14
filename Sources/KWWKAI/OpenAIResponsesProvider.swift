@@ -207,7 +207,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 refusedSeals: session.refusedSeals
             )
         } catch {
-            let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return .finished
@@ -298,13 +298,13 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             if response.statusCode >= 400 {
                 let failure = Self.readingDetail(await ProviderFailure.http(response, body: stream))
                 if holdSealRefusal, Self.isForeignSeal(failure) { return true }
-                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return false
             }
             if let failure = try await Self.notAnEventStream(response, body: &stream) {
-                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return false
@@ -322,11 +322,11 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
             return try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
-                let aborted = Self.makeAborted(api: api, model: model)
+                let aborted = AssistantMessage.makeAborted(api: api, model: model)
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = Self.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -372,7 +372,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                 source: verboseSource,
                 message: "WebSocket session already has an in-flight response; returning stream error"
             )
-            let err = Self.makeError(
+            let err = AssistantMessage.makeError(
                 api: api,
                 model: model,
                 text: "OpenAI Responses WebSocket session already has an in-flight response for this sessionId. Use a distinct sessionId for parallel runs."
@@ -523,7 +523,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                         "failure_count": .int(failure.count),
                     ]
                 )
-                let err = Self.makeError(
+                let err = AssistantMessage.makeError(
                     api: api,
                     model: model,
                     text: "WebSocket stream closed before response.completed"
@@ -578,7 +578,7 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
                     "failure_count": .int(failure.count),
                 ]
             )
-            let err = Self.makeError(api: api, model: model, text: "WebSocket stream failed: \(error)", failure: .capture(error))
+            let err = AssistantMessage.makeError(api: api, model: model, text: "WebSocket stream failed: \(error)", failure: .capture(error))
             out.push(.error(reason: .error, error: err))
             out.end(err)
             return .failedWithoutFallback
@@ -1495,33 +1495,6 @@ public final class OpenAIResponsesProvider: APIProvider, APIProviderSessionLifec
         default: return .stop
         }
     }
-
-    private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .error,
-            errorMessage: text,
-            failure: failure ?? ProviderFailure(message: text),
-            timestamp: Timestamp.now()
-        )
-    }
-
-    private static func makeAborted(api: String, model: Model) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .aborted,
-            errorMessage: "Request was aborted",
-            timestamp: Timestamp.now()
-        )
-    }
 }
 
 private struct OpenAIResponsesDriveResult: Sendable {
@@ -1983,7 +1956,7 @@ final class OpenAIResponsesState: @unchecked Sendable {
     func toolCallValue(at index: Int) -> ToolCall? {
         lock.withLock {
             guard case .toolUse(let id, let name, let json) = blocks[index] else { return nil }
-            return ToolCall(id: id, name: name, arguments: parseArguments(json))
+            return ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
         }
     }
 
@@ -2024,7 +1997,7 @@ final class OpenAIResponsesState: @unchecked Sendable {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json):
-                        let args: JSONValue = parseToolArgs ? parseArguments(json) : .object([:])
+                        let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
                         return .toolCall(ToolCall(id: id, name: name, arguments: args))
                     case .none: return nil
                     }
@@ -2053,14 +2026,5 @@ final class OpenAIResponsesState: @unchecked Sendable {
         stopReason = .error
         errorMessage = text
         return snapshot()
-    }
-
-    private func parseArguments(_ json: String) -> JSONValue {
-        if json.isEmpty { return .object([:]) }
-        if let data = json.data(using: .utf8),
-           let v = try? JSONDecoder().decode(JSONValue.self, from: data) {
-            return v
-        }
-        return .object([:])
     }
 }

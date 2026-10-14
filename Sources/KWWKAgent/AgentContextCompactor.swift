@@ -586,3 +586,9 @@ public enum AgentContextCompactionError: Error, LocalizedError {
         }
     }
 }
+
+func checkCompactionCancellation(_ cancellation: CancellationHandle?) throws {
+    if cancellation?.isCancelled == true || Task.isCancelled {
+        throw AgentContextCompactionError.cancelled
+    }
+}

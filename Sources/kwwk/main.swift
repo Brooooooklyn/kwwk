@@ -10,32 +10,10 @@ import KWWKAI
 import KWWKAgent
 import KWWKCli
 
-/// `kwwk` — coding-agent CLI. Dispatches on argv:
+/// `kwwk` — coding-agent CLI entry point. Flags and subcommands are documented in `printUsage()`.
 ///
-///   kwwk                    → interactive coding TUI (sign in via `/login`)
-///   kwwk -p <prompt>        → one-shot, non-interactive run (stdout = reply)
-///   kwwk --help             → usage
-///   kwwk --self-test        → verify bundled model resources without network access
-///
-/// Global flags (apply to both TUI and headless `-p`):
-///   `--thinking <off|minimal|low|medium|high|xhigh|max>` — reasoning effort,
-///                        defaulting to `medium`.
-///   `--model <id>`     — override the resolved provider's default model id
-///                        (e.g. `--model claude-opus-4-5`). Catalog metadata
-///                        is looked up by id; unknown ids fall back to sane
-///                        defaults for `contextWindow` / `maxTokens`.
-///   `--context-1m`     — opt into Anthropic's 1M-context beta. Adds
-///                        `context-1m-2025-08-07` to the `anthropic-beta`
-///                        header and bumps `contextWindow` to 1_000_000.
-///                        Requires the account to have long-context billing
-///                        enabled. Ignored for non-Anthropic providers.
-///   `--subagents <list>` — comma-separated built-in subagents to enable:
-///                        general, explore, plan, test-runner, code-reviewer,
-///                        read-only, all, none.
-///   `--no-subagents`    — disable built-in CLI subagents.
-///   `--idle-compact`    — (TUI only) compact the conversation after the
-///                        session has been idle for a while; tune in-session
-///                        with `/idle-compact`.
+/// `--context-1m` adds `context-1m-2025-08-07` to the `anthropic-beta` header,
+/// so it only works for accounts with long-context billing enabled.
 @main
 struct KwwkCLI {
     static func main() async {
@@ -285,13 +263,7 @@ struct KwwkCLI {
                 selection = .none
                 i += 1
             case "--subagents":
-                guard i + 1 < argv.count else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: --subagents needs one of: \(BuiltinSubagentSelection.validNames)\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                guard let parsed = BuiltinSubagentSelection.parseList(argv[i + 1]) else {
+                guard i + 1 < argv.count, let parsed = BuiltinSubagentSelection.parseList(argv[i + 1]) else {
                     FileHandle.standardError.write(Data(
                         "kwwk: --subagents needs one of: \(BuiltinSubagentSelection.validNames)\n".utf8
                     ))
@@ -322,7 +294,7 @@ struct KwwkCLI {
         modelOverride: String?,
         context1m: Bool,
         builtinSubagents: BuiltinSubagentSelection,
-        resume: SessionResume = .none
+        resume: SessionResume
     ) async {
         // A picker can't run under -p (non-interactive). Use --session or
         // --continue instead.
@@ -357,21 +329,14 @@ struct KwwkCLI {
             Foundation.exit(2)
         }
 
-        do {
-            let code = try await KWWK.runHeadless(
-                prompt: prompt,
-                builtinSubagents: builtinSubagents,
-                thinkingLevel: thinkingLevel,
-                modelOverride: modelOverride,
-                context1m: context1m,
-                resume: resume
-            )
-            Foundation.exit(code)
-        } catch {
-            let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-            FileHandle.standardError.write(Data("kwwk: \(msg)\n".utf8))
-            Foundation.exit(1)
-        }
+        await runOrExit { Foundation.exit(try await KWWK.runHeadless(
+            prompt: prompt,
+            builtinSubagents: builtinSubagents,
+            thinkingLevel: thinkingLevel,
+            modelOverride: modelOverride,
+            context1m: context1m,
+            resume: resume
+        )) }
     }
 
     /// Run the async body and surface any thrown error on stderr before

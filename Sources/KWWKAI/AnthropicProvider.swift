@@ -227,10 +227,10 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                 fallbackEnabled: fallbackEnabled
             )
         } catch {
-            out.push(.error(reason: .error, error: Self.makeError(
-                model: model, api: api, text: "Failed to encode request: \(error)"
+            out.push(.error(reason: .error, error: AssistantMessage.makeError(
+                api: api, model: model, text: "Failed to encode request: \(error)"
             )))
-            out.end(Self.makeError(model: model, api: api, text: "Failed to encode request: \(error)"))
+            out.end(AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)"))
             return
         }
 
@@ -243,7 +243,7 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             )
             if response.statusCode >= 400 {
                 let failure = await ProviderFailure.http(response, body: stream)
-                let msg = Self.makeError(model: model, api: api, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return
@@ -266,11 +266,11 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
-                let aborted = Self.makeAborted(model: model, api: api)
+                let aborted = AssistantMessage.makeAborted(api: api, model: model)
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = Self.makeError(model: model, api: api, text: "\(error)", failure: .capture(error))
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -965,33 +965,6 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             return ["role": "user", "content": [entry]]
         }
     }
-
-    private static func makeError(model: Model, api: String, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .error,
-            errorMessage: text,
-            failure: failure ?? ProviderFailure(message: text),
-            timestamp: Timestamp.now()
-        )
-    }
-
-    private static func makeAborted(model: Model, api: String) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .aborted,
-            errorMessage: "Request was aborted",
-            timestamp: Timestamp.now()
-        )
-    }
 }
 
 private enum AnthropicRequestEncodingError: LocalizedError, CustomStringConvertible {
@@ -1222,17 +1195,11 @@ final class AnthropicStreamState: @unchecked Sendable {
             case .text(let t): return .text(t.text)
             case .thinking(let th): return .thinking(th.thinking)
             case .toolUse(let id, let name, let json):
-                let call = ToolCall(id: id, name: name, arguments: Self.parseToolJSON(json))
+                let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
                 blocks[index] = .toolUse(id: id, name: name, json: json)
                 return .toolCall(call)
             }
         }
-    }
-
-    static func parseToolJSON(_ json: String) -> JSONValue {
-        if let data = json.data(using: .utf8),
-           let v = try? JSONDecoder().decode(JSONValue.self, from: data) { return v }
-        return .object([:])
     }
 
     /// Streaming snapshot. In-progress tool calls are represented with an empty
@@ -1251,7 +1218,7 @@ final class AnthropicStreamState: @unchecked Sendable {
                 case .text(let t): content.append(.text(t))
                 case .thinking(let th): content.append(.thinking(th))
                 case .toolUse(let id, let name, let json):
-                    let args: JSONValue = parseToolArgs ? Self.parseToolJSON(json) : .object([:])
+                    let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
                     content.append(.toolCall(ToolCall(id: id, name: name, arguments: args)))
                 }
             }

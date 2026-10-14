@@ -435,17 +435,13 @@ public enum MCPToolAdapter {
 
     /// Image types every provider accepts inline.
     static func isViewableImage(_ mimeType: String) -> Bool {
-        let type = mimeType.split(separator: ";").first.map {
-            $0.trimmingCharacters(in: .whitespaces).lowercased()
-        } ?? ""
+        let type = mediaType(mimeType)
         return ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"].contains(type)
     }
 
     static func isTextMimeType(_ mimeType: String?) -> Bool {
         guard let mimeType else { return false }
-        let type = mimeType.split(separator: ";").first.map {
-            $0.trimmingCharacters(in: .whitespaces).lowercased()
-        } ?? ""
+        let type = mediaType(mimeType)
         return type.hasPrefix("text/") || type == "application/json" || type.hasSuffix("+json") || type.hasSuffix("+xml")
     }
 
@@ -470,12 +466,7 @@ public struct MCPDirectoryResultSpill: MCPResultSpill {
     }
 
     public func spill(_ result: MCPSpilledResult) async throws -> String {
-        // Results may hold private data: a 0700 directory and 0600 files.
-        if !FileManager.default.fileExists(atPath: directory.path) {
-            try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
-            )
-        }
+        try createPrivateDirectory(directory)
         let stem = "\(MCPToolNaming.sanitize(result.server))-\(MCPToolNaming.sanitize(result.tool))-\(UUID().uuidString.prefix(8))"
         let textURL = directory.appendingPathComponent("\(stem).txt")
         try Self.writePrivate(Data(result.text.utf8), to: textURL)
@@ -510,12 +501,7 @@ public struct MCPDirectoryResultFiles: MCPResultFiles {
     }
 
     public func save(_ data: Data, mimeType: String, server: String, tool: String) async throws -> String {
-        // Results may hold private data: a 0700 directory and 0600 files.
-        if !FileManager.default.fileExists(atPath: directory.path) {
-            try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
-            )
-        }
+        try createPrivateDirectory(directory)
         let digest = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
         let name = "\(MCPToolNaming.sanitize(server))-\(MCPToolNaming.sanitize(tool))-\(digest).\(Self.fileExtension(for: mimeType))"
         let url = directory.appendingPathComponent(name)
@@ -539,9 +525,7 @@ public struct MCPDirectoryResultFiles: MCPResultFiles {
     /// The usual extension for a MIME type: its subtype, with the common
     /// spellings normalized; `bin` when there is nothing usable.
     static func fileExtension(for mimeType: String) -> String {
-        let type = mimeType.split(separator: ";").first.map {
-            $0.trimmingCharacters(in: .whitespaces).lowercased()
-        } ?? ""
+        let type = mediaType(mimeType)
         let known: [String: String] = [
             "image/jpeg": "jpg", "image/jpg": "jpg", "image/svg+xml": "svg", "image/x-icon": "ico",
             "image/vnd.microsoft.icon": "ico", "audio/mpeg": "mp3", "audio/x-wav": "wav", "audio/wave": "wav",
@@ -553,5 +537,21 @@ public struct MCPDirectoryResultFiles: MCPResultFiles {
         let base = subtype.split(separator: "+").first.map(String.init) ?? subtype
         let ext = MCPToolNaming.sanitize(base.hasPrefix("x-") ? String(base.dropFirst(2)) : base)
         return ext.isEmpty || ext.count > 10 ? "bin" : ext
+    }
+}
+
+/// The bare media type of a MIME type: no parameters, lowercased.
+private func mediaType(_ mimeType: String) -> String {
+    mimeType.split(separator: ";").first.map {
+        $0.trimmingCharacters(in: .whitespaces).lowercased()
+    } ?? ""
+}
+
+/// Results may hold private data: a 0700 directory and 0600 files.
+private func createPrivateDirectory(_ directory: URL) throws {
+    if !FileManager.default.fileExists(atPath: directory.path) {
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
     }
 }

@@ -175,7 +175,7 @@ final class SubagentCapacityReservation: @unchecked Sendable {
 
     func wait(cancellation: CancellationHandle) async throws -> SubagentPermit {
         let registration = cancellation.onCancel { [weak self] _ in
-            self?.cancel()
+            self?.abandon()
         }
         defer { registration.cancel() }
         let result = await withCheckedContinuation {
@@ -204,10 +204,6 @@ final class SubagentCapacityReservation: @unchecked Sendable {
             permit.release()
             throw error
         }
-    }
-
-    func cancel() {
-        abandon()
     }
 
     /// Cancel a queued launch that will never call `wait`. This is also safe

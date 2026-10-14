@@ -214,10 +214,8 @@ public enum MCPOAuth {
             client = stamped
             try await registrationStore?.saveClientInformation(stamped, context: context)
         }
-        if client == nil && !options.interactive {
-            return .authorizationRequired
-        }
         if client == nil {
+            guard options.interactive else { return .authorizationRequired }
             guard options.authorizationCode == nil else {
                 throw MCPAuthError.providerMisconfigured(
                     "Existing OAuth client information is required when exchanging an authorization code"
@@ -645,19 +643,20 @@ public enum MCPOAuth {
             )
             resourceMetadata = found
             authorizationServerURL = found.authorizationServers?.first
-        } catch let error as MCPAuthError {
+        } catch is MCPAuthError {
             // No protected resource metadata: fall back below. Transport
             // failures (URLError) propagate.
-            _ = error
         }
-        if authorizationServerURL == nil {
+        let server: String
+        if let authorizationServerURL {
+            server = authorizationServerURL
+        } else {
             var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)
             components?.path = "/"
             components?.query = nil
             components?.fragment = nil
-            authorizationServerURL = components?.url?.absoluteString ?? serverURL.absoluteString
+            server = components?.url?.absoluteString ?? serverURL.absoluteString
         }
-        let server = authorizationServerURL ?? serverURL.absoluteString
         let metadata = try await discoverAuthorizationServerMetadata(
             server,
             skipIssuerValidation: skipIssuerMetadataValidation,
@@ -910,7 +909,8 @@ public enum MCPOAuth {
             guard let secret = client.clientSecret else {
                 throw MCPAuthError.providerMisconfigured("client_secret_basic authentication requires a client_secret")
             }
-            let credentials = "\(basicEncode(client.clientID)):\(basicEncode(secret))"
+            // RFC 6749 §2.3.1: client credentials are form-encoded before Basic.
+            let credentials = "\(MCPAuthHTTP.formEncode(client.clientID)):\(MCPAuthHTTP.formEncode(secret))"
             headers["Authorization"] = "Basic " + Data(credentials.utf8).base64EncodedString()
         case "client_secret_post":
             form.append(("client_id", client.clientID))
@@ -938,11 +938,6 @@ public enum MCPOAuth {
             throw MCPAuthError.oauth(parseErrorResponse(response))
         }
         throw MCPAuthError.requestFailed("Invalid token response: \(response.text.prefix(500))")
-    }
-
-    /// RFC 6749 §2.3.1: client credentials are form-encoded before Basic.
-    private static func basicEncode(_ value: String) -> String {
-        MCPAuthHTTP.formEncode(value)
     }
 
     static func parseErrorResponse(_ response: MCPAuthHTTPResponse) -> MCPOAuthErrorResponse {

@@ -50,7 +50,7 @@ struct GenerateCursorModels {
             exit(0)
         }
         guard arguments.count <= 1, !(arguments.first?.hasPrefix("-") ?? false) else {
-            FileHandle.standardError.write(Data("unexpected arguments\n\n\(usage)\n".utf8))
+            stderr("unexpected arguments\n\n\(usage)")
             exit(1)
         }
         let outputPath = arguments.first ?? defaultOutputPath
@@ -67,7 +67,7 @@ struct GenerateCursorModels {
                 print("    \(model.id)  \(model.name)\(thinking)")
             }
         } catch {
-            FileHandle.standardError.write(Data("kwwk-generate-cursor-models: \(error)\n".utf8))
+            stderr("kwwk-generate-cursor-models: \(error)")
             exit(1)
         }
     }

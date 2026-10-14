@@ -102,8 +102,7 @@ public enum ProviderVariants {
             defaultBaseURL: baseURL,
             defaultAPIKey: apiKey,
             urlBuilder: { model, _, fallback in
-                var base = model.baseURL.isEmpty ? fallbackBase : model.baseURL
-                while base.hasSuffix("/") { base.removeLast() }
+                var base = (model.baseURL.isEmpty ? fallbackBase : model.baseURL).trimmedSlashes
                 base = substituteCloudflarePlaceholders(in: base) { token in
                     token == "CLOUDFLARE_ACCOUNT_ID" ? accountId : nil
                 }
@@ -141,8 +140,7 @@ public enum ProviderVariants {
             defaultBaseURL: baseURL,
             defaultAPIKey: apiKey,
             urlBuilder: { model, _, fallback in
-                var base = model.baseURL.isEmpty ? fallbackBase : model.baseURL
-                while base.hasSuffix("/") { base.removeLast() }
+                var base = (model.baseURL.isEmpty ? fallbackBase : model.baseURL).trimmedSlashes
                 base = substituteCloudflarePlaceholders(in: base) { token in
                     switch token {
                     case "CLOUDFLARE_ACCOUNT_ID": return accountId

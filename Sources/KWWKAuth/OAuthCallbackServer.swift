@@ -33,8 +33,7 @@ public final class OAuthCallbackServer: @unchecked Sendable {
     // `waitForCallback()` registering its continuation (fast redirects; the
     // login flow hands out the URL before it awaits). Buffer that early
     // result so the wait returns it instead of "already resolved".
-    private var pendingParams: [String: String]?
-    private var pendingError: OAuthError?
+    private var pendingResult: Result<[String: String], OAuthError>?
 
     public init(
         port: UInt16,
@@ -114,15 +113,11 @@ public final class OAuthCallbackServer: @unchecked Sendable {
             try await withCheckedThrowingContinuation { cont in
                 lock.lock()
                 if resolved {
-                    let params = pendingParams
-                    let error = pendingError
-                    pendingParams = nil
-                    pendingError = nil
+                    let result = pendingResult
+                    pendingResult = nil
                     lock.unlock()
-                    if let params {
-                        cont.resume(returning: params)
-                    } else if let error {
-                        cont.resume(throwing: error)
+                    if let result {
+                        cont.resume(with: result)
                     } else {
                         cont.resume(throwing: OAuthError.transport("callback server already resolved"))
                     }
@@ -166,29 +161,16 @@ public final class OAuthCallbackServer: @unchecked Sendable {
 
     // MARK: - Called by `CallbackHandler` when a request resolves the flow
 
-    fileprivate func resolveSuccess(_ params: [String: String]) {
+    fileprivate func resolve(_ result: Result<[String: String], OAuthError>) {
         let cont: CheckedContinuation<[String: String], Error>?
         lock.lock()
         if resolved { lock.unlock(); return }
         resolved = true
         cont = continuation
         continuation = nil
-        if cont == nil { pendingParams = params }
+        if cont == nil { pendingResult = result }
         lock.unlock()
-        cont?.resume(returning: params)
-        stop()
-    }
-
-    fileprivate func resolveError(_ error: OAuthError) {
-        let cont: CheckedContinuation<[String: String], Error>?
-        lock.lock()
-        if resolved { lock.unlock(); return }
-        resolved = true
-        cont = continuation
-        continuation = nil
-        if cont == nil { pendingError = error }
-        lock.unlock()
-        cont?.resume(throwing: error)
+        cont?.resume(with: result)
         stop()
     }
 
@@ -265,9 +247,9 @@ private final class CallbackHandler: ChannelInboundHandler, @unchecked Sendable 
         if let err = params["error"] {
             write(context: context, status: .badRequest, html: server.errorHTMLFilled(err))
             if server.surfacesProviderErrors {
-                server.resolveSuccess(params)
+                server.resolve(.success(params))
             } else {
-                server.resolveError(.invalidResponse(err))
+                server.resolve(.failure(.invalidResponse(err)))
             }
             return
         }
@@ -281,7 +263,7 @@ private final class CallbackHandler: ChannelInboundHandler, @unchecked Sendable 
             return
         }
         write(context: context, status: .ok, html: server.successHTML)
-        server.resolveSuccess(params)
+        server.resolve(.success(params))
     }
 
     private func write(context: ChannelHandlerContext, status: HTTPResponseStatus, html: String) {

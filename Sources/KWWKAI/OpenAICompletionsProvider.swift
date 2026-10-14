@@ -101,7 +101,7 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             bodyDecorator?(&root, model, context, options)
             body = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
         } catch {
-            let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return
@@ -155,7 +155,7 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             )
             if response.statusCode >= 400 {
                 let failure = await ProviderFailure.http(response, body: stream)
-                let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
                 return
@@ -170,11 +170,11 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
             try await driveTask.value
         } catch {
             if options?.cancellation?.isCancelled == true {
-                let aborted = Self.makeAborted(api: api, model: model)
+                let aborted = AssistantMessage.makeAborted(api: api, model: model)
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = Self.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -1024,34 +1024,6 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         default: return .stop
         }
     }
-
-    private static func makeError(api: String, model: Model, text: String, failure: ProviderFailure? = nil) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .error,
-            errorMessage: text,
-            failure: failure ?? ProviderFailure(message: text),
-            timestamp: Timestamp.now()
-        )
-    }
-
-    private static func makeAborted(api: String, model: Model) -> AssistantMessage {
-        AssistantMessage(
-            content: [],
-            api: api,
-            provider: model.provider,
-            model: model.id,
-            usage: Usage(),
-            stopReason: .aborted,
-            errorMessage: "Request was aborted",
-            timestamp: Timestamp.now()
-        )
-    }
-
 }
 
 /// Mutable state for OpenAI Completions stream. Tracks content block order
@@ -1269,7 +1241,7 @@ final class OpenAICompletionsState: @unchecked Sendable {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json, let sig):
-                        let args: JSONValue = parseToolArgs ? parseArguments(json) : .object([:])
+                        let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
                         return .toolCall(ToolCall(id: id, name: name, arguments: args, thoughtSignature: sig))
                     case .none: return nil
                     }
@@ -1300,7 +1272,7 @@ final class OpenAICompletionsState: @unchecked Sendable {
             case .thinking(let th):
                 emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
             case .toolUse(let id, let name, let json, let sig):
-                let call = ToolCall(id: id, name: name, arguments: parseArguments(json), thoughtSignature: sig)
+                let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]), thoughtSignature: sig)
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }
             _ = lock.withLock { endedIndices.insert(idx) }
@@ -1316,15 +1288,6 @@ final class OpenAICompletionsState: @unchecked Sendable {
         var m = buildMessage(parseToolArgs: true)
         m.errorMessage = "Request was aborted"
         return m
-    }
-
-    private func parseArguments(_ json: String) -> JSONValue {
-        if json.isEmpty { return .object([:]) }
-        if let data = json.data(using: .utf8),
-           let v = try? JSONDecoder().decode(JSONValue.self, from: data) {
-            return v
-        }
-        return .object([:])
     }
 }
 

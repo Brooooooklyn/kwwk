@@ -9,7 +9,6 @@ public struct PKCE: Sendable {
 
     public static func random() -> PKCE {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SystemRandomNumberGenerator()
         for i in 0..<bytes.count { bytes[i] = UInt8.random(in: 0...255) }
         let verifier = base64URL(Data(bytes))
         let hashed = SHA256.hash(data: Data(verifier.utf8))

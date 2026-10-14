@@ -44,7 +44,7 @@ extension Modal {
 /// a modal is up, otherwise fall through to their default behavior.
 @MainActor
 final class ModalHost {
-    private(set) var isOpen: Bool = false
+    var isOpen: Bool { active != nil }
     private var active: Modal?
 
     private let renderModalLines: ([String]?) -> Void
@@ -76,13 +76,11 @@ final class ModalHost {
 
     func open(_ modal: Modal) {
         self.active = modal
-        self.isOpen = true
         redraw()
     }
 
     func close() {
         self.active = nil
-        self.isOpen = false
         renderModalLines(nil)
         restoreTranscript()
         requestRender()

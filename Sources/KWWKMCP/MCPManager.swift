@@ -466,7 +466,7 @@ public actor MCPManager {
             if case .insufficientScope(let scope, _) = error {
                 throw MCPManagerError.insufficientScope(name, scope)
             }
-            guard let refused = capture.refusal, servers[name]?.auth != nil else {
+            guard let refused = Self.refusal(error, capture: capture, auth: servers[name]?.auth) else {
                 throw MCPManagerError.unavailable(name, MCPClient.describe(error))
             }
             requireAuthorization(name, client: client, error: error, refused: refused)
@@ -638,9 +638,7 @@ public actor MCPManager {
     }
 
     private func scheduleReconnect(_ name: String) {
-        guard !isShutDown, var server = servers[name], server.reconnectTask == nil,
-              server.failures <= reconnectPolicy.maxAttempts, reconnectPolicy.maxAttempts > 0
-        else { return }
+        guard !isShutDown, var server = servers[name], server.reconnectTask == nil else { return }
         let failures = max(1, server.failures)
         guard failures <= reconnectPolicy.maxAttempts else { return }
         let delay = reconnectPolicy.delay(afterFailures: failures)

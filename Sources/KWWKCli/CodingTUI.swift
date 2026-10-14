@@ -9,7 +9,6 @@ import KWWKAgent
 @MainActor
 func runCodingTUIInternal(
     model: Model,
-    modelLabel: String,
     cwd: String,
     tools: CodingTools,
     builtinSubagents: BuiltinSubagentSelection = .all,

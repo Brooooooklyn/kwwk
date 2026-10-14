@@ -108,18 +108,20 @@ public enum OAuthUsage {
         return 120
     }
 
-    /// GETs `url`, mapping a 429 to `.rateLimited` and any other failure to
-    /// `.unavailable`.
+    /// Requests `url` (a GET unless `method` says otherwise), mapping a 429
+    /// to `.rateLimited` and any other failure to `.unavailable`.
     static func get(
         _ url: URL,
         headers: [String: String],
+        method: String = "GET",
+        body requestBody: Data? = nil,
         provider: String,
         client: HTTPClient
     ) async throws -> (HTTPURLResponse, Data) {
         let response: HTTPURLResponse
         let body: Data
         do {
-            (response, body) = try await client.request(url: url, method: "GET", headers: headers, body: nil)
+            (response, body) = try await client.request(url: url, method: method, headers: headers, body: requestBody)
         } catch is CancellationError {
             throw CancellationError()
         } catch {

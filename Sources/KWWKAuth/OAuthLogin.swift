@@ -102,7 +102,13 @@ public enum OAuthLogin {
               let refresh = response.refreshToken, !refresh.isEmpty else {
             throw OAuthError.invalidResponse("anthropic token response missing credentials")
         }
-        return credentials(from: response, fallbackRefresh: refresh)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return OAuthCredentials(
+            access: response.accessToken,
+            refresh: refresh,
+            expires: now + Int64(response.expiresIn * 1000) - OAuth.expiryMarginMs,
+            extras: [:]
+        )
     }
 
     // MARK: - OpenAI Codex
@@ -111,6 +117,7 @@ public enum OAuthLogin {
         callbacks: Callbacks,
         client: HTTPClient = URLSessionHTTPClient()
     ) async throws -> OAuthCredentials {
+        let provider = OpenAICodexOAuthProvider()
         let pkce = PKCE.random()
         let state = PKCE.randomHex()
         // OpenAI registered exactly this redirect for the Codex CLI's client.
@@ -120,7 +127,7 @@ public enum OAuthLogin {
         var comps = URLComponents(string: "https://auth.openai.com/oauth/authorize")!
         comps.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "client_id", value: "app_EMoamEEZ73f0CkXaXp7hrann"),
+            URLQueryItem(name: "client_id", value: provider.clientID),
             URLQueryItem(name: "redirect_uri", value: server.redirectURI),
             URLQueryItem(name: "scope", value: "openid profile email offline_access"),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
@@ -144,12 +151,12 @@ public enum OAuthLogin {
         let form = OAuth.urlEncodedForm([
             "grant_type": "authorization_code",
             "code": code,
-            "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+            "client_id": provider.clientID,
             "redirect_uri": server.redirectURI,
             "code_verifier": pkce.verifier,
         ])
         let (response, body) = try await client.request(
-            url: URL(string: "https://auth.openai.com/oauth/token")!,
+            url: provider.tokenURL,
             method: "POST",
             headers: [
                 "content-type": "application/x-www-form-urlencoded",
@@ -174,7 +181,7 @@ public enum OAuthLogin {
         return OAuthCredentials(
             access: json.accessToken,
             refresh: refresh,
-            expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
+            expires: now + Int64(json.expiresIn * 1000) - OAuth.expiryMarginMs,
             extras: extras
         )
     }
@@ -346,7 +353,6 @@ public enum OAuthLogin {
         client: HTTPClient,
         pollSleep: @Sendable (Int) async throws -> Void
     ) async throws -> OAuthCredentials {
-        // Poll for the access token.
         let pollURL = URL(string: "https://github.com/login/oauth/access_token")!
         let deadline = Date().addingTimeInterval(15 * 60)
         var interval = initialInterval
@@ -624,7 +630,7 @@ public enum OAuthLogin {
                     return OAuthCredentials(
                         access: access,
                         refresh: refresh,
-                        expires: now + Int64(expiresIn) * 1000 - 5 * 60 * 1000
+                        expires: now + Int64(expiresIn) * 1000 - OAuth.expiryMarginMs
                     )
                 }
             }
@@ -753,7 +759,7 @@ public enum OAuthLogin {
         return OAuthCredentials(
             access: token,
             refresh: "",
-            expires: OAuth.jwtExpiryMillis(token) ?? (now + DevinOAuth.fallbackLifetimeMs - 5 * 60 * 1000),
+            expires: OAuth.jwtExpiryMillis(token) ?? (now + DevinOAuth.fallbackLifetimeMs - OAuth.expiryMarginMs),
             extras: [
                 "apiEndpoint": .string(DevinOAuth.apiEndpoint),
                 "enterpriseUrl": .string(DevinOAuth.enterpriseURL),
@@ -809,7 +815,7 @@ public enum OAuthLogin {
             try await zaiJSON(
                 url: ZaiOAuth.tokenURL, method: "POST",
                 body: ["provider": "zai", "code": code, "redirect_uri": redirect, "state": state],
-                bearer: nil, client: client
+                client: client
             ),
             operation: "token exchange"
         )
@@ -824,7 +830,7 @@ public enum OAuthLogin {
         let login = try zaiUnwrap(
             try await zaiJSON(
                 url: ZaiOAuth.businessLoginURL, method: "POST",
-                body: ["token": oauthToken], bearer: nil, client: client
+                body: ["token": oauthToken], client: client
             ),
             operation: "business login"
         )
@@ -838,7 +844,7 @@ public enum OAuthLogin {
         let customer = try zaiUnwrap(
             try await zaiJSON(
                 url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/customer/getCustomerInfo"),
-                method: "GET", body: nil, bearer: bizToken, client: client
+                method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
             ),
             operation: "customer lookup"
         )
@@ -850,7 +856,9 @@ public enum OAuthLogin {
         let keysURL = ZaiOAuth.bizBaseURL
             .appendingPathComponent("api/biz/v1/organization/\(organizationId)/projects/\(projectId)/api_keys")
         let listed = try zaiUnwrap(
-            try await zaiJSON(url: keysURL, method: "GET", body: nil, bearer: bizToken, client: client),
+            try await zaiJSON(
+                url: keysURL, method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
+            ),
             operation: "api key list"
         )
         let record: [String: Any]?
@@ -865,7 +873,7 @@ public enum OAuthLogin {
             record = try zaiUnwrap(
                 try await zaiJSON(
                     url: keysURL, method: "POST",
-                    body: ["name": ZaiOAuth.keyName], bearer: bizToken, client: client
+                    body: ["name": ZaiOAuth.keyName], authorization: "Bearer \(bizToken)", client: client
                 ),
                 operation: "api key create"
             ) as? [String: Any]
@@ -880,7 +888,7 @@ public enum OAuthLogin {
         let copied = try zaiUnwrap(
             try await zaiJSON(
                 url: keysURL.appendingPathComponent("copy/\(apiKey)"),
-                method: "GET", body: nil, bearer: bizToken, client: client
+                method: "GET", body: nil, authorization: "Bearer \(bizToken)", client: client
             ),
             operation: "api key copy"
         )
@@ -954,7 +962,7 @@ public enum OAuthLogin {
         guard let listed = try? zaiUnwrap(
             try await zaiJSON(
                 url: ZaiOAuth.bizBaseURL.appendingPathComponent("api/biz/subscription/list"),
-                method: "GET", body: nil, bearer: nil, authorization: key, client: client
+                method: "GET", body: nil, authorization: key, client: client
             ),
             operation: "subscription list"
         ), let subscriptions = listed as? [[String: Any]] else { return nil }
@@ -963,19 +971,17 @@ public enum OAuthLogin {
         return zaiString(valid["productName"]) ?? "GLM Coding Plan"
     }
 
-    /// One JSON round-trip: optional JSON body, optional bearer, ≥400 throws
+    /// One JSON round-trip: optional JSON body, optional authorization, ≥400 throws
     /// with the response text, empty bodies come back nil.
     private static func zaiJSON(
         url: URL,
         method: String,
         body: [String: Any]?,
-        bearer: String?,
         authorization: String? = nil,
         client: HTTPClient
     ) async throws -> Any? {
         var headers = ["accept": "application/json"]
         if body != nil { headers["content-type"] = "application/json" }
-        if let bearer { headers["authorization"] = "Bearer \(bearer)" }
         if let authorization { headers["authorization"] = authorization }
         let data = try body.map { try JSONSerialization.data(withJSONObject: $0) }
         let (response, responseBody) = try await client.request(
@@ -1051,19 +1057,6 @@ public enum OAuthLogin {
         }
         return try OAuth.decodeTokenResponse(responseBody)
     }
-
-    private static func credentials(
-        from response: OAuth.TokenResponse,
-        fallbackRefresh: String?
-    ) -> OAuthCredentials {
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        return OAuthCredentials(
-            access: response.accessToken,
-            refresh: response.refreshToken ?? fallbackRefresh ?? "",
-            expires: now + Int64(response.expiresIn * 1000) - 5 * 60 * 1000,
-            extras: [:]
-        )
-    }
 }
 
 // MARK: - GitHub Copilot post-login setup
@@ -1093,16 +1086,11 @@ extension OAuthLogin {
         let body = Data(#"{"state":"enabled"}"#.utf8)
         for id in modelIds {
             guard let url = URL(string: "\(baseString)/models/\(id)/policy") else { continue }
-            let headers: [String: String] = [
-                "content-type": "application/json",
-                "authorization": "Bearer \(sessionToken)",
-                "editor-version": "vscode/1.107.0",
-                "editor-plugin-version": "copilot-chat/0.35.0",
-                "user-agent": "GitHubCopilotChat/0.35.0",
-                "copilot-integration-id": "vscode-chat",
-                "openai-intent": "chat-policy",
-                "x-interaction-type": "chat-policy",
-            ]
+            var headers = GitHubCopilotOAuthProvider().extraHeaders
+            headers["content-type"] = "application/json"
+            headers["authorization"] = "Bearer \(sessionToken)"
+            headers["openai-intent"] = "chat-policy"
+            headers["x-interaction-type"] = "chat-policy"
             do {
                 let (response, _) = try await client.request(
                     url: url, method: "POST", headers: headers, body: body

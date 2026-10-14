@@ -129,7 +129,7 @@ enum CursorRequestBuilder {
         }.joined(separator: "\n")
     }
 
-    private static func toolResultText(_ tr: ToolResultMessage) -> String {
+    static func toolResultText(_ tr: ToolResultMessage) -> String {
         tr.content.compactMap { block -> String? in
             switch block {
             case .text(let t): return t.text

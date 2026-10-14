@@ -615,9 +615,7 @@ public final class QoderChatProvider: APIProvider, @unchecked Sendable {
         } catch {}
         var failure = failure(status: response.statusCode, body: bytes)
         // The wait Qoder's queue names in the body stands; else the header's.
-        failure.retryAfterMs = failure.retryAfterMs ?? ProviderFailure.retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
-            if let key = entry.key as? String { result[key.lowercased()] = String(describing: entry.value) }
-        })
+        failure.retryAfterMs = failure.retryAfterMs ?? ProviderFailure.retryDelay(response: response)
         return failure
     }
 

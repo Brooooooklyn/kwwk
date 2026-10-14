@@ -163,17 +163,9 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
     static func httpFailure(
         response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>
     ) async -> ProviderFailure {
-        var bytes = Data()
-        do {
-            for try await chunk in body {
-                bytes.append(contentsOf: chunk.prefix(max(0, 4096 - bytes.count)))
-                if bytes.count >= 4096 { break }
-            }
-        } catch {}
+        let bytes = await ProviderFailure.readBoundedBody(body)
         var failure = httpFailure(status: response.statusCode, body: bytes)
-        failure.retryAfterMs = ProviderFailure.retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
-            if let key = entry.key as? String { result[key.lowercased()] = String(describing: entry.value) }
-        })
+        failure.retryAfterMs = ProviderFailure.retryDelay(response: response)
         return failure
     }
 

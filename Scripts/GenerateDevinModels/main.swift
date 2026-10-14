@@ -59,7 +59,7 @@ struct GenerateDevinModels {
             exit(0)
         }
         guard arguments.count <= 1, !(arguments.first?.hasPrefix("-") ?? false) else {
-            FileHandle.standardError.write(Data("unexpected arguments\n\n\(usage)\n".utf8))
+            stderr("unexpected arguments\n\n\(usage)")
             exit(1)
         }
         let outputPath = arguments.first ?? defaultOutputPath
@@ -81,7 +81,7 @@ struct GenerateDevinModels {
                 print("    \(model.id)  \(model.name)\(thinking)\(router)")
             }
         } catch {
-            FileHandle.standardError.write(Data("kwwk-generate-devin-models: \(error)\n".utf8))
+            stderr("kwwk-generate-devin-models: \(error)")
             exit(1)
         }
     }

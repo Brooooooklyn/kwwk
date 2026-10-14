@@ -29,7 +29,6 @@ func runHeadlessInternal(
     tools: CodingTools,
     builtinSubagents: BuiltinSubagentSelection = .all,
     thinkingLevel: ThinkingLevel = .medium,
-    autoCompactThreshold: Double? = 0.75,
     modelOverride: String? = nil,
     context1m: Bool = false,
     resume: SessionResume = .none
@@ -52,11 +51,10 @@ func runHeadlessInternal(
         tools: tools,
         contextFiles: loadProjectContextFiles(cwd: cwd),
         skillDirectories: Skills.defaultDirectories(cwd: cwd, includeUserDirectory: true),
-        backgroundAutoContinue: false,
         subagents: defaultCLISubagents(for: tools, selection: builtinSubagents),
         sessionId: sessionId,
         authResolver: resolved.authResolver,
-        autoCompactThreshold: autoCompactThreshold,
+        autoCompactThreshold: 0.75,
         bashEnvironment: environment,
         bashShellPath: cliShellPath(environment: environment),
         subagentTranscriptStore: store.subagentTranscripts

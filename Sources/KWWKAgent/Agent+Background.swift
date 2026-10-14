@@ -128,7 +128,7 @@ extension Agent {
             bridgeId: bridge.id,
             deliveryConsumer: deliveryConsumer
         )
-        appendAttachment(attachment)
+        backgroundAttachmentList.append(attachment)
 
         // Agent event subscription for the post-agentEnd safety drain.
         let eventUnsubscribe = subscribe { event, _ in
@@ -144,7 +144,7 @@ extension Agent {
                 guard (sessionId == nil || notification.sessionId == sessionId),
                       let event = backgroundSubagentLifecycleEvent(notification),
                       let self,
-                      self.recordBackgroundSubagent(event) else {
+                      self.backgroundAttachmentList.record(event) else {
                     return
                 }
                 await self.emitExternalRuntimeEvent(.subagent(event))
@@ -155,7 +155,7 @@ extension Agent {
             eventUnsubscribe()
             await unregisterDelivery()
             deliveryConsumer.releaseAllWatches()
-            self?.removeAttachment(bridgeId: bridge.id)
+            self?.backgroundAttachmentList.remove(bridgeId: bridge.id)
         }
     }
 
@@ -164,7 +164,7 @@ extension Agent {
     /// the manager was attached with. Normal `abort()` leaves them running.
     public func abortAndKillBackgroundTasks() async {
         abort()
-        let attachments = backgroundAttachments()
+        let attachments = backgroundAttachmentList.list()
         for attachment in attachments {
             if let sessionId = attachment.sessionId {
                 // Teardown cancellation is not model input. Close silently so
@@ -182,24 +182,6 @@ extension Agent {
     /// that completes after the spawning run has ended.
     public func backgroundSubagentRuns() -> [SubagentRunSummary] {
         backgroundAttachmentList.backgroundSubagentRuns()
-    }
-
-    // MARK: - Private storage wiring
-
-    fileprivate func appendAttachment(_ attachment: BackgroundAttachment) {
-        backgroundAttachmentList.append(attachment)
-    }
-
-    fileprivate func removeAttachment(bridgeId: UUID) {
-        backgroundAttachmentList.remove(bridgeId: bridgeId)
-    }
-
-    fileprivate func backgroundAttachments() -> [BackgroundAttachment] {
-        backgroundAttachmentList.list()
-    }
-
-    fileprivate func recordBackgroundSubagent(_ event: SubagentLifecycleEvent) -> Bool {
-        backgroundAttachmentList.record(event)
     }
 }
 

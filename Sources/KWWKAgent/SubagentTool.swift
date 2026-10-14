@@ -525,7 +525,7 @@ internal func _createAgentTool(context: SubagentToolContext) -> AgentTool {
     var tool = AgentTool(
         name: "agent",
         label: "agent",
-        description: buildAgentToolDescription(
+        description: SubagentPromptBuilder.agentToolDescription(
             registry: registry,
             backgroundTasksAvailable: context.backgroundManager != nil,
             maxForegroundTimeoutSeconds: limits.maxForegroundTimeoutSeconds
@@ -1421,7 +1421,6 @@ private enum SubagentPromptBuilder {
     static func systemPrompt(
         definition: SubagentDefinition,
         cwd: String,
-        tools: [AgentTool],
         projectContextFiles: [(path: String, content: String)],
         availableSkills: [Skill]
     ) -> String {
@@ -1454,18 +1453,6 @@ private enum SubagentPromptBuilder {
             availableSkills: availableSkills
         ))
     }
-}
-
-private func buildAgentToolDescription(
-    registry: SubagentRegistry,
-    backgroundTasksAvailable: Bool,
-    maxForegroundTimeoutSeconds: Int
-) -> String {
-    SubagentPromptBuilder.agentToolDescription(
-        registry: registry,
-        backgroundTasksAvailable: backgroundTasksAvailable,
-        maxForegroundTimeoutSeconds: maxForegroundTimeoutSeconds
-    )
 }
 
 private func subagentToolsDescription(
@@ -2283,10 +2270,9 @@ internal struct SubagentInvocationRunner: Sendable {
             toolCatalog.restore(from: resumeMessages ?? [])
             tools.append(makeToolSearchTool(catalog: toolCatalog))
         }
-        let systemPrompt = buildSubagentSystemPrompt(
+        let systemPrompt = SubagentPromptBuilder.systemPrompt(
             definition: definition,
             cwd: cwd,
-            tools: tools,
             projectContextFiles: parent.projectContextFiles,
             availableSkills: visibleSkills(
                 parent.availableSkills,
@@ -2977,22 +2963,6 @@ private func subagentBackgroundFailure(
             : isIncomplete ? "incomplete" : "failed",
         details: .object(details),
         errorMessage: isIncomplete ? nil : message
-    )
-}
-
-private func buildSubagentSystemPrompt(
-    definition: SubagentDefinition,
-    cwd: String,
-    tools: [AgentTool],
-    projectContextFiles: [(path: String, content: String)],
-    availableSkills: [Skill]
-) -> String {
-    SubagentPromptBuilder.systemPrompt(
-        definition: definition,
-        cwd: cwd,
-        tools: tools,
-        projectContextFiles: projectContextFiles,
-        availableSkills: availableSkills
     )
 }
 

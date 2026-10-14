@@ -173,16 +173,16 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
         // MCP stdio shutdown: close stdin and let the server exit on its own
         // first. Wrappers such as `npx` only reach their child through that
         // EOF; signalling the wrapper right away can orphan the real server.
-        let eofDeadline = Date().addingTimeInterval(Self.stdinCloseGraceSeconds)
-        while process.isRunning && Date() < eofDeadline {
-            try? await Task.sleep(nanoseconds: 25_000_000)
+        func waitForExit(_ seconds: Double) async {
+            let deadline = Date().addingTimeInterval(seconds)
+            while process.isRunning && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
         }
+        await waitForExit(Self.stdinCloseGraceSeconds)
         guard process.isRunning else { return }
         process.terminate()
-        let deadline = Date().addingTimeInterval(Self.terminateGraceSeconds)
-        while process.isRunning && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 25_000_000)
-        }
+        await waitForExit(Self.terminateGraceSeconds)
         if process.isRunning {
             kill(process.processIdentifier, SIGKILL)
         }

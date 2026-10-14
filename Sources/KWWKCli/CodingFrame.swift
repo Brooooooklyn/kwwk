@@ -100,11 +100,7 @@ final class CodingFrame: Component, @unchecked Sendable {
     // MARK: - Slash menu
 
     private func slashQuery() -> String? {
-        let v = input.value
-        guard v.hasPrefix("/") else { return nil }
-        let body = v.dropFirst()
-        if body.contains(where: { $0 == " " || $0 == "\t" || $0 == "\n" }) { return nil }
-        return String(body)
+        bareSlashQuery(input.value)
     }
 
     private func filteredCommands() -> [SlashCommandInfo] {

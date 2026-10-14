@@ -106,7 +106,7 @@ public enum KiroOAuth {
     /// may omit the lifetime; an hour then, as magpie takes it.
     static func expiry(_ expiresIn: Int) -> Int64 {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        return now + Int64(expiresIn > 0 ? expiresIn : 3600) * 1000 - 5 * 60 * 1000
+        return now + Int64(expiresIn > 0 ? expiresIn : 3600) * 1000 - OAuth.expiryMarginMs
     }
 
     // MARK: - Profile

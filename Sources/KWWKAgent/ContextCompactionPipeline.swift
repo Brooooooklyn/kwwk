@@ -86,7 +86,7 @@ enum ContextCompactionPipeline {
     private static func runPlanned(
         _ request: ContextCompactionPipelineRequest
     ) async throws -> AgentContextCompactionResult {
-        try checkCancellation(request.cancellation)
+        try checkCompactionCancellation(request.cancellation)
 
         if let target = request.targetTokens, target <= 0 {
             throw AgentContextCompactionError.insufficientReduction(
@@ -147,7 +147,7 @@ enum ContextCompactionPipeline {
             guard historySummary != nil || turnPrefixSummary != nil else {
                 throw ContextCompactionPipelineError.noCompressibleMessages
             }
-            try checkCancellation(request.cancellation)
+            try checkCompactionCancellation(request.cancellation)
 
             let replacement = await makeReplacement(
                 plan: plan,
@@ -332,7 +332,7 @@ enum ContextCompactionPipeline {
             transformed = await convert(transformed)
         }
         transformed = transformed.map(redactedForPersistence)
-        try checkCancellation(request.cancellation)
+        try checkCompactionCancellation(request.cancellation)
 
         var accumulator = previousSummary
         let summaryConfig = effectiveSummaryConfig(for: request)
@@ -343,7 +343,7 @@ enum ContextCompactionPipeline {
         var providerBudget: Int?
         let minimumBudget = min(16_384, max(1_024, request.summaryModel.contextWindow / 8))
         while !pending.isEmpty {
-            try checkCancellation(request.cancellation)
+            try checkCompactionCancellation(request.cancellation)
             let plannedBudget = try CompactionSummaryGenerator.availableTranscriptTokens(
                 model: request.summaryModel,
                 config: summaryConfig,
@@ -379,7 +379,7 @@ enum ContextCompactionPipeline {
                     )
                 )
             } catch {
-                try checkCancellation(request.cancellation)
+                try checkCompactionCancellation(request.cancellation)
                 guard !(error is CancellationError), shrinksOnFailure(error) else { throw error }
                 // Halve the serialized input actually sent, not an inflated
                 // catalog allowance. Only the failed chunk is replayed; keep
@@ -596,12 +596,6 @@ enum ContextCompactionPipeline {
             max(50, summarySizingTokens * 3 / 4)
         )
         return config
-    }
-
-    private static func checkCancellation(_ cancellation: CancellationHandle?) throws {
-        if cancellation?.isCancelled == true || Task.isCancelled {
-            throw AgentContextCompactionError.cancelled
-        }
     }
 }
 

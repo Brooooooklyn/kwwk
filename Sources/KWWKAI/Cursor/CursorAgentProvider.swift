@@ -651,7 +651,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
                     )
                 }
                 if result.isError {
-                    reply(11, CursorProto.encodeMcpError(Self.toolResultText(result)))
+                    reply(11, CursorProto.encodeMcpError(CursorRequestBuilder.toolResultText(result)))
                 } else {
                     reply(11, CursorProto.encodeMcpSuccess(
                         content: Self.mcpContent(result), isError: false
@@ -743,7 +743,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             let result = await bridge.execute(
                 ToolCall(id: callId, name: toolName, arguments: arguments, cursorExecResolved: true)
             )
-            let text = Self.toolResultText(result)
+            let text = CursorRequestBuilder.toolResultText(result)
             send(result.isError ? failure(text.isEmpty ? "\(toolName) failed" : text) : success(text))
         }
     }
@@ -787,7 +787,7 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             let result = await bridge.execute(
                 ToolCall(id: callId, name: "bash", arguments: Self.bashArguments(args), cursorExecResolved: true)
             )
-            let text = Self.toolResultText(result)
+            let text = CursorRequestBuilder.toolResultText(result)
             if !text.isEmpty {
                 sendEvent { w in
                     w.messageField(result.isError ? 2 : 1) { chunk in chunk.stringField(1, text) }
@@ -810,15 +810,6 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
         #else
         return "linux \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
         #endif
-    }
-
-    private static func toolResultText(_ result: ToolResultMessage) -> String {
-        result.content.compactMap { block -> String? in
-            switch block {
-            case .text(let t): return t.text
-            case .image(let i): return "[\(i.mimeType) image]"
-            }
-        }.joined(separator: "\n")
     }
 
     private static func mcpContent(_ result: ToolResultMessage) -> [CursorProto.McpContent] {

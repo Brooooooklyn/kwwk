@@ -28,35 +28,18 @@ public struct CursorUsageReader: OAuthUsageReader {
     }
 
     public func usage(_ credentials: OAuthCredentials, using client: HTTPClient) async throws -> [OAuthUsageWindow] {
-        let response: HTTPURLResponse
-        let body: Data
-        do {
-            (response, body) = try await client.request(
-                url: url,
-                method: "POST",
-                headers: [
-                    "Authorization": "Bearer \(credentials.access)",
-                    "Content-Type": "application/json",
-                    "Connect-Protocol-Version": "1",
-                ],
-                body: Data("{}".utf8)
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw OAuthUsageError.unavailable(providerId: providerId, status: nil, detail: error.localizedDescription)
-        }
-        if response.statusCode == 429 {
-            throw OAuthUsageError.rateLimited(
-                retryAfterSeconds: OAuthUsage.retryAfterSeconds(response.value(forHTTPHeaderField: "Retry-After"))
-            )
-        }
-        if response.statusCode >= 400 {
-            throw OAuthUsageError.unavailable(
-                providerId: providerId, status: response.statusCode,
-                detail: String((String(data: body, encoding: .utf8) ?? "").prefix(300))
-            )
-        }
+        let (response, body) = try await OAuthUsage.get(
+            url,
+            headers: [
+                "Authorization": "Bearer \(credentials.access)",
+                "Content-Type": "application/json",
+                "Connect-Protocol-Version": "1",
+            ],
+            method: "POST",
+            body: Data("{}".utf8),
+            provider: providerId,
+            client: client
+        )
         guard let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
             throw OAuthUsageError.unavailable(
                 providerId: providerId, status: response.statusCode, detail: "undecodable body"

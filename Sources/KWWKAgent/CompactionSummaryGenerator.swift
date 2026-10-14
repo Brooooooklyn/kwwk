@@ -28,7 +28,7 @@ struct CompactionSummaryRequest: Sendable {
 
 enum CompactionSummaryGenerator {
     static func generate(_ request: CompactionSummaryRequest) async throws -> String {
-        try checkCancellation(request.cancellation)
+        try checkCompactionCancellation(request.cancellation)
 
         let prompt = makePrompt(
             config: request.config,
@@ -65,7 +65,7 @@ enum CompactionSummaryGenerator {
         )
 
         let resolvedAuth = try await request.authResolver?(request.model, request.sessionId)
-        try checkCancellation(request.cancellation)
+        try checkCompactionCancellation(request.cancellation)
 
         var requestModel = request.model
         if let baseURL = resolvedAuth?.baseURL, !baseURL.isEmpty {
@@ -83,7 +83,7 @@ enum CompactionSummaryGenerator {
         // values, including malformed full-window caps. Keep zero automatic
         // here instead of materializing a second, summary-only policy.
         let hasExplicitWireCap = request.config.summaryMaxTokens > 0
-            && AgentRequestBudget.supportsExplicitOutputTokenLimit(for: request.model)
+            && OutputTokenPolicy.supportsExplicitLimit(for: request.model)
         let streamMaxTokens = hasExplicitWireCap ? outputReserveTokens : nil
         let options = StreamOptions(
             // Newer reasoning models can reject an explicit temperature even
@@ -135,7 +135,7 @@ enum CompactionSummaryGenerator {
         // This also closes any OpenAI Responses WebSocket opened for the
         // isolated id and prevents summary checkpoints from lingering.
         await closeProviderSession(sessionId: providerSessionId)
-        try checkCancellation(request.cancellation)
+        try checkCompactionCancellation(request.cancellation)
         return try summaryText(from: result)
     }
 
@@ -319,7 +319,7 @@ enum CompactionSummaryGenerator {
     ) -> Int {
         let desired: Int
         if config.summaryMaxTokens > 0,
-           AgentRequestBudget.supportsExplicitOutputTokenLimit(for: model) {
+           OutputTokenPolicy.supportsExplicitLimit(for: model) {
             desired = OutputTokenPolicy.effectiveLimit(
                 for: model,
                 requested: config.summaryMaxTokens
@@ -331,9 +331,6 @@ enum CompactionSummaryGenerator {
     }
 
     private static func summaryText(from result: AssistantMessage) throws -> String {
-        if result.stopReason == .aborted {
-            throw AgentContextCompactionError.cancelled
-        }
         guard result.stopReason == .stop else {
             switch result.stopReason {
             case .length:
@@ -370,12 +367,6 @@ enum CompactionSummaryGenerator {
             throw AgentContextCompactionError.emptySummary
         }
         return text
-    }
-
-    private static func checkCancellation(_ cancellation: CancellationHandle?) throws {
-        if cancellation?.isCancelled == true || Task.isCancelled {
-            throw AgentContextCompactionError.cancelled
-        }
     }
 
     private static func jsonStringLiteral(_ text: String) -> String {

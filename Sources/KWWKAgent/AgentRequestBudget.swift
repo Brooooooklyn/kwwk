@@ -27,8 +27,4 @@ enum AgentRequestBudget {
         // planning headroom without forcing a low generation cap.
         return max(1, window / 4)
     }
-
-    static func supportsExplicitOutputTokenLimit(for model: Model) -> Bool {
-        OutputTokenPolicy.supportsExplicitLimit(for: model)
-    }
 }

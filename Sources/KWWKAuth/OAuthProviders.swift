@@ -33,7 +33,7 @@ public struct AnthropicOAuthProvider: OAuthProvider {
         return OAuthCredentials(
             access: json.accessToken,
             refresh: json.refreshToken ?? credentials.refresh,
-            expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
+            expires: now + Int64(json.expiresIn * 1000) - OAuth.expiryMarginMs,
             extras: credentials.extras
         )
     }
@@ -76,7 +76,7 @@ public struct OpenAICodexOAuthProvider: OAuthProvider {
         return OAuthCredentials(
             access: json.accessToken,
             refresh: json.refreshToken ?? credentials.refresh,
-            expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
+            expires: now + Int64(json.expiresIn * 1000) - OAuth.expiryMarginMs,
             extras: extras
         )
     }
@@ -126,10 +126,9 @@ public struct GitHubCopilotOAuthProvider: OAuthProvider {
         self.extraHeaders = extraHeaders
     }
 
-    /// Copilot doesn't do standard OAuth token refresh — instead the stored
-    /// `refresh` is a long-lived GitHub PAT that we exchange for a short
-    /// session token on every request. The session token is cached as
-    /// `access` until it expires.
+    /// Copilot doesn't do standard OAuth token refresh — the stored `refresh`
+    /// is a long-lived GitHub token, and each refresh trades it for a
+    /// short-lived session token kept as `access` until it expires.
     public func refresh(
         _ credentials: OAuthCredentials, using client: HTTPClient
     ) async throws -> OAuthCredentials {
@@ -164,7 +163,7 @@ public struct GitHubCopilotOAuthProvider: OAuthProvider {
         return OAuthCredentials(
             access: token,
             refresh: credentials.refresh,
-            expires: expiresAtSec * 1000 - 5 * 60 * 1000,
+            expires: expiresAtSec * 1000 - OAuth.expiryMarginMs,
             extras: extras
         )
     }
@@ -293,7 +292,7 @@ public struct KimiCodingOAuthProvider: OAuthProvider {
         return OAuthCredentials(
             access: json.accessToken,
             refresh: json.refreshToken ?? credentials.refresh,
-            expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
+            expires: now + Int64(json.expiresIn * 1000) - OAuth.expiryMarginMs,
             extras: extras
         )
     }
@@ -459,7 +458,7 @@ public struct XaiOAuthProvider: OAuthProvider {
             access: json.accessToken,
             // xAI may omit refresh_token when the token isn't rotated.
             refresh: json.refreshToken ?? credentials.refresh,
-            expires: now + Int64(json.expiresIn * 1000) - 5 * 60 * 1000,
+            expires: now + Int64(json.expiresIn * 1000) - OAuth.expiryMarginMs,
             extras: credentials.extras
         )
     }
@@ -522,6 +521,10 @@ public enum ZaiOAuth {
 // MARK: - Helpers
 
 package enum OAuth {
+    /// Safety margin subtracted from every token expiry so callers refresh
+    /// slightly early.
+    package static let expiryMarginMs: Int64 = 5 * 60 * 1000
+
     /// Decode a JWT's `exp` claim (Unix seconds) into an expiry in Unix
     /// milliseconds, subtracting a 5-minute safety margin so callers refresh
     /// slightly early. Returns nil for non-JWT / unparseable tokens.
@@ -541,7 +544,7 @@ package enum OAuth {
         else if let v = obj["exp"] as? Int { exp = Double(v) }
         else { exp = nil }
         guard let exp else { return nil }
-        return Int64(exp * 1000) - 5 * 60 * 1000
+        return Int64(exp * 1000) - expiryMarginMs
     }
 
     package struct TokenResponse: Decodable {

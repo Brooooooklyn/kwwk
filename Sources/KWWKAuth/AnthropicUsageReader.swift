@@ -43,13 +43,12 @@ public struct AnthropicUsageReader: OAuthUsageReader {
         var seen: Set<String> = []
         for limit in payload.limits ?? [] {
             guard let percent = limit.percent else { continue }
-            let used = min(100, max(0, percent))
             switch limit.kind {
             case "session":
                 guard sharedFiveHour == nil else { continue }
                 sharedFiveHour = OAuthUsageWindow(
                     window: .fiveHour,
-                    usedPercent: used,
+                    usedPercent: percent,
                     resetsAt: limit.usage.resetsAtMillis,
                     windowSeconds: 5 * 60 * 60
                 )
@@ -57,7 +56,7 @@ public struct AnthropicUsageReader: OAuthUsageReader {
                 guard sharedSevenDay == nil else { continue }
                 sharedSevenDay = OAuthUsageWindow(
                     window: .sevenDay,
-                    usedPercent: used,
+                    usedPercent: percent,
                     resetsAt: limit.usage.resetsAtMillis,
                     windowSeconds: 7 * 24 * 60 * 60
                 )
@@ -68,15 +67,14 @@ public struct AnthropicUsageReader: OAuthUsageReader {
                 guard seen.insert(id).inserted else { continue }
                 // is_active identifies the binding limit, not whether a quota
                 // exists. An inactive Fable limit still has usage to display.
-                var dto = OAuthUsageWindow(
+                windows.append(OAuthUsageWindow(
                     window: .primary,
-                    usedPercent: used,
+                    usedPercent: percent,
                     resetsAt: limit.usage.resetsAtMillis,
-                    windowSeconds: 7 * 24 * 60 * 60
-                )
-                dto.limitID = id
-                dto.limitName = name
-                windows.append(dto)
+                    windowSeconds: 7 * 24 * 60 * 60,
+                    limitID: id,
+                    limitName: name
+                ))
             default:
                 continue
             }
@@ -171,7 +169,7 @@ public struct AnthropicUsageReader: OAuthUsageReader {
         func dto(window: OAuthUsageWindowKind, seconds: Int) -> OAuthUsageWindow {
             OAuthUsageWindow(
                 window: window,
-                usedPercent: min(100, max(0, usedPercent)),
+                usedPercent: usedPercent,
                 resetsAt: resetsAtMillis,
                 windowSeconds: seconds
             )
