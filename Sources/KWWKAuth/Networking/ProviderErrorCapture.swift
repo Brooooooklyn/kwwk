@@ -46,6 +46,12 @@ public enum ProviderErrorCapture {
         "content-type", "www-authenticate", "retry-after", "retry-after-ms", "x-should-retry",
         "x-request-id", "request-id", "cf-ray", "x-amzn-requestid", "x-amzn-errortype",
         "grpc-status", "grpc-message", "connect-protocol-version",
+        // A Claude subscription's spent window is told apart from a burst
+        // only by these.
+        "anthropic-ratelimit-unified-status", "anthropic-ratelimit-unified-reset",
+        "anthropic-ratelimit-unified-representative-claim", "anthropic-ratelimit-unified-overage-status",
+        "anthropic-ratelimit-unified-5h-status", "anthropic-ratelimit-unified-5h-reset",
+        "anthropic-ratelimit-unified-7d-status", "anthropic-ratelimit-unified-7d-reset",
     ]
 
     private struct State {
