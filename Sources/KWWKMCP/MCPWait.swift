@@ -4,11 +4,12 @@ import KWWKAI
 /// Waiting on an unstructured task with a timeout and cancellation, without
 /// waiting for the task itself to finish when either fires.
 enum MCPWait {
-    /// A timeout in seconds as a `Task.sleep` duration. Capped at 1e10 s
-    /// (about 317 years) so a huge configured value means "no timeout"
-    /// rather than overflowing `UInt64`; negative and NaN become 0.
+    /// A timeout in seconds as a `Task.sleep` duration. Capped at 1e9 s
+    /// (about 31 years) so a huge configured value means "no timeout": older
+    /// runtimes wrap a sleep past `Int64.max` ns into one that fires at once.
+    /// Negative and NaN become 0.
     static func nanoseconds(_ seconds: Double) -> UInt64 {
-        UInt64(min(max(0, seconds), 1e10) * 1_000_000_000)
+        UInt64(min(max(0, seconds), 1e9) * 1_000_000_000)
     }
 
     static func value<T: Sendable>(

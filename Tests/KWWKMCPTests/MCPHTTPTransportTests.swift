@@ -222,7 +222,7 @@ struct MCPHTTPTransportTests {
             what: "startup"
         )
         #expect(value == 42)
-        #expect(MCPWait.nanoseconds(.infinity) == 10_000_000_000_000_000_000)
+        #expect(MCPWait.nanoseconds(.infinity) == 1_000_000_000_000_000_000)
         #expect(MCPWait.nanoseconds(-1) == 0)
         #expect(MCPWait.nanoseconds(.nan) == 0)
         #expect(MCPWait.nanoseconds(1.5) == 1_500_000_000)
