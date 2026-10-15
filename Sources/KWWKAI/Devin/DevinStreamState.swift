@@ -1,29 +1,31 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 // MARK: - Stream state
 
 /// Accumulates the assistant message from `GetChatMessageResponse` deltas and
 /// emits the matching `AssistantMessageEvent`s.
-final class DevinStreamState: @unchecked Sendable {
+final class DevinStreamState: Sendable {
     private let api: String
     private let model: Model
-    private let lock = NSLock()
-
-    private var blocks: [AssistantBlock] = []
-    private var textIndex: Int?
-    private var thinkingIndex: Int?
-    /// Tool-call block index + accumulated JSON args, keyed by call id.
-    private var toolIndexById: [String: Int] = [:]
-    private var toolArgs: [String: String] = [:]
-    private var toolOrder: [String] = []
-    private var activeToolCallId: String?
-    /// Ids given here to calls Devin opened without one.
-    private var mintedToolCallIds: Set<String> = []
-    private var responseId: String?
-    private var responseModel: String?
-    private var lastStopReason: UInt64 = DevinProto.StopReason.unspecified
-    private var usage = Usage()
-    private var stopReasonOverride: StopReason?
+    private struct State {
+        var blocks: [AssistantBlock] = []
+        var textIndex: Int?
+        var thinkingIndex: Int?
+        /// Tool-call block index + accumulated JSON args, keyed by call id.
+        var toolIndexById: [String: Int] = [:]
+        var toolArgs: [String: String] = [:]
+        var toolOrder: [String] = []
+        var activeToolCallId: String?
+        /// Ids given here to calls Devin opened without one.
+        var mintedToolCallIds: Set<String> = []
+        var responseId: String?
+        var responseModel: String?
+        var lastStopReason: UInt64 = DevinProto.StopReason.unspecified
+        var usage = Usage()
+        var stopReasonOverride: StopReason?
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, model: Model) {
         self.api = api
@@ -31,20 +33,21 @@ final class DevinStreamState: @unchecked Sendable {
     }
 
     func setResponseModel(_ uid: String) {
-        lock.withLock { responseModel = uid }
+        state.withLockedValue { $0.responseModel = uid }
     }
 
     func apply(_ msg: DevinProto.GetChatMessageResponse, emit: (AssistantMessageEvent) -> Void) {
-        lock.withLock {
-            if !msg.messageId.isEmpty, responseId == nil { responseId = msg.messageId }
-            if let actual = msg.actualModelUid, !actual.isEmpty { responseModel = actual }
-            if msg.stopReason != DevinProto.StopReason.unspecified { lastStopReason = msg.stopReason }
+        state.withLockedValue { state in
+            if !msg.messageId.isEmpty, state.responseId == nil { state.responseId = msg.messageId }
+            if let actual = msg.actualModelUid, !actual.isEmpty { state.responseModel = actual }
+            if msg.stopReason != DevinProto.StopReason.unspecified { state.lastStopReason = msg.stopReason }
             if let u = msg.usage {
-                usage.input = Int(u.inputTokens)
-                usage.output = Int(u.outputTokens)
-                usage.cacheRead = Int(u.cacheReadTokens)
-                usage.cacheWrite = Int(u.cacheWriteTokens)
-                usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+                state.usage.input = Int(u.inputTokens)
+                state.usage.output = Int(u.outputTokens)
+                state.usage.cacheRead = Int(u.cacheReadTokens)
+                state.usage.cacheWrite = Int(u.cacheWriteTokens)
+                state.usage.totalTokens = state.usage.input + state.usage.output
+                    + state.usage.cacheRead + state.usage.cacheWrite
             }
         }
         if !msg.deltaThinking.isEmpty {
@@ -55,11 +58,12 @@ final class DevinStreamState: @unchecked Sendable {
             // after the last thinking delta and before the text (measured
             // 2026-10-11 on Opus 5: 700 bytes in field 10, no field 9).
             // Replayed with it, the thinking is kept; without, Devin drops it.
-            lock.withLock {
-                let index = thinkingIndex ?? blocks.lastIndex { if case .thinking = $0 { return true }; return false }
-                if let index, case .thinking(var t) = blocks[index] {
+            state.withLockedValue { state in
+                let index = state.thinkingIndex
+                    ?? state.blocks.lastIndex { if case .thinking = $0 { return true }; return false }
+                if let index, case .thinking(var t) = state.blocks[index] {
                     t.thinkingSignature = msg.deltaSignature
-                    blocks[index] = .thinking(t)
+                    state.blocks[index] = .thinking(t)
                 }
             }
         }
@@ -75,50 +79,50 @@ final class DevinStreamState: @unchecked Sendable {
     }
 
     private func appendText(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let idx = textIndex { return (idx, false) }
-            blocks.append(.text(TextContent(text: "")))
-            textIndex = blocks.count - 1
-            return (blocks.count - 1, true)
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let idx = state.textIndex { return (idx, false) }
+            state.blocks.append(.text(TextContent(text: "")))
+            state.textIndex = state.blocks.count - 1
+            return (state.blocks.count - 1, true)
         }
         if isNew { emit(.textStart(contentIndex: index, partial: snapshot())) }
-        lock.withLock {
-            if case .text(var t) = blocks[index] { t.text += delta; blocks[index] = .text(t) }
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] { t.text += delta; state.blocks[index] = .text(t) }
         }
         emit(.textDelta(contentIndex: index, delta: delta, partial: snapshot()))
     }
 
     private func appendThinking(_ delta: String, signature: String, emit: (AssistantMessageEvent) -> Void) {
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let idx = thinkingIndex { return (idx, false) }
-            blocks.append(.thinking(ThinkingContent(thinking: "")))
-            thinkingIndex = blocks.count - 1
-            return (blocks.count - 1, true)
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let idx = state.thinkingIndex { return (idx, false) }
+            state.blocks.append(.thinking(ThinkingContent(thinking: "")))
+            state.thinkingIndex = state.blocks.count - 1
+            return (state.blocks.count - 1, true)
         }
         if isNew { emit(.thinkingStart(contentIndex: index, partial: snapshot())) }
-        lock.withLock {
-            if case .thinking(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var t) = state.blocks[index] {
                 t.thinking += delta
                 if !signature.isEmpty { t.thinkingSignature = signature }
-                blocks[index] = .thinking(t)
+                state.blocks[index] = .thinking(t)
             }
         }
         emit(.thinkingDelta(contentIndex: index, delta: delta, partial: snapshot()))
     }
 
     private func endText(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let idx = textIndex, case .text(let t) = blocks[idx] else { return nil }
-            textIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let idx = state.textIndex, case .text(let t) = state.blocks[idx] else { return nil }
+            state.textIndex = nil
             return (idx, t.text)
         }
         if let (index, content) = closed { emit(.textEnd(contentIndex: index, content: content, partial: snapshot())) }
     }
 
     private func endThinking(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let idx = thinkingIndex, case .thinking(let t) = blocks[idx] else { return nil }
-            thinkingIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let idx = state.thinkingIndex, case .thinking(let t) = state.blocks[idx] else { return nil }
+            state.thinkingIndex = nil
             return (idx, t.thinking)
         }
         if let (index, content) = closed {
@@ -130,8 +134,8 @@ final class DevinStreamState: @unchecked Sendable {
     /// omit it) and either cumulative or incremental argument JSON.
     private func applyToolDelta(_ call: DevinProto.ChatToolCall, emit: (AssistantMessageEvent) -> Void) {
         enum Step { case skip, started(Int), existing(Int) }
-        let step: Step = lock.withLock {
-            var named = call.id.isEmpty ? activeToolCallId : call.id
+        let step: Step = state.withLockedValue { state in
+            var named = call.id.isEmpty ? state.activeToolCallId : call.id
             // A call that opens with a name and no id still runs: it gets an
             // id of ours, as magpie's Devin plugin gives one (`events`). A
             // name is what opens a call there, so a second name with no id
@@ -139,24 +143,24 @@ final class DevinStreamState: @unchecked Sendable {
             // taken as one, their arguments would run together and decode
             // to `{}`.
             if call.id.isEmpty, !call.name.isEmpty,
-               activeToolCallId.map(mintedToolCallIds.contains) ?? true {
+               state.activeToolCallId.map({ state.mintedToolCallIds.contains($0) }) ?? true {
                 let minted = "call_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-                mintedToolCallIds.insert(minted)
+                state.mintedToolCallIds.insert(minted)
                 named = minted
             }
             guard let id = named else { return .skip }
-            activeToolCallId = id
-            if let idx = toolIndexById[id] {
-                if !call.name.isEmpty, case .toolCall(var tc) = blocks[idx] {
-                    tc.name = call.name; blocks[idx] = .toolCall(tc)
+            state.activeToolCallId = id
+            if let idx = state.toolIndexById[id] {
+                if !call.name.isEmpty, case .toolCall(var tc) = state.blocks[idx] {
+                    tc.name = call.name; state.blocks[idx] = .toolCall(tc)
                 }
                 return .existing(idx)
             }
-            blocks.append(.toolCall(ToolCall(id: id, name: call.name, arguments: .object([:]))))
-            let idx = blocks.count - 1
-            toolIndexById[id] = idx
-            toolArgs[id] = ""
-            toolOrder.append(id)
+            state.blocks.append(.toolCall(ToolCall(id: id, name: call.name, arguments: .object([:]))))
+            let idx = state.blocks.count - 1
+            state.toolIndexById[id] = idx
+            state.toolArgs[id] = ""
+            state.toolOrder.append(id)
             return .started(idx)
         }
         let index: Int
@@ -169,13 +173,13 @@ final class DevinStreamState: @unchecked Sendable {
             index = idx
         }
         guard !call.argumentsJson.isEmpty else { return }
-        let delta: String = lock.withLock {
-            let id = activeToolCallId ?? ""
-            let previous = toolArgs[id] ?? ""
+        let delta: String = state.withLockedValue { state in
+            let id = state.activeToolCallId ?? ""
+            let previous = state.toolArgs[id] ?? ""
             let accumulated = call.argumentsJson.hasPrefix(previous)
                 ? call.argumentsJson
                 : previous + call.argumentsJson
-            toolArgs[id] = accumulated
+            state.toolArgs[id] = accumulated
             return String(accumulated.dropFirst(previous.count))
         }
         if !delta.isEmpty { emit(.toolCallDelta(contentIndex: index, delta: delta, partial: snapshot())) }
@@ -184,18 +188,18 @@ final class DevinStreamState: @unchecked Sendable {
     func closeOpenBlocks(emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let completed: [(Int, ToolCall)] = lock.withLock {
+        let completed: [(Int, ToolCall)] = state.withLockedValue { state in
             var out: [(Int, ToolCall)] = []
-            for id in toolOrder {
-                guard let idx = toolIndexById[id], case .toolCall(var tc) = blocks[idx] else { continue }
-                let json = toolArgs[id] ?? ""
+            for id in state.toolOrder {
+                guard let idx = state.toolIndexById[id], case .toolCall(var tc) = state.blocks[idx] else { continue }
+                let json = state.toolArgs[id] ?? ""
                 tc.arguments = json.isEmpty
                     ? .object([:])
                     : (try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))) ?? .object([:])
-                blocks[idx] = .toolCall(tc)
+                state.blocks[idx] = .toolCall(tc)
                 out.append((idx, tc))
             }
-            toolOrder.removeAll()
+            state.toolOrder.removeAll()
             return out
         }
         for (index, call) in completed {
@@ -204,42 +208,44 @@ final class DevinStreamState: @unchecked Sendable {
     }
 
     func snapshot() -> AssistantMessage {
-        lock.withLock { messageLocked(stopReason: stopReasonOverride ?? derivedStopReasonLocked()) }
+        state.withLockedValue { state in
+            messageLocked(state, stopReason: state.stopReasonOverride ?? derivedStopReasonLocked(state))
+        }
     }
 
     func finalize() -> AssistantMessage { snapshot() }
 
     func aborted() -> AssistantMessage {
-        lock.withLock { stopReasonOverride = .aborted }
+        state.withLockedValue { $0.stopReasonOverride = .aborted }
         var m = snapshot()
         m.errorMessage = "Request was aborted"
         return m
     }
 
     func failed(_ failure: ProviderFailure) -> AssistantMessage {
-        lock.withLock { stopReasonOverride = .error }
+        state.withLockedValue { $0.stopReasonOverride = .error }
         var m = snapshot()
         m.errorMessage = failure.message
         m.failure = failure
         return m
     }
 
-    private func derivedStopReasonLocked() -> StopReason {
-        if !toolIndexById.isEmpty { return .toolUse }
-        if lastStopReason == DevinProto.StopReason.maxTokens { return .length }
+    private func derivedStopReasonLocked(_ state: State) -> StopReason {
+        if !state.toolIndexById.isEmpty { return .toolUse }
+        if state.lastStopReason == DevinProto.StopReason.maxTokens { return .length }
         return .stop
     }
 
-    private func messageLocked(stopReason: StopReason) -> AssistantMessage {
-        var u = usage
+    private func messageLocked(_ state: State, stopReason: StopReason) -> AssistantMessage {
+        var u = state.usage
         u.cost = calculateCost(model: model, usage: u)
         return AssistantMessage(
-            content: blocks,
+            content: state.blocks,
             api: api,
             provider: model.provider,
             model: model.id,
-            responseId: responseId,
-            responseModel: responseModel,
+            responseId: state.responseId,
+            responseModel: state.responseModel,
             usage: u,
             stopReason: stopReason,
             timestamp: Timestamp.now()

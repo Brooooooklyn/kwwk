@@ -51,6 +51,9 @@ let package = Package(
         // Command-line parsing for `kwwk`, `kwwk mcp` and the catalog generators: options, help and
         // usage errors come from one declaration instead of hand-rolled argv loops.
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // `Deque` for the FIFO queues on the streaming and input paths, where
+        // `Array.removeFirst()` would shift every element on each pop.
+        .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
     ],
     targets: [
         .target(
@@ -59,6 +62,8 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/KWWKAuth"
         ),
@@ -72,6 +77,8 @@ let package = Package(
                 .product(name: "ZLibC", package: "zlib", condition: .when(platforms: [.linux])),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
                 .product(name: "NIOHTTP2", package: "swift-nio-http2"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "stb_image", package: "Cstb"),
@@ -85,7 +92,10 @@ let package = Package(
         ),
         .target(
             name: "KWWKAgent",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+            ],
             path: "Sources/KWWKAgent"
         ),
         .target(
@@ -94,6 +104,7 @@ let package = Package(
                 "KWWKAI",
                 "KWWKAgent",
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
             ],
             path: "Sources/KWWKMCP"
         ),
@@ -104,6 +115,8 @@ let package = Package(
                 "KWWKAgent",
                 "KWWKMCP",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/KWWKCli"
         ),

@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -113,9 +114,11 @@ private extension URLSessionWebSocketClient {
 
 private final class URLSessionWebSocketConnection: WebSocketConnection, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
-    private let lock = NSLock()
-    private var lastInbound: DispatchTime = .now()
-    private var keepaliveFailure: WebSocketKeepaliveError?
+    private struct State {
+        var lastInbound: DispatchTime = .now()
+        var keepaliveFailure: WebSocketKeepaliveError?
+    }
+    private let state = NIOLockedValueBox(State())
     private var heartbeat: Task<Void, Never>?
 
     init(task: URLSessionWebSocketTask, pingIntervalSeconds: TimeInterval, idleTimeoutSeconds: TimeInterval) {
@@ -173,10 +176,7 @@ private final class URLSessionWebSocketConnection: WebSocketConnection, @uncheck
     /// deadline has passed, otherwise ping. Returns false once the
     /// connection has failed and the heartbeat should stop.
     private func heartbeatTick(idleTimeoutSeconds: TimeInterval) -> Bool {
-        lock.lock()
-        let failed = keepaliveFailure != nil
-        let last = lastInbound
-        lock.unlock()
+        let (failed, last) = state.withLockedValue { ($0.keepaliveFailure != nil, $0.lastInbound) }
         if failed { return false }
 
         let idleNs = DispatchTime.now().uptimeNanoseconds - last.uptimeNanoseconds
@@ -198,12 +198,11 @@ private final class URLSessionWebSocketConnection: WebSocketConnection, @uncheck
     }
 
     private func fail(reason: String) {
-        lock.lock()
-        let alreadyFailed = keepaliveFailure != nil
-        if !alreadyFailed {
-            keepaliveFailure = WebSocketKeepaliveError(reason: reason)
+        let alreadyFailed = state.withLockedValue { state in
+            guard state.keepaliveFailure == nil else { return true }
+            state.keepaliveFailure = WebSocketKeepaliveError(reason: reason)
+            return false
         }
-        lock.unlock()
         guard !alreadyFailed else { return }
         // Cancelling the task makes any pending receive()/send() throw;
         // the wrappers above replace that error with the keepalive failure.
@@ -211,14 +210,10 @@ private final class URLSessionWebSocketConnection: WebSocketConnection, @uncheck
     }
 
     private func noteInbound() {
-        lock.lock()
-        lastInbound = .now()
-        lock.unlock()
+        state.withLockedValue { $0.lastInbound = .now() }
     }
 
     private func recordedKeepaliveFailure() -> WebSocketKeepaliveError? {
-        lock.lock()
-        defer { lock.unlock() }
-        return keepaliveFailure
+        state.withLockedValue { $0.keepaliveFailure }
     }
 }

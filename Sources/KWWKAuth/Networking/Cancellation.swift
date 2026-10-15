@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// A shareable cancellation token, analogous to the browser's `AbortSignal`.
 ///
@@ -18,39 +19,36 @@ public struct CancellationRegistration: Sendable {
     }
 }
 
-public final class CancellationHandle: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _isCancelled = false
-    private var _reason: String?
-    private var listeners: [(id: UUID, handler: @Sendable (String?) -> Void)] = []
+public final class CancellationHandle: Sendable {
+    private struct State {
+        var isCancelled = false
+        var reason: String?
+        var listeners: [(id: UUID, handler: @Sendable (String?) -> Void)] = []
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     public init() {}
 
     public var isCancelled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isCancelled
+        state.withLockedValue { $0.isCancelled }
     }
 
     public var reason: String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _reason
+        state.withLockedValue { $0.reason }
     }
 
     /// Cancel the handle. Subsequent calls are no-ops.
     public func cancel(reason: String? = nil) {
-        let callbacks: [@Sendable (String?) -> Void]
-        lock.lock()
-        if _isCancelled {
-            lock.unlock()
-            return
+        let callbacks: [@Sendable (String?) -> Void]? = state.withLockedValue { state in
+            if state.isCancelled { return nil }
+            state.isCancelled = true
+            state.reason = reason
+            let callbacks = state.listeners.map(\.handler)
+            state.listeners.removeAll()
+            return callbacks
         }
-        _isCancelled = true
-        _reason = reason
-        callbacks = listeners.map(\.handler)
-        listeners.removeAll()
-        lock.unlock()
+        guard let callbacks else { return }
         for cb in callbacks {
             cb(reason)
         }
@@ -61,24 +59,26 @@ public final class CancellationHandle: @unchecked Sendable {
     @discardableResult
     public func onCancel(_ handler: @Sendable @escaping (String?) -> Void) -> CancellationRegistration {
         let id = UUID()
-        lock.lock()
-        if _isCancelled {
-            let r = _reason
-            lock.unlock()
+        // `.some(reason)` when already cancelled; the handler then fires
+        // synchronously, outside the lock.
+        let alreadyCancelled: String?? = state.withLockedValue { state in
+            if state.isCancelled { return .some(state.reason) }
+            state.listeners.append((id: id, handler: handler))
+            return nil
+        }
+        if let r = alreadyCancelled {
             handler(r)
             return CancellationRegistration {}
         }
-        listeners.append((id: id, handler: handler))
-        lock.unlock()
         return CancellationRegistration { [weak self] in
             self?.removeListener(id)
         }
     }
 
     private func removeListener(_ id: UUID) {
-        lock.lock()
-        listeners.removeAll { $0.id == id }
-        lock.unlock()
+        state.withLockedValue { state in
+            state.listeners.removeAll { $0.id == id }
+        }
     }
 
     /// Throw CancellationError if already cancelled.

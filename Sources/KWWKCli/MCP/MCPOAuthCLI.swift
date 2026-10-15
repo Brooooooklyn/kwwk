@@ -6,6 +6,7 @@ import Darwin
 #endif
 import KWWKAI
 import KWWKMCP
+import NIOConcurrencyHelpers
 
 /// `oauth` settings of one HTTP server in `mcp.json`.
 struct MCPOAuthSettings: Sendable, Hashable {
@@ -140,17 +141,20 @@ actor MCPOAuthFileStore {
 /// client, writes a verifier or opens the browser; a server that needs more
 /// waits for `/mcp login`.
 final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscoveryStore,
-    MCPOAuthCredentialInvalidation, @unchecked Sendable {
+    MCPOAuthCredentialInvalidation, Sendable {
     let server: String
     let serverURL: URL
     let settings: MCPOAuthSettings
     let store: MCPOAuthFileStore
     let callbackPort: UInt16
 
-    private let lock = NSLock()
-    private var pendingAuthorizationURL: URL?
-    private var issuedState: String?
-    private var opensBrowser = true
+    private struct FlowState {
+        var pendingAuthorizationURL: URL?
+        var issuedState: String?
+        var opensBrowser = true
+    }
+
+    private let flowState = NIOLockedValueBox(FlowState())
 
     init(server: String, serverURL: URL, settings: MCPOAuthSettings, store: MCPOAuthFileStore, callbackPort: UInt16) {
         self.server = server
@@ -178,7 +182,7 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
 
     func state() async throws -> String? {
         let value = PKCE.randomHex(bytes: 32)
-        lock.withLock { issuedState = value }
+        flowState.withLockedValue { $0.issuedState = value }
         return value
     }
 
@@ -206,9 +210,9 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
     }
 
     func redirectToAuthorization(_ url: URL) async throws {
-        let open = lock.withLock { () -> Bool in
-            pendingAuthorizationURL = url
-            return opensBrowser
+        let open = flowState.withLockedValue { state -> Bool in
+            state.pendingAuthorizationURL = url
+            return state.opensBrowser
         }
         if open { Browser.open(url) }
     }
@@ -261,9 +265,9 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
         let callback = try OAuthCallbackServer(port: callbackPort, path: "/callback")
         try callback.start()
         defer { callback.stop() }
-        lock.withLock {
-            pendingAuthorizationURL = nil
-            opensBrowser = openBrowser
+        flowState.withLockedValue {
+            $0.pendingAuthorizationURL = nil
+            $0.opensBrowser = openBrowser
         }
 
         let result = try await MCPOAuth.auth(self, options: MCPOAuthOptions(
@@ -272,7 +276,7 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
             httpClient: httpClient
         ))
         guard result == .redirect else { return }
-        if let url = lock.withLock({ pendingAuthorizationURL }) {
+        if let url = flowState.withLockedValue({ $0.pendingAuthorizationURL }) {
             let lead = openBrowser ? "If the browser did not open, visit" : "Open this URL to sign in"
             FileHandle.standardError.write(Data("\(lead):\n  \(url.absoluteString)\n".utf8))
         }
@@ -286,7 +290,7 @@ final class CLIMCPOAuthProvider: MCPOAuthClientRegistrationStore, MCPOAuthDiscov
             guard let first = try await group.next() else { throw CancellationError() }
             return first
         }
-        let expected = lock.withLock { issuedState }
+        let expected = flowState.withLockedValue { $0.issuedState }
         guard let expected, parameters["state"] == expected else {
             throw MCPAuthError.unauthorized("The authorization callback's state did not match")
         }

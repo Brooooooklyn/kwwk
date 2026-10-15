@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Accumulates the assistant message as Cursor `InteractionUpdate`s arrive and
 /// emits the corresponding `AssistantMessageEvent`s. Text, thinking, and tool
@@ -6,33 +7,34 @@ import Foundation
 /// machine: a new block is opened whenever a delta arrives with no block of
 /// that kind currently open, and starting a tool call closes any open text or
 /// thinking block.
-final class CursorStreamState: @unchecked Sendable {
+final class CursorStreamState: Sendable {
     private let api: String
     private let model: Model
-    private let lock = NSLock()
+    private struct State {
+        var blocks: [AssistantBlock] = []
+        var textIndex: Int?
+        var thinkingIndex: Int?
 
-    private var blocks: [AssistantBlock] = []
-    private var textIndex: Int?
-    private var thinkingIndex: Int?
+        var toolCallIndex: Int?
+        /// Cumulative JSON-text snapshot of the streaming MCP args so far.
+        var toolCallArgsBuffer = ""
+        /// Whether the open tool call streams MCP args (todo blocks don't).
+        var toolCallIsMcp = false
 
-    private var toolCallIndex: Int?
-    /// Cumulative JSON-text snapshot of the streaming MCP args so far.
-    private var toolCallArgsBuffer = ""
-    /// Whether the open tool call streams MCP args (todo blocks don't).
-    private var toolCallIsMcp = false
-
-    private var outputTokens = 0
-    private var sawTokenDelta = false
-    /// What the turn's TurnEndedUpdate said it used; wins over the
-    /// delta/checkpoint estimate when present. A step that ends on a tool
-    /// call gets none, so the estimate stays the fallback.
-    private var turnUsage: Usage?
-    private var stopReason: StopReason = .stop
-    /// Field numbers of the interaction updates and server messages this
-    /// provider does not read, with how often each came: an empty reply
-    /// names them, so a report says what was not understood.
-    private var unreadUpdates: [Int: Int] = [:]
-    private var unreadMessages: [Int: Int] = [:]
+        var outputTokens = 0
+        var sawTokenDelta = false
+        /// What the turn's TurnEndedUpdate said it used; wins over the
+        /// delta/checkpoint estimate when present. A step that ends on a tool
+        /// call gets none, so the estimate stays the fallback.
+        var turnUsage: Usage?
+        var stopReason: StopReason = .stop
+        /// Field numbers of the interaction updates and server messages this
+        /// provider does not read, with how often each came: an empty reply
+        /// names them, so a report says what was not understood.
+        var unreadUpdates: [Int: Int] = [:]
+        var unreadMessages: [Int: Int] = [:]
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, model: Model) {
         self.api = api
@@ -42,49 +44,49 @@ final class CursorStreamState: @unchecked Sendable {
     // MARK: - Text / thinking
 
     func appendText(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let idx = textIndex { return (idx, false) }
-            let idx = blocks.count
-            textIndex = idx
-            blocks.append(.text(TextContent(text: "")))
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let idx = state.textIndex { return (idx, false) }
+            let idx = state.blocks.count
+            state.textIndex = idx
+            state.blocks.append(.text(TextContent(text: "")))
             return (idx, true)
         }
         if isNew {
             emit(.textStart(contentIndex: index, partial: snapshot()))
         }
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.text += delta
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
         emit(.textDelta(contentIndex: index, delta: delta, partial: snapshot()))
     }
 
     func appendThinking(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let idx = thinkingIndex { return (idx, false) }
-            let idx = blocks.count
-            thinkingIndex = idx
-            blocks.append(.thinking(ThinkingContent(thinking: "")))
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let idx = state.thinkingIndex { return (idx, false) }
+            let idx = state.blocks.count
+            state.thinkingIndex = idx
+            state.blocks.append(.thinking(ThinkingContent(thinking: "")))
             return (idx, true)
         }
         if isNew {
             emit(.thinkingStart(contentIndex: index, partial: snapshot()))
         }
-        lock.withLock {
-            if case .thinking(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var t) = state.blocks[index] {
                 t.thinking += delta
-                blocks[index] = .thinking(t)
+                state.blocks[index] = .thinking(t)
             }
         }
         emit(.thinkingDelta(contentIndex: index, delta: delta, partial: snapshot()))
     }
 
     func endText(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let idx = textIndex, case .text(let t) = blocks[idx] else { return nil }
-            textIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let idx = state.textIndex, case .text(let t) = state.blocks[idx] else { return nil }
+            state.textIndex = nil
             return (idx, t.text)
         }
         if let (index, content) = closed {
@@ -93,9 +95,9 @@ final class CursorStreamState: @unchecked Sendable {
     }
 
     func endThinking(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let idx = thinkingIndex, case .thinking(let t) = blocks[idx] else { return nil }
-            thinkingIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let idx = state.thinkingIndex, case .thinking(let t) = state.blocks[idx] else { return nil }
+            state.thinkingIndex = nil
             return (idx, t.thinking)
         }
         if let (index, content) = closed {
@@ -111,12 +113,12 @@ final class CursorStreamState: @unchecked Sendable {
     func startMcpToolCall(id: String, name: String, emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let index: Int = lock.withLock {
-            let idx = blocks.count
-            toolCallIndex = idx
-            toolCallArgsBuffer = ""
-            toolCallIsMcp = true
-            blocks.append(.toolCall(ToolCall(id: id, name: name, arguments: .object([:]))))
+        let index: Int = state.withLockedValue { state in
+            let idx = state.blocks.count
+            state.toolCallIndex = idx
+            state.toolCallArgsBuffer = ""
+            state.toolCallIsMcp = true
+            state.blocks.append(.toolCall(ToolCall(id: id, name: name, arguments: .object([:]))))
             return idx
         }
         emit(.toolCallStart(contentIndex: index, partial: snapshot()))
@@ -127,12 +129,12 @@ final class CursorStreamState: @unchecked Sendable {
     func startTodoToolCall(id: String, arguments: JSONValue, emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let index: Int = lock.withLock {
-            let idx = blocks.count
-            toolCallIndex = idx
-            toolCallArgsBuffer = ""
-            toolCallIsMcp = false
-            blocks.append(.toolCall(ToolCall(
+        let index: Int = state.withLockedValue { state in
+            let idx = state.blocks.count
+            state.toolCallIndex = idx
+            state.toolCallArgsBuffer = ""
+            state.toolCallIsMcp = false
+            state.blocks.append(.toolCall(ToolCall(
                 id: id,
                 name: "todo",
                 arguments: arguments,
@@ -147,13 +149,13 @@ final class CursorStreamState: @unchecked Sendable {
     /// already have and emit only the new suffix (falling back to treating a
     /// non-extending snapshot as an incremental fragment, like oh-my-pi).
     func appendToolCallArgs(snapshot argsSnapshot: String, emit: (AssistantMessageEvent) -> Void) {
-        let update: (index: Int, chunk: String)? = lock.withLock {
-            guard let idx = toolCallIndex, toolCallIsMcp else { return nil }
-            let chunk = argsSnapshot.hasPrefix(toolCallArgsBuffer)
-                ? String(argsSnapshot.dropFirst(toolCallArgsBuffer.count))
+        let update: (index: Int, chunk: String)? = state.withLockedValue { state in
+            guard let idx = state.toolCallIndex, state.toolCallIsMcp else { return nil }
+            let chunk = argsSnapshot.hasPrefix(state.toolCallArgsBuffer)
+                ? String(argsSnapshot.dropFirst(state.toolCallArgsBuffer.count))
                 : argsSnapshot
             guard !chunk.isEmpty else { return nil }
-            toolCallArgsBuffer += chunk
+            state.toolCallArgsBuffer += chunk
             return (idx, chunk)
         }
         if let (index, chunk) = update {
@@ -166,20 +168,20 @@ final class CursorStreamState: @unchecked Sendable {
     /// frame's `McpArgs` map) fills in per-key, except where the completion
     /// downgraded a structured streamed value to a raw string.
     func completeToolCall(completionArgs: JSONValue?, emit: (AssistantMessageEvent) -> Void) {
-        let completed: (index: Int, call: ToolCall)? = lock.withLock {
-            guard let idx = toolCallIndex, case .toolCall(var call) = blocks[idx] else { return nil }
-            if toolCallIsMcp {
+        let completed: (index: Int, call: ToolCall)? = state.withLockedValue { state in
+            guard let idx = state.toolCallIndex, case .toolCall(var call) = state.blocks[idx] else { return nil }
+            if state.toolCallIsMcp {
                 let streamed = (try? JSONDecoder().decode(
                     JSONValue.self,
-                    from: Data(toolCallArgsBuffer.utf8)
+                    from: Data(state.toolCallArgsBuffer.utf8)
                 )) ?? JSONValue.object([:])
                 call.arguments = Self.mergeMcpArgs(streamed: streamed, completion: completionArgs)
             } else if let completionArgs {
                 call.arguments = completionArgs
             }
-            blocks[idx] = .toolCall(call)
-            toolCallIndex = nil
-            toolCallArgsBuffer = ""
+            state.blocks[idx] = .toolCall(call)
+            state.toolCallIndex = nil
+            state.toolCallArgsBuffer = ""
             return (idx, call)
         }
         if let (index, call) = completed {
@@ -198,10 +200,10 @@ final class CursorStreamState: @unchecked Sendable {
     ) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let (index, call): (Int, ToolCall) = lock.withLock {
+        let (index, call): (Int, ToolCall) = state.withLockedValue { state in
             let call = ToolCall(id: id, name: name, arguments: arguments, cursorExecResolved: true)
-            blocks.append(.toolCall(call))
-            return (blocks.count - 1, call)
+            state.blocks.append(.toolCall(call))
+            return (state.blocks.count - 1, call)
         }
         emit(.toolCallStart(contentIndex: index, partial: snapshot()))
         emit(.toolCallEnd(contentIndex: index, toolCall: call, partial: snapshot()))
@@ -210,11 +212,11 @@ final class CursorStreamState: @unchecked Sendable {
     /// Mark the tool-call block with `id` as resolved (the provider executed it
     /// inline via the exec channel). Returns whether a block matched.
     func markToolCallResolved(id: String) -> Bool {
-        lock.withLock {
-            for (idx, block) in blocks.enumerated() {
+        state.withLockedValue { state in
+            for (idx, block) in state.blocks.enumerated() {
                 guard case .toolCall(var call) = block, call.id == id else { continue }
                 call.cursorExecResolved = true
-                blocks[idx] = .toolCall(call)
+                state.blocks[idx] = .toolCall(call)
                 return true
             }
             return false
@@ -244,9 +246,9 @@ final class CursorStreamState: @unchecked Sendable {
     // MARK: - Usage
 
     func addOutputTokens(_ tokens: Int) {
-        lock.withLock {
-            sawTokenDelta = true
-            outputTokens += tokens
+        state.withLockedValue { state in
+            state.sawTokenDelta = true
+            state.outputTokens += tokens
         }
     }
 
@@ -255,9 +257,9 @@ final class CursorStreamState: @unchecked Sendable {
     /// context occupancy, not this turn's output, so it must never override
     /// delta-accumulated counts.
     func applyCheckpointUsedTokens(_ used: Int) {
-        lock.withLock {
-            guard !sawTokenDelta, used > 0 else { return }
-            outputTokens = used
+        state.withLockedValue { state in
+            guard !state.sawTokenDelta, used > 0 else { return }
+            state.outputTokens = used
         }
     }
 
@@ -266,8 +268,8 @@ final class CursorStreamState: @unchecked Sendable {
     /// reports it.
     func applyTurnEnded(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, reasoning: Int) {
         guard input > 0 || output > 0 else { return }
-        lock.withLock {
-            turnUsage = Usage(
+        state.withLockedValue { state in
+            state.turnUsage = Usage(
                 input: max(input - cacheRead - cacheWrite, 0),
                 output: output,
                 cacheRead: cacheRead,
@@ -280,11 +282,11 @@ final class CursorStreamState: @unchecked Sendable {
     // MARK: - Empty replies
 
     func noteUnread(update number: Int) {
-        lock.withLock { unreadUpdates[number, default: 0] += 1 }
+        state.withLockedValue { $0.unreadUpdates[number, default: 0] += 1 }
     }
 
     func noteUnread(message number: Int) {
-        lock.withLock { unreadMessages[number, default: 0] += 1 }
+        state.withLockedValue { $0.unreadMessages[number, default: 0] += 1 }
     }
 
     /// A turn that ends having written no text and made no tool call is an
@@ -297,9 +299,9 @@ final class CursorStreamState: @unchecked Sendable {
     /// Run ended, the thinking, Cursor's own count of output when it gave
     /// one, and what Cursor sent that is not read (agent.v1 field numbers).
     func emptyReplyFailure(how: String) -> ProviderFailure? {
-        lock.withLock {
+        state.withLockedValue { state in
             var thinking = 0
-            for block in blocks {
+            for block in state.blocks {
                 switch block {
                 case .text(let t):
                     if !t.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
@@ -318,9 +320,9 @@ final class CursorStreamState: @unchecked Sendable {
             parts.append(thinking > 0
                 ? "after \(thinking) chars of thinking, no text and no tool call"
                 : "with no thinking, no text and no tool call")
-            if let turnUsage { parts.append("Cursor counted \(turnUsage.output) output tokens") }
-            if !unreadUpdates.isEmpty { parts.append("updates not read: \(list(unreadUpdates))") }
-            if !unreadMessages.isEmpty { parts.append("messages not read: \(list(unreadMessages))") }
+            if let turnUsage = state.turnUsage { parts.append("Cursor counted \(turnUsage.output) output tokens") }
+            if !state.unreadUpdates.isEmpty { parts.append("updates not read: \(list(state.unreadUpdates))") }
+            if !state.unreadMessages.isEmpty { parts.append("messages not read: \(list(state.unreadMessages))") }
             return ProviderFailure(
                 message: "Cursor sent an empty reply (\(parts.joined(separator: "; ")))",
                 shouldRetry: true
@@ -338,14 +340,14 @@ final class CursorStreamState: @unchecked Sendable {
     }
 
     func snapshot() -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             AssistantMessage(
-                content: blocks,
+                content: state.blocks,
                 api: api,
                 provider: model.provider,
                 model: model.id,
-                usage: usageLocked(),
-                stopReason: stopReason,
+                usage: usageLocked(state),
+                stopReason: state.stopReason,
                 timestamp: Timestamp.now()
             )
         }
@@ -356,14 +358,14 @@ final class CursorStreamState: @unchecked Sendable {
     }
 
     func aborted() -> AssistantMessage {
-        lock.withLock { stopReason = .aborted }
+        state.withLockedValue { $0.stopReason = .aborted }
         var m = finalize()
         m.errorMessage = "Request was aborted"
         return m
     }
 
-    private func usageLocked() -> Usage {
-        var usage = turnUsage ?? Usage(output: outputTokens)
+    private func usageLocked(_ state: State) -> Usage {
+        var usage = state.turnUsage ?? Usage(output: state.outputTokens)
         usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
         usage.cost = calculateCost(model: model, usage: usage)
         return usage

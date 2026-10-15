@@ -1,12 +1,13 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Process-local registry for live and parked child transcripts.
 ///
 /// The registry intentionally stores messages instead of file paths. The
 /// paired `agent_history` tool can therefore expose only children launched by
 /// this parent catalog and cannot read arbitrary files.
-public final class SubagentHistoryStore: @unchecked Sendable {
+public final class SubagentHistoryStore: Sendable {
     private enum Scope: Hashable {
         case anonymous
         case session(String)
@@ -35,14 +36,17 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         token == nil || entry.runToken == token
     }
 
-    private let lock = NSLock()
+    private struct State {
+        var entries: [String: Entry] = [:]
+        var childSessionIds: [String] = []
+        var evictedEntriesByScope: [Scope: Int] = [:]
+        var reservedAgentIds: [Scope: Set<String>] = [:]
+        var agentIdCounters: [Scope: [String: Int]] = [:]
+    }
+
+    private let state = NIOLockedValueBox(State())
     private let maxTerminalEntries: Int
     private let maxEstimatedBytes: Int
-    private var entries: [String: Entry] = [:]
-    private var childSessionIds: [String] = []
-    private var evictedEntriesByScope: [Scope: Int] = [:]
-    private var reservedAgentIds: [Scope: Set<String>] = [:]
-    private var agentIdCounters: [Scope: [String: Int]] = [:]
 
     public init(
         maxTerminalEntries: Int = 32,
@@ -53,20 +57,20 @@ public final class SubagentHistoryStore: @unchecked Sendable {
     }
 
     public func retention(parentSessionId: String? = nil) -> SubagentHistoryRetention {
-        lock.withLock {
+        state.withLockedValue { state in
             SubagentHistoryRetention(
                 processLocal: true,
                 maxTerminalEntries: maxTerminalEntries,
                 maxEstimatedBytes: maxEstimatedBytes,
-                evictedEntries: evictedEntriesByScope[Scope(parentSessionId), default: 0]
+                evictedEntries: state.evictedEntriesByScope[Scope(parentSessionId), default: 0]
             )
         }
     }
 
     public func list(parentSessionId: String? = nil) -> [SubagentHistorySnapshot] {
-        lock.withLock {
-            childSessionIds.compactMap { childSessionId in
-                guard let entry = entries[childSessionId],
+        state.withLockedValue { state in
+            state.childSessionIds.compactMap { childSessionId in
+                guard let entry = state.entries[childSessionId],
                       entry.parentSessionId == parentSessionId else {
                     return nil
                 }
@@ -79,8 +83,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         childSessionId: String,
         parentSessionId: String? = nil
     ) -> SubagentHistorySnapshot? {
-        lock.withLock {
-            guard let entry = entries[childSessionId],
+        state.withLockedValue { state in
+            guard let entry = state.entries[childSessionId],
                   entry.parentSessionId == parentSessionId else {
                 return nil
             }
@@ -93,8 +97,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         agentId: String,
         parentSessionId: String? = nil
     ) -> SubagentHistorySnapshot? {
-        lock.withLock { entryId(agentId: agentId, parentSessionId: parentSessionId) }
-            .flatMap { id in lock.withLock { entries[id]?.snapshot } }
+        state.withLockedValue { entryId(in: $0, agentId: agentId, parentSessionId: parentSessionId) }
+            .flatMap { id in state.withLockedValue { $0.entries[id]?.snapshot } }
     }
 
     /// The child any of whose runs has this background task id.
@@ -102,8 +106,10 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         taskId: String,
         parentSessionId: String? = nil
     ) -> SubagentHistorySnapshot? {
-        lock.withLock {
-            childSessionIds.reversed().lazy.compactMap { self.entries[$0] }.first {
+        state.withLockedValue { state in
+            // The lazy transform escapes, so it cannot capture the inout state.
+            let entries = state.entries
+            return state.childSessionIds.reversed().lazy.compactMap { entries[$0] }.first {
                 $0.parentSessionId == parentSessionId
                     && ($0.snapshot.taskId == taskId
                         || $0.snapshot.runs.contains { $0.taskId == taskId })
@@ -119,10 +125,10 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         requested: String?,
         subagentType: String
     ) throws -> String {
-        try lock.withLock {
+        try state.withLockedValue { state in
             let scope = Scope(parentSessionId)
-            var reserved = reservedAgentIds[scope, default: []]
-            let taken = Set(entries.values.compactMap { entry -> String? in
+            var reserved = state.reservedAgentIds[scope, default: []]
+            let taken = Set(state.entries.values.compactMap { entry -> String? in
                 guard Scope(entry.parentSessionId) == scope else { return nil }
                 return entry.snapshot.agentId.lowercased()
             }).union(reserved)
@@ -135,7 +141,7 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 }
                 agentId = requested
             } else {
-                var counters = agentIdCounters[scope, default: [:]]
+                var counters = state.agentIdCounters[scope, default: [:]]
                 var next = counters[subagentType, default: 0]
                 var candidate: String
                 repeat {
@@ -143,20 +149,20 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                     candidate = "\(subagentType)-\(next)"
                 } while taken.contains(candidate.lowercased())
                 counters[subagentType] = next
-                agentIdCounters[scope] = counters
+                state.agentIdCounters[scope] = counters
                 agentId = candidate
             }
             reserved.insert(agentId.lowercased())
-            reservedAgentIds[scope] = reserved
+            state.reservedAgentIds[scope] = reserved
             return agentId
         }
     }
 
     /// Give back a reserved `agent_id` whose launch failed before it began.
     func releaseAgentId(_ agentId: String, parentSessionId: String?) {
-        lock.withLock {
+        state.withLockedValue { state in
             let scope = Scope(parentSessionId)
-            reservedAgentIds[scope]?.remove(agentId.lowercased())
+            state.reservedAgentIds[scope]?.remove(agentId.lowercased())
         }
     }
 
@@ -175,8 +181,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         firstMessageIndex: Int? = nil
     ) {
         let now = Timestamp.now()
-        lock.withLock {
-            if var existing = entries[childSessionId] {
+        state.withLockedValue { state in
+            if var existing = state.entries[childSessionId] {
                 // A run that already finished, or a stale one, must not take
                 // the entry back from the run that owns it now.
                 if let runToken, let current = existing.runToken, current != runToken { return }
@@ -195,13 +201,13 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 if let awaitingTaskId {
                     existing.awaitingTaskId = awaitingTaskId
                 }
-                entries[childSessionId] = existing
+                state.entries[childSessionId] = existing
                 return
             }
             let agentId = agentId ?? childSessionId
             let scope = Scope(parentSessionId)
-            reservedAgentIds[scope]?.remove(agentId.lowercased())
-            entries[childSessionId] = Entry(
+            state.reservedAgentIds[scope]?.remove(agentId.lowercased())
+            state.entries[childSessionId] = Entry(
                 parentSessionId: parentSessionId,
                 snapshot: SubagentHistorySnapshot(
                     childSessionId: childSessionId,
@@ -224,22 +230,22 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 modelOverride: modelOverride,
                 runToken: runToken
             )
-            childSessionIds.append(childSessionId)
+            state.childSessionIds.append(childSessionId)
         }
     }
 
     func attachTask(_ taskId: String, childSessionId: String) {
-        lock.withLock {
-            guard var entry = entries[childSessionId] else { return }
+        state.withLockedValue { state in
+            guard var entry = state.entries[childSessionId] else { return }
             entry.snapshot.taskId = taskId
             if !entry.snapshot.runs.isEmpty {
                 entry.snapshot.runs[entry.snapshot.runs.count - 1].taskId = taskId
             }
             entry.awaitingTaskId = false
             entry.snapshot.updatedAt = Timestamp.now()
-            entries[childSessionId] = entry
+            state.entries[childSessionId] = entry
             if !entry.snapshot.status.isActive {
-                pruneTerminalEntries(parentSessionId: entry.parentSessionId)
+                pruneTerminalEntries(in: &state, parentSessionId: entry.parentSessionId)
             }
         }
     }
@@ -251,8 +257,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         liveMessage: Message?,
         currentActivity: String?
     ) {
-        lock.withLock {
-            guard var entry = entries[childSessionId], Self.owns(runToken, entry) else { return }
+        state.withLockedValue { state in
+            guard var entry = state.entries[childSessionId], Self.owns(runToken, entry) else { return }
             entry.snapshot.messages = messages
             entry.snapshot.liveMessage = liveMessage
             if entry.snapshot.status.isActive, let currentActivity {
@@ -262,7 +268,7 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 entry.snapshot.currentActivity = nil
             }
             entry.snapshot.updatedAt = Timestamp.now()
-            entries[childSessionId] = entry
+            state.entries[childSessionId] = entry
         }
     }
 
@@ -276,8 +282,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         messages: [Message]? = nil,
         errorMessage: String? = nil
     ) {
-        lock.withLock {
-            guard var entry = entries[childSessionId], Self.owns(runToken, entry) else { return }
+        state.withLockedValue { state in
+            guard var entry = state.entries[childSessionId], Self.owns(runToken, entry) else { return }
             let now = Timestamp.now()
             if let messages {
                 entry.snapshot.messages = messages
@@ -294,8 +300,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
             }
             entry.live = nil
             entry.runToken = nil
-            entries[childSessionId] = entry
-            pruneTerminalEntries(parentSessionId: entry.parentSessionId)
+            state.entries[childSessionId] = entry
+            pruneTerminalEntries(in: &state, parentSessionId: entry.parentSessionId)
         }
     }
 
@@ -309,12 +315,12 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         parentSessionId: String?,
         message: String
     ) -> SubagentFollowUpClaim {
-        lock.withLock {
-            guard let id = entryId(agentId: agentId, parentSessionId: parentSessionId),
-                  var entry = entries[id] else {
+        state.withLockedValue { state in
+            guard let id = entryId(in: state, agentId: agentId, parentSessionId: parentSessionId),
+                  var entry = state.entries[id] else {
                 let scope = Scope(parentSessionId)
-                let known = childSessionIds.compactMap { childSessionId -> String? in
-                    guard let entry = entries[childSessionId],
+                let known = state.childSessionIds.compactMap { childSessionId -> String? in
+                    guard let entry = state.entries[childSessionId],
                           Scope(entry.parentSessionId) == scope else { return nil }
                     return entry.snapshot.agentId
                 }
@@ -329,7 +335,7 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 // Waiting for capacity, or a claimed resume that has not
                 // begun: the run delivers these when it attaches.
                 entry.pendingSteers.append(message)
-                entries[id] = entry
+                state.entries[id] = entry
                 return .delivered(entry.snapshot)
             case .running:
                 // Starting up or settling after its last step: no agent to
@@ -353,7 +359,7 @@ public final class SubagentHistoryStore: @unchecked Sendable {
                 status: .queued,
                 startedAt: now
             ))
-            entries[id] = entry
+            state.entries[id] = entry
             return .resume(SubagentResumeTicket(
                 childSessionId: id,
                 agentId: entry.snapshot.agentId,
@@ -370,8 +376,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
 
     /// Undo a resume claim whose run never launched.
     func abandonFollowUp(_ ticket: SubagentResumeTicket, errorMessage: String) {
-        lock.withLock {
-            guard var entry = entries[ticket.childSessionId],
+        state.withLockedValue { state in
+            guard var entry = state.entries[ticket.childSessionId],
                   entry.snapshot.status == .queued,
                   entry.snapshot.runs.last?.trigger == .send else { return }
             entry.snapshot.runs.removeLast()
@@ -382,21 +388,21 @@ public final class SubagentHistoryStore: @unchecked Sendable {
             // Follow-ups acknowledged meanwhile stay queued for the next
             // resume, behind the ones this claim carried.
             entry.pendingSteers = ticket.carriedMessages + entry.pendingSteers
-            entries[ticket.childSessionId] = entry
+            state.entries[ticket.childSessionId] = entry
         }
     }
 
     /// Register the child's live agent for the duration of a run. Follow-ups
     /// that arrived while it was queued are delivered now.
     func attachLive(childSessionId: String, runToken: UUID? = nil, live: SubagentLiveChild) {
-        lock.withLock {
-            guard var entry = entries[childSessionId], Self.owns(runToken, entry) else { return }
+        state.withLockedValue { state in
+            guard var entry = state.entries[childSessionId], Self.owns(runToken, entry) else { return }
             for message in entry.pendingSteers {
                 live.deliver(message)
             }
             entry.pendingSteers.removeAll()
             entry.live = live
-            entries[childSessionId] = entry
+            state.entries[childSessionId] = entry
         }
     }
 
@@ -405,8 +411,8 @@ public final class SubagentHistoryStore: @unchecked Sendable {
     /// run. Holding the store lock makes this atomic with `claimFollowUp`, so
     /// no follow-up can land between the check and the detach.
     func detachLiveIfSettled(childSessionId: String, runToken: UUID? = nil) -> Bool {
-        lock.withLock {
-            guard var entry = entries[childSessionId],
+        state.withLockedValue { state in
+            guard var entry = state.entries[childSessionId],
                   Self.owns(runToken, entry),
                   let live = entry.live else { return true }
             for message in entry.pendingSteers {
@@ -414,28 +420,28 @@ public final class SubagentHistoryStore: @unchecked Sendable {
             }
             entry.pendingSteers.removeAll()
             guard !live.hasQueuedSteering else {
-                entries[childSessionId] = entry
+                state.entries[childSessionId] = entry
                 return false
             }
             entry.live = nil
-            entries[childSessionId] = entry
+            state.entries[childSessionId] = entry
             return true
         }
     }
 
-    private func entryId(agentId: String, parentSessionId: String?) -> String? {
+    private func entryId(in state: State, agentId: String, parentSessionId: String?) -> String? {
         let wanted = agentId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return childSessionIds.last { childSessionId in
-            guard let entry = entries[childSessionId] else { return false }
+        return state.childSessionIds.last { childSessionId in
+            guard let entry = state.entries[childSessionId] else { return false }
             return entry.parentSessionId == parentSessionId
                 && entry.snapshot.agentId.lowercased() == wanted
         }
     }
 
-    private func pruneTerminalEntries(parentSessionId: String?) {
+    private func pruneTerminalEntries(in state: inout State, parentSessionId: String?) {
         let scope = Scope(parentSessionId)
-        var terminalIds = childSessionIds.filter { childSessionId in
-            guard let entry = entries[childSessionId],
+        var terminalIds = state.childSessionIds.filter { childSessionId in
+            guard let entry = state.entries[childSessionId],
                   Scope(entry.parentSessionId) == scope,
                   !entry.awaitingTaskId else { return false }
             return !entry.snapshot.status.isActive
@@ -443,18 +449,18 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         // Least recently active first: a child resumed a moment ago is worth
         // more than one that finished long before it.
         let order = Dictionary(
-            childSessionIds.enumerated().map { ($1, $0) },
+            state.childSessionIds.enumerated().map { ($1, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         terminalIds.sort { lhs, rhs in
-            let left = entries[lhs]?.snapshot.updatedAt ?? 0
-            let right = entries[rhs]?.snapshot.updatedAt ?? 0
+            let left = state.entries[lhs]?.snapshot.updatedAt ?? 0
+            let right = state.entries[rhs]?.snapshot.updatedAt ?? 0
             if left != right { return left < right }
             return order[lhs, default: 0] < order[rhs, default: 0]
         }
         func estimatedBytes() -> Int {
             terminalIds.reduce(0) { total, childSessionId in
-                guard let snapshot = entries[childSessionId]?.snapshot else { return total }
+                guard let snapshot = state.entries[childSessionId]?.snapshot else { return total }
                 let encoded = (try? JSONEncoder().encode(snapshot.messages))?.count ?? 0
                 return total + encoded + snapshot.prompt.utf8.count
             }
@@ -464,9 +470,9 @@ public final class SubagentHistoryStore: @unchecked Sendable {
         while terminalIds.count > maxTerminalEntries
             || (bytes > maxEstimatedBytes && terminalIds.count > 1) {
             let removed = terminalIds.removeFirst()
-            guard let snapshot = entries.removeValue(forKey: removed)?.snapshot else { continue }
-            childSessionIds.removeAll { $0 == removed }
-            evictedEntriesByScope[scope, default: 0] += 1
+            guard let snapshot = state.entries.removeValue(forKey: removed)?.snapshot else { continue }
+            state.childSessionIds.removeAll { $0 == removed }
+            state.evictedEntriesByScope[scope, default: 0] += 1
             bytes -= ((try? JSONEncoder().encode(snapshot.messages))?.count ?? 0)
                 + snapshot.prompt.utf8.count
         }

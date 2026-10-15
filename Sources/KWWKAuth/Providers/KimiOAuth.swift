@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 // MARK: - Kimi For Coding (Moonshot coding plan)
 //
@@ -152,8 +153,7 @@ public enum KimiOAuth {
     /// may reject a refresh whose `X-Msh-Device-Id` differs from login's, so
     /// the id must at least survive the process even when it can't survive
     /// a restart.
-    private static let fallbackLock = NSLock()
-    nonisolated(unsafe) private static var fallbackDeviceId: String?
+    private static let fallbackDeviceId = NIOLockedValueBox<String?>(nil)
 
     /// Read (or create, 0600) the stable device id beside the OAuth store.
     /// Best-effort: an unwritable directory falls back to one id per process.
@@ -178,10 +178,10 @@ public enum KimiOAuth {
             attributes: [.posixPermissions: 0o600]
         )
         if wrote { return fresh }
-        fallbackLock.lock()
-        defer { fallbackLock.unlock() }
-        if let cached = fallbackDeviceId { return cached }
-        fallbackDeviceId = fresh
-        return fresh
+        return fallbackDeviceId.withLockedValue { cached in
+            if let cached { return cached }
+            cached = fresh
+            return fresh
+        }
     }
 }

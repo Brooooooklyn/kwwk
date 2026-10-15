@@ -1,5 +1,6 @@
 import Foundation
 import NIO
+import NIOConcurrencyHelpers
 import NIOHTTP1
 
 /// Single-shot localhost HTTP server used during OAuth authorization-code
@@ -9,7 +10,7 @@ import NIOHTTP1
 ///
 /// Backed by SwiftNIO so the same implementation runs on macOS and Linux —
 /// the previous `Network.framework` version only linked on Apple.
-public final class OAuthCallbackServer: @unchecked Sendable {
+public final class OAuthCallbackServer: Sendable {
     public let port: UInt16
     public let path: String
     public let successHTML: String
@@ -24,16 +25,19 @@ public final class OAuthCallbackServer: @unchecked Sendable {
     public let surfacesProviderErrors: Bool
 
     private let group: MultiThreadedEventLoopGroup
-    private let lock = NSLock()
-    private var channel: Channel?
-    private var continuation: CheckedContinuation<[String: String], Error>?
-    private var resolved = false
-    private var cancelled = false
-    // A callback can land between `start()` binding the port and
-    // `waitForCallback()` registering its continuation (fast redirects; the
-    // login flow hands out the URL before it awaits). Buffer that early
-    // result so the wait returns it instead of "already resolved".
-    private var pendingResult: Result<[String: String], OAuthError>?
+    private let state = NIOLockedValueBox(State())
+
+    private struct State {
+        var channel: Channel?
+        var continuation: CheckedContinuation<[String: String], Error>?
+        var resolved = false
+        var cancelled = false
+        // A callback can land between `start()` binding the port and
+        // `waitForCallback()` registering its continuation (fast redirects; the
+        // login flow hands out the URL before it awaits). Buffer that early
+        // result so the wait returns it instead of "already resolved".
+        var pendingResult: Result<[String: String], OAuthError>?
+    }
 
     public init(
         port: UInt16,
@@ -72,21 +76,19 @@ public final class OAuthCallbackServer: @unchecked Sendable {
     /// `waitForCallback()`, which starts via NIO's async future bridge and does
     /// not block the caller's executor.
     public func start() throws {
-        lock.lock()
-        if channel != nil { lock.unlock(); return }
-        lock.unlock()
+        if state.withLockedValue({ $0.channel != nil }) { return }
 
         let ch = try makeBootstrap().bind(host: "127.0.0.1", port: Int(port)).wait()
-        lock.withLock { channel = ch }
+        state.withLockedValue { $0.channel = ch }
     }
 
     private func startAsync() async throws {
         // Already listening, or already resolved (`stop()` ran after an early
         // callback) — don't re-bind a port nobody will answer on.
-        if lock.withLock({ channel != nil || resolved }) { return }
+        if state.withLockedValue({ $0.channel != nil || $0.resolved }) { return }
 
         let ch = try await makeBootstrap().bind(host: "127.0.0.1", port: Int(port)).get()
-        lock.withLock { channel = ch }
+        state.withLockedValue { $0.channel = ch }
     }
 
     private func makeBootstrap() -> ServerBootstrap {
@@ -111,25 +113,25 @@ public final class OAuthCallbackServer: @unchecked Sendable {
         try await startAsync()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { cont in
-                lock.lock()
-                if resolved {
-                    let result = pendingResult
-                    pendingResult = nil
-                    lock.unlock()
-                    if let result {
-                        cont.resume(with: result)
-                    } else {
-                        cont.resume(throwing: OAuthError.transport("callback server already resolved"))
+                // Decide under the lock; resume (if at all) after releasing it.
+                let immediate: Result<[String: String], Error>? = state.withLockedValue { state in
+                    if state.resolved {
+                        let result = state.pendingResult
+                        state.pendingResult = nil
+                        if let result {
+                            return result.mapError { $0 as Error }
+                        }
+                        return .failure(OAuthError.transport("callback server already resolved"))
                     }
-                    return
+                    if state.cancelled {
+                        return .failure(CancellationError())
+                    }
+                    state.continuation = cont
+                    return nil
                 }
-                if cancelled {
-                    lock.unlock()
-                    cont.resume(throwing: CancellationError())
-                    return
+                if let immediate {
+                    cont.resume(with: immediate)
                 }
-                continuation = cont
-                lock.unlock()
             }
         } onCancel: {
             cancel()
@@ -138,39 +140,44 @@ public final class OAuthCallbackServer: @unchecked Sendable {
 
     /// Stop listening; subsequent connections are rejected.
     public func stop() {
-        lock.lock()
-        let ch = channel
-        channel = nil
-        lock.unlock()
+        let ch = state.withLockedValue { state -> Channel? in
+            let ch = state.channel
+            state.channel = nil
+            return ch
+        }
         _ = ch?.close()
     }
 
     /// Unblock `waitForCallback()` with a `CancellationError`. Callers use
     /// this to abort when the user declines manually.
     public func cancel() {
-        let cont: CheckedContinuation<[String: String], Error>?
-        lock.lock()
-        if resolved { lock.unlock(); return }
-        cancelled = true
-        cont = continuation
-        continuation = nil
-        lock.unlock()
-        cont?.resume(throwing: CancellationError())
+        let outcome: (resolved: Bool, cont: CheckedContinuation<[String: String], Error>?) =
+            state.withLockedValue { state in
+                if state.resolved { return (true, nil) }
+                state.cancelled = true
+                let cont = state.continuation
+                state.continuation = nil
+                return (false, cont)
+            }
+        if outcome.resolved { return }
+        outcome.cont?.resume(throwing: CancellationError())
         stop()
     }
 
     // MARK: - Called by `CallbackHandler` when a request resolves the flow
 
     fileprivate func resolve(_ result: Result<[String: String], OAuthError>) {
-        let cont: CheckedContinuation<[String: String], Error>?
-        lock.lock()
-        if resolved { lock.unlock(); return }
-        resolved = true
-        cont = continuation
-        continuation = nil
-        if cont == nil { pendingResult = result }
-        lock.unlock()
-        cont?.resume(with: result)
+        let outcome: (alreadyResolved: Bool, cont: CheckedContinuation<[String: String], Error>?) =
+            state.withLockedValue { state in
+                if state.resolved { return (true, nil) }
+                state.resolved = true
+                let cont = state.continuation
+                state.continuation = nil
+                if cont == nil { state.pendingResult = result }
+                return (false, cont)
+            }
+        if outcome.alreadyResolved { return }
+        outcome.cont?.resume(with: result)
         stop()
     }
 

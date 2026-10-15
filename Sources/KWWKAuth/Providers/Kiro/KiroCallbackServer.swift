@@ -1,5 +1,7 @@
+import DequeModule
 import Foundation
 import NIO
+import NIOConcurrencyHelpers
 import NIOHTTP1
 
 /// The default `KiroLoopbackListener`: a SwiftNIO HTTP server on 127.0.0.1
@@ -7,13 +9,16 @@ import NIOHTTP1
 /// and writes back the page or redirect it answers with. Unlike
 /// `OAuthCallbackServer` it keeps listening after a request, since an AWS
 /// sign-in comes back twice.
-public final class KiroCallbackServer: KiroLoopbackListener, @unchecked Sendable {
+public final class KiroCallbackServer: KiroLoopbackListener, Sendable {
     private let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-    private let lock = NSLock()
-    private var channel: Channel?
-    private var pending: [KiroCallback] = []
-    private var waiter: CheckedContinuation<KiroCallback, Error>?
-    private var stopped = false
+    private let state = NIOLockedValueBox(State())
+
+    private struct State {
+        var channel: Channel?
+        var pending: Deque<KiroCallback> = []
+        var waiter: CheckedContinuation<KiroCallback, Error>?
+        var stopped = false
+    }
 
     public init() {}
 
@@ -35,7 +40,7 @@ public final class KiroCallbackServer: KiroLoopbackListener, @unchecked Sendable
             }
         for port in ports {
             guard let bound = try? await bootstrap.bind(host: "127.0.0.1", port: Int(port)).get() else { continue }
-            lock.withLock { channel = bound }
+            state.withLockedValue { $0.channel = bound }
             return UInt16(bound.localAddress?.port ?? Int(port))
         }
         throw OAuthError.transport(
@@ -46,44 +51,46 @@ public final class KiroCallbackServer: KiroLoopbackListener, @unchecked Sendable
     public func nextCallback() async throws -> KiroCallback {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                lock.lock()
-                if !pending.isEmpty {
-                    let callback = pending.removeFirst()
-                    lock.unlock()
-                    continuation.resume(returning: callback)
-                } else if stopped || Task.isCancelled {
-                    lock.unlock()
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    waiter = continuation
-                    lock.unlock()
+                // Decide under the lock; resume (if at all) after releasing it.
+                let immediate: Result<KiroCallback, Error>? = state.withLockedValue { state in
+                    if let callback = state.pending.popFirst() {
+                        return .success(callback)
+                    } else if state.stopped || Task.isCancelled {
+                        return .failure(CancellationError())
+                    } else {
+                        state.waiter = continuation
+                        return nil
+                    }
+                }
+                if let immediate {
+                    continuation.resume(with: immediate)
                 }
             }
         } onCancel: {
-            let waiting = lock.withLock { () -> CheckedContinuation<KiroCallback, Error>? in
-                defer { waiter = nil }
-                return waiter
+            let waiting = state.withLockedValue { state -> CheckedContinuation<KiroCallback, Error>? in
+                defer { state.waiter = nil }
+                return state.waiter
             }
             waiting?.resume(throwing: CancellationError())
         }
     }
 
     public func stop() {
-        let (bound, waiting) = lock.withLock { () -> (Channel?, CheckedContinuation<KiroCallback, Error>?) in
-            defer { channel = nil; waiter = nil; stopped = true }
-            return (channel, waiter)
+        let (bound, waiting) = state.withLockedValue { state -> (Channel?, CheckedContinuation<KiroCallback, Error>?) in
+            defer { state.channel = nil; state.waiter = nil; state.stopped = true }
+            return (state.channel, state.waiter)
         }
         waiting?.resume(throwing: CancellationError())
         _ = bound?.close()
     }
 
     fileprivate func deliver(_ callback: KiroCallback) {
-        let waiting = lock.withLock { () -> CheckedContinuation<KiroCallback, Error>? in
-            guard let waiter else {
-                pending.append(callback)
+        let waiting = state.withLockedValue { state -> CheckedContinuation<KiroCallback, Error>? in
+            guard let waiter = state.waiter else {
+                state.pending.append(callback)
                 return nil
             }
-            self.waiter = nil
+            state.waiter = nil
             return waiter
         }
         waiting?.resume(returning: callback)

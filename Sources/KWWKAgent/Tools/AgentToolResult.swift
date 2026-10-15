@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Partial or final result returned by an `AgentTool.execute` call.
 public struct AgentToolResult: Sendable, Hashable {
@@ -40,10 +41,9 @@ public struct AgentToolResult: Sendable, Hashable {
 
 /// A tiny commit/rollback token for side-channel delivery ownership. Identity
 /// hashing keeps `AgentToolResult` Hashable without comparing closures.
-final class AgentToolRetentionLease: @unchecked Sendable, Hashable {
+final class AgentToolRetentionLease: Sendable, Hashable {
     private let id = UUID()
-    private let lock = NSLock()
-    private var resolution: Resolution?
+    private let resolution = NIOLockedValueBox<Resolution?>(nil)
     private let onCommit: @Sendable () -> Void
     private let onRollback: @Sendable () -> Void
 
@@ -65,7 +65,7 @@ final class AgentToolRetentionLease: @unchecked Sendable, Hashable {
     }
 
     func commit() {
-        let shouldRun = lock.withLock { () -> Bool in
+        let shouldRun = resolution.withLockedValue { resolution -> Bool in
             guard resolution == nil else { return false }
             resolution = .committed
             return true
@@ -74,7 +74,7 @@ final class AgentToolRetentionLease: @unchecked Sendable, Hashable {
     }
 
     func rollback() {
-        let shouldRun = lock.withLock { () -> Bool in
+        let shouldRun = resolution.withLockedValue { resolution -> Bool in
             guard resolution == nil else { return false }
             resolution = .rolledBack
             return true

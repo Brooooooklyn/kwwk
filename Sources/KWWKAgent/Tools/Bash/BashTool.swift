@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// SDK-safe default shell for command execution. CLI entry points may override
 /// this with the user's configured shell after explicitly opting into CLI
@@ -694,15 +695,18 @@ private func runBashLegacy(
 /// A single background thread runs the blocking `waitpid`; its cached result
 /// fans out to every registered `onExit` callback, so the soft-timeout race and
 /// a later adopted wait share one reap.
-private final class ForegroundBashExecution: @unchecked Sendable {
+private final class ForegroundBashExecution: Sendable {
     let spawned: SpawnedBashProcess
     let outputFile: URL
     let control: BashProcessControl
     let startedAt: Date
-    private let lock = NSLock()
-    private var exitWaiterStarted = false
-    private var exitStatus: SpawnedBashProcess.ExitStatus?
-    private var exitCallbacks: [@Sendable (SpawnedBashProcess.ExitStatus) -> Void] = []
+    private let state = NIOLockedValueBox(State())
+
+    private struct State {
+        var exitWaiterStarted = false
+        var exitStatus: SpawnedBashProcess.ExitStatus?
+        var exitCallbacks: [@Sendable (SpawnedBashProcess.ExitStatus) -> Void] = []
+    }
 
     init(
         spawned: SpawnedBashProcess,
@@ -770,9 +774,9 @@ private final class ForegroundBashExecution: @unchecked Sendable {
 
     private func onExit(_ callback: @escaping @Sendable (SpawnedBashProcess.ExitStatus) -> Void) {
         startExitWaiterIfNeeded()
-        let status: SpawnedBashProcess.ExitStatus? = lock.withLock {
-            if let exitStatus { return exitStatus }
-            exitCallbacks.append(callback)
+        let status: SpawnedBashProcess.ExitStatus? = state.withLockedValue { state in
+            if let exitStatus = state.exitStatus { return exitStatus }
+            state.exitCallbacks.append(callback)
             return nil
         }
         if let status {
@@ -781,9 +785,9 @@ private final class ForegroundBashExecution: @unchecked Sendable {
     }
 
     private func startExitWaiterIfNeeded() {
-        let shouldStart: Bool = lock.withLock {
-            if exitWaiterStarted { return false }
-            exitWaiterStarted = true
+        let shouldStart: Bool = state.withLockedValue { state in
+            if state.exitWaiterStarted { return false }
+            state.exitWaiterStarted = true
             return true
         }
         guard shouldStart else { return }
@@ -796,11 +800,11 @@ private final class ForegroundBashExecution: @unchecked Sendable {
     }
 
     private func finishExit(status: SpawnedBashProcess.ExitStatus) {
-        let callbacks: [@Sendable (SpawnedBashProcess.ExitStatus) -> Void] = lock.withLock {
-            if exitStatus != nil { return [] }
-            exitStatus = status
-            let callbacks = exitCallbacks
-            exitCallbacks.removeAll()
+        let callbacks: [@Sendable (SpawnedBashProcess.ExitStatus) -> Void] = state.withLockedValue { state in
+            if state.exitStatus != nil { return [] }
+            state.exitStatus = status
+            let callbacks = state.exitCallbacks
+            state.exitCallbacks.removeAll()
             return callbacks
         }
         for callback in callbacks {
@@ -809,18 +813,17 @@ private final class ForegroundBashExecution: @unchecked Sendable {
     }
 }
 
-private final class OneShotContinuation<Value: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Value, Never>?
+private final class OneShotContinuation<Value: Sendable>: Sendable {
+    private let continuation: NIOLockedValueBox<CheckedContinuation<Value, Never>?>
 
     init(_ continuation: CheckedContinuation<Value, Never>) {
-        self.continuation = continuation
+        self.continuation = NIOLockedValueBox(continuation)
     }
 
     func resume(returning value: Value) {
-        let continuation: CheckedContinuation<Value, Never>? = lock.withLock {
-            let continuation = self.continuation
-            self.continuation = nil
+        let continuation: CheckedContinuation<Value, Never>? = self.continuation.withLockedValue { stored in
+            let continuation = stored
+            stored = nil
             return continuation
         }
         continuation?.resume(returning: value)

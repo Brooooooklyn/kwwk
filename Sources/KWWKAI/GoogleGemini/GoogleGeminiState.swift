@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 // MARK: - Mutable state
 
@@ -19,12 +20,14 @@ final class GoogleGeminiState: @unchecked Sendable {
         case toolUse(id: String, call: ToolCall)
     }
 
-    private let lock = NSLock()
-    private var blocks: [Int: Block] = [:]
-    private var order: [Int] = []
-    private var textIndex: Int?
-    private var thinkingIndex: Int?
-    private var endedIndices: Set<Int> = []
+    private struct State {
+        var blocks: [Int: Block] = [:]
+        var order: [Int] = []
+        var textIndex: Int?
+        var thinkingIndex: Int?
+        var endedIndices: Set<Int> = []
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, provider: String, modelId: String) {
         self.api = api
@@ -33,41 +36,41 @@ final class GoogleGeminiState: @unchecked Sendable {
     }
 
     func noteTextBlock() -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let idx = textIndex { return (idx, false) }
-            let idx = order.count
-            textIndex = idx
-            order.append(idx)
-            blocks[idx] = .text(TextContent(text: ""))
+        state.withLockedValue { state in
+            if let idx = state.textIndex { return (idx, false) }
+            let idx = state.order.count
+            state.textIndex = idx
+            state.order.append(idx)
+            state.blocks[idx] = .text(TextContent(text: ""))
             return (idx, true)
         }
     }
 
     func noteThinkingBlock() -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let idx = thinkingIndex { return (idx, false) }
-            let idx = order.count
-            thinkingIndex = idx
-            order.append(idx)
-            blocks[idx] = .thinking(ThinkingContent(thinking: ""))
+        state.withLockedValue { state in
+            if let idx = state.thinkingIndex { return (idx, false) }
+            let idx = state.order.count
+            state.thinkingIndex = idx
+            state.order.append(idx)
+            state.blocks[idx] = .thinking(ThinkingContent(thinking: ""))
             return (idx, true)
         }
     }
 
     func appendText(index: Int, text: String) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.text += text
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
     }
 
     func appendThinking(index: Int, text: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinking += text
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
@@ -78,44 +81,44 @@ final class GoogleGeminiState: @unchecked Sendable {
     }
 
     func setTextSignature(index: Int, sig: String?) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.textSignature = Self.retainSignature(t.textSignature, sig)
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
     }
 
     func setThinkingSignature(index: Int, sig: String?) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinkingSignature = Self.retainSignature(th.thinkingSignature, sig)
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func appendToolCall(id given: String? = nil, name: String, args: JSONValue, signature: String?) -> Int {
-        lock.withLock {
-            let idx = order.count
+        state.withLockedValue { state in
+            let idx = state.order.count
             let id = given ?? "\(GoogleGeminiProvider.mintedIdPrefix)\(idx)-\(Int(Date().timeIntervalSince1970 * 1000))"
             let call = ToolCall(id: id, name: name, arguments: args, thoughtSignature: signature)
-            order.append(idx)
-            blocks[idx] = .toolUse(id: id, call: call)
-            endedIndices.insert(idx)   // Gemini delivers calls atomically.
+            state.order.append(idx)
+            state.blocks[idx] = .toolUse(id: id, call: call)
+            state.endedIndices.insert(idx)   // Gemini delivers calls atomically.
             return idx
         }
     }
 
     func toolCallId(at index: Int) -> String {
-        lock.withLock {
-            if case .toolUse(let id, _) = blocks[index] { return id } else { return "" }
+        state.withLockedValue { state in
+            if case .toolUse(let id, _) = state.blocks[index] { return id } else { return "" }
         }
     }
 
     func hasToolCalls() -> Bool {
-        lock.withLock {
-            blocks.values.contains { if case .toolUse = $0 { return true } else { return false } }
+        state.withLockedValue { state in
+            state.blocks.values.contains { if case .toolUse = $0 { return true } else { return false } }
         }
     }
 
@@ -139,10 +142,10 @@ final class GoogleGeminiState: @unchecked Sendable {
     }
 
     func snapshot() -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             AssistantMessage(
-                content: order.compactMap { idx -> AssistantBlock? in
-                    switch blocks[idx] {
+                content: state.order.compactMap { idx -> AssistantBlock? in
+                    switch state.blocks[idx] {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(_, let call): return .toolCall(call)
@@ -172,10 +175,10 @@ final class GoogleGeminiState: @unchecked Sendable {
     }
 
     func finalizeStreamingBlocks(emit: (AssistantMessageEvent) -> Void) {
-        let indices = lock.withLock { order }
+        let indices = state.withLockedValue { $0.order }
         for idx in indices {
-            if endedIndices.contains(idx) { continue }
-            guard let block = lock.withLock({ blocks[idx] }) else { continue }
+            if state.withLockedValue({ $0.endedIndices.contains(idx) }) { continue }
+            guard let block = state.withLockedValue({ $0.blocks[idx] }) else { continue }
             let partial = snapshot()
             switch block {
             case .text(let t):
@@ -184,7 +187,7 @@ final class GoogleGeminiState: @unchecked Sendable {
                 emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
             case .toolUse: break
             }
-            _ = lock.withLock { endedIndices.insert(idx) }
+            _ = state.withLockedValue { $0.endedIndices.insert(idx) }
         }
     }
 }

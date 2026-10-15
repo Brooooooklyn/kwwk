@@ -1,4 +1,6 @@
 import Foundation
+import DequeModule
+import NIOConcurrencyHelpers
 
 // MARK: - Faux helpers (public API matching pi-ai)
 
@@ -236,7 +238,7 @@ public func registerFauxProvider(_ options: RegisterFauxProviderOptions = .init(
 
 // MARK: - Faux provider implementation
 
-public final class FauxProvider: APIProvider, @unchecked Sendable {
+public final class FauxProvider: APIProvider, Sendable {
     static let defaultAPI = "faux"
     static let defaultProvider = "faux"
     static let defaultModelId = "faux-1"
@@ -253,10 +255,12 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
     private let maxTokenSize: Int
     private let tokensPerSecond: Double?
 
-    private let lock = NSLock()
-    private var pendingResponses: [FauxResponseStep] = []
-    private var callCount = 0
-    private var promptCache: [String: String] = [:]
+    private struct State {
+        var pendingResponses: Deque<FauxResponseStep> = []
+        var callCount = 0
+        var promptCache: [String: String] = [:]
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(
         api: String,
@@ -277,40 +281,34 @@ public final class FauxProvider: APIProvider, @unchecked Sendable {
     // MARK: Registration API
 
     func snapshotState() -> FauxState {
-        lock.lock(); defer { lock.unlock() }
-        return FauxState(callCount: callCount)
+        state.withLockedValue { FauxState(callCount: $0.callCount) }
     }
 
     func setResponses(_ steps: [FauxResponseStep]) {
-        lock.lock(); defer { lock.unlock() }
-        pendingResponses = steps
+        state.withLockedValue { $0.pendingResponses = Deque(steps) }
     }
 
     func appendResponses(_ steps: [FauxResponseStep]) {
-        lock.lock(); defer { lock.unlock() }
-        pendingResponses.append(contentsOf: steps)
+        state.withLockedValue { $0.pendingResponses.append(contentsOf: steps) }
     }
 
     func getPendingResponseCount() -> Int {
-        lock.lock(); defer { lock.unlock() }
-        return pendingResponses.count
+        state.withLockedValue { $0.pendingResponses.count }
     }
 
     private func popResponse() -> FauxResponseStep? {
-        lock.lock(); defer { lock.unlock() }
-        callCount += 1
-        guard !pendingResponses.isEmpty else { return nil }
-        return pendingResponses.removeFirst()
+        state.withLockedValue { state in
+            state.callCount += 1
+            return state.pendingResponses.popFirst()
+        }
     }
 
     private func cachedPrompt(for sessionId: String) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return promptCache[sessionId]
+        state.withLockedValue { $0.promptCache[sessionId] }
     }
 
     private func setCachedPrompt(_ prompt: String, for sessionId: String) {
-        lock.lock(); defer { lock.unlock() }
-        promptCache[sessionId] = prompt
+        state.withLockedValue { $0.promptCache[sessionId] = prompt }
     }
 
     // MARK: APIProvider

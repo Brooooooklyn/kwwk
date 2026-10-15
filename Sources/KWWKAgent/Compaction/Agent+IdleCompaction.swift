@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 extension Agent {
     /// Restart the idle countdown. The agent calls this itself whenever it
@@ -98,42 +99,45 @@ extension Agent {
 /// is already sleeping, so per-keystroke activity costs a lock, not a Task.
 /// The action runs at most once per arm, after the deadline has passed with
 /// no further `arm` or `cancel`.
-final class IdleCompactionTimer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var deadline: TimeInterval?
-    private var action: (@Sendable () async -> Void)?
-    private var task: Task<Void, Never>?
-    private var generation: UInt64 = 0
-    private var _lastAttemptedRevision: UInt64?
+final class IdleCompactionTimer: Sendable {
+    private struct State {
+        var deadline: TimeInterval?
+        var action: (@Sendable () async -> Void)?
+        var task: Task<Void, Never>?
+        var generation: UInt64 = 0
+        var lastAttemptedRevision: UInt64?
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     /// Transcript revision left behind by the last scheduled attempt.
     var lastAttemptedRevision: UInt64? {
-        get { lock.withLock { _lastAttemptedRevision } }
-        set { lock.withLock { _lastAttemptedRevision = newValue } }
+        get { state.withLockedValue { $0.lastAttemptedRevision } }
+        set { state.withLockedValue { $0.lastAttemptedRevision = newValue } }
     }
 
     func arm(after delay: TimeInterval, action: @escaping @Sendable () async -> Void) {
-        lock.withLock {
-            deadline = ProcessInfo.processInfo.systemUptime + delay
-            self.action = action
-            guard task == nil else { return }
-            generation &+= 1
-            let generation = generation
-            task = Task { [weak self] in await self?.run(generation) }
+        state.withLockedValue { state in
+            state.deadline = ProcessInfo.processInfo.systemUptime + delay
+            state.action = action
+            guard state.task == nil else { return }
+            state.generation &+= 1
+            let generation = state.generation
+            state.task = Task { [weak self] in await self?.run(generation) }
         }
     }
 
     func cancel() {
-        lock.withLock {
-            deadline = nil
-            action = nil
-            generation &+= 1
-            task?.cancel()
-            task = nil
+        state.withLockedValue { state in
+            state.deadline = nil
+            state.action = nil
+            state.generation &+= 1
+            state.task?.cancel()
+            state.task = nil
         }
     }
 
-    var isArmed: Bool { lock.withLock { deadline != nil } }
+    var isArmed: Bool { state.withLockedValue { $0.deadline != nil } }
 
     private enum Step {
         case stop
@@ -143,15 +147,18 @@ final class IdleCompactionTimer: @unchecked Sendable {
 
     private func run(_ generation: UInt64) async {
         while true {
-            let step: Step = lock.withLock {
-                guard self.generation == generation, let deadline, let action else { return .stop }
+            let step: Step = state.withLockedValue { state in
+                guard state.generation == generation,
+                      let deadline = state.deadline,
+                      let action = state.action
+                else { return .stop }
                 let remaining = deadline - ProcessInfo.processInfo.systemUptime
                 if remaining > 0 { return .sleep(remaining) }
                 // Release the slot before firing so activity during the
                 // (long) action arms a fresh countdown instead of being lost.
-                self.deadline = nil
-                self.action = nil
-                self.task = nil
+                state.deadline = nil
+                state.action = nil
+                state.task = nil
                 return .fire(action)
             }
             switch step {

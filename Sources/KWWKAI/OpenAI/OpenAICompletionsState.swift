@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Mutable state for OpenAI Completions stream. Tracks content block order
 /// and incremental tool-call JSON buffers.
@@ -20,19 +21,21 @@ final class OpenAICompletionsState: @unchecked Sendable {
         case thinking(ThinkingContent)
         case toolUse(id: String, name: String, json: String, thoughtSignature: String?)
     }
-    private let lock = NSLock()
-    private var blocks: [Int: Block] = [:]
-    private var order: [Int] = []
-    private var textBlockIndex: Int?
-    private var thinkingBlockIndex: Int?
-    /// Map from OpenAI `tool_calls[i].index` → our content index.
-    private var toolCallIndexMap: [Int: Int] = [:]
-    /// Map from a settled tool-call `id` → our content index. Used to attach
-    /// encrypted reasoning details, which arrive keyed by tool-call id.
-    private var toolCallContentIndexById: [String: Int] = [:]
-    /// Reasoning details that arrived before the matching tool-call id settled.
-    private var pendingReasoningById: [String: String] = [:]
-    private var endedIndices: Set<Int> = []
+    private struct State {
+        var blocks: [Int: Block] = [:]
+        var order: [Int] = []
+        var textBlockIndex: Int?
+        var thinkingBlockIndex: Int?
+        /// Map from OpenAI `tool_calls[i].index` → our content index.
+        var toolCallIndexMap: [Int: Int] = [:]
+        /// Map from a settled tool-call `id` → our content index. Used to attach
+        /// encrypted reasoning details, which arrive keyed by tool-call id.
+        var toolCallContentIndexById: [String: Int] = [:]
+        /// Reasoning details that arrived before the matching tool-call id settled.
+        var pendingReasoningById: [String: String] = [:]
+        var endedIndices: Set<Int> = []
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, provider: String, modelId: String, model: Model) {
         self.api = api
@@ -44,23 +47,23 @@ final class OpenAICompletionsState: @unchecked Sendable {
     // MARK: Block book-keeping
 
     func noteTextBlock() -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let idx = textBlockIndex { return (idx, false) }
-            let idx = order.count
-            textBlockIndex = idx
-            order.append(idx)
-            blocks[idx] = .text(TextContent(text: ""))
+        state.withLockedValue { state in
+            if let idx = state.textBlockIndex { return (idx, false) }
+            let idx = state.order.count
+            state.textBlockIndex = idx
+            state.order.append(idx)
+            state.blocks[idx] = .text(TextContent(text: ""))
             return (idx, true)
         }
     }
 
     func noteThinkingBlock() -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let idx = thinkingBlockIndex { return (idx, false) }
-            let idx = order.count
-            thinkingBlockIndex = idx
-            order.append(idx)
-            blocks[idx] = .thinking(ThinkingContent(thinking: ""))
+        state.withLockedValue { state in
+            if let idx = state.thinkingBlockIndex { return (idx, false) }
+            let idx = state.order.count
+            state.thinkingBlockIndex = idx
+            state.order.append(idx)
+            state.blocks[idx] = .thinking(ThinkingContent(thinking: ""))
             return (idx, true)
         }
     }
@@ -70,72 +73,72 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// by is the next call, not more of this one; a fragment with no id, or
     /// repeating the open call's, continues it.
     func noteToolCallBlock(at rawIndex: Int, id: String? = nil) -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let idx = toolCallIndexMap[rawIndex] {
-                guard let id, case .toolUse(let openID, _, _, _) = blocks[idx],
+        state.withLockedValue { state in
+            if let idx = state.toolCallIndexMap[rawIndex] {
+                guard let id, case .toolUse(let openID, _, _, _) = state.blocks[idx],
                       !openID.isEmpty, openID != id else { return (idx, false) }
             }
-            let idx = order.count
-            toolCallIndexMap[rawIndex] = idx
-            order.append(idx)
-            blocks[idx] = .toolUse(id: "", name: "", json: "", thoughtSignature: nil)
+            let idx = state.order.count
+            state.toolCallIndexMap[rawIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .toolUse(id: "", name: "", json: "", thoughtSignature: nil)
             return (idx, true)
         }
     }
 
     func appendText(index: Int, text: String) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.text += text
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
     }
 
     func appendThinking(index: Int, text: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinking += text
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func setThinkingSignature(index: Int, signature: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index], th.thinkingSignature == nil {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index], th.thinkingSignature == nil {
                 th.thinkingSignature = signature
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func updateToolCallID(rawIndex: Int, id: String) {
-        lock.withLock {
-            guard let contentIndex = toolCallIndexMap[rawIndex] else { return }
-            if case .toolUse(_, let name, let json, let sig) = blocks[contentIndex] {
+        state.withLockedValue { state in
+            guard let contentIndex = state.toolCallIndexMap[rawIndex] else { return }
+            if case .toolUse(_, let name, let json, let sig) = state.blocks[contentIndex] {
                 var newSig = sig
-                if let pending = pendingReasoningById.removeValue(forKey: id) { newSig = pending }
-                blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: newSig)
+                if let pending = state.pendingReasoningById.removeValue(forKey: id) { newSig = pending }
+                state.blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: newSig)
             }
-            toolCallContentIndexById[id] = contentIndex
+            state.toolCallContentIndexById[id] = contentIndex
         }
     }
 
     func updateToolCallName(rawIndex: Int, name: String) {
-        lock.withLock {
-            guard let contentIndex = toolCallIndexMap[rawIndex] else { return }
-            if case .toolUse(let id, _, let json, let sig) = blocks[contentIndex] {
-                blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: sig)
+        state.withLockedValue { state in
+            guard let contentIndex = state.toolCallIndexMap[rawIndex] else { return }
+            if case .toolUse(let id, _, let json, let sig) = state.blocks[contentIndex] {
+                state.blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: sig)
             }
         }
     }
 
     func appendToolCallArgs(rawIndex: Int, chunk: String) {
-        lock.withLock {
-            guard let contentIndex = toolCallIndexMap[rawIndex] else { return }
-            if case .toolUse(let id, let name, let json, let sig) = blocks[contentIndex] {
-                blocks[contentIndex] = .toolUse(id: id, name: name, json: json + chunk, thoughtSignature: sig)
+        state.withLockedValue { state in
+            guard let contentIndex = state.toolCallIndexMap[rawIndex] else { return }
+            if case .toolUse(let id, let name, let json, let sig) = state.blocks[contentIndex] {
+                state.blocks[contentIndex] = .toolUse(id: id, name: name, json: json + chunk, thoughtSignature: sig)
             }
         }
     }
@@ -143,12 +146,12 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// Attach an encrypted reasoning detail (serialized JSON) to the tool call
     /// with the matching id, or stash it as pending if the id has not settled.
     func applyReasoningDetail(id: String, serialized: String) {
-        lock.withLock {
-            if let contentIndex = toolCallContentIndexById[id],
-               case .toolUse(let cid, let name, let json, _) = blocks[contentIndex] {
-                blocks[contentIndex] = .toolUse(id: cid, name: name, json: json, thoughtSignature: serialized)
+        state.withLockedValue { state in
+            if let contentIndex = state.toolCallContentIndexById[id],
+               case .toolUse(let cid, let name, let json, _) = state.blocks[contentIndex] {
+                state.blocks[contentIndex] = .toolUse(id: cid, name: name, json: json, thoughtSignature: serialized)
             } else {
-                pendingReasoningById[id] = serialized
+                state.pendingReasoningById[id] = serialized
             }
         }
     }
@@ -197,22 +200,23 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// `call_<id>` the same way, gateway/chat.go). The id is minted once and
     /// kept, so the end event, the final message and the tool result agree.
     private func settleEmptyToolCallIds() {
-        lock.withLock {
-            for idx in order {
-                guard case .toolUse(let id, let name, let json, let sig) = blocks[idx], id.isEmpty else { continue }
+        state.withLockedValue { state in
+            for idx in state.order {
+                guard case .toolUse(let id, let name, let json, let sig) = state.blocks[idx], id.isEmpty
+                else { continue }
                 let minted = "call_"
                     + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24))
-                blocks[idx] = .toolUse(id: minted, name: name, json: json, thoughtSignature: sig)
+                state.blocks[idx] = .toolUse(id: minted, name: name, json: json, thoughtSignature: sig)
             }
         }
     }
 
     private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
         if parseToolArgs { settleEmptyToolCallIds() }
-        return lock.withLock {
+        return state.withLockedValue { state in
             AssistantMessage(
-                content: order.compactMap { idx -> AssistantBlock? in
-                    switch blocks[idx] {
+                content: state.order.compactMap { idx -> AssistantBlock? in
+                    switch state.blocks[idx] {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json, let sig):
@@ -236,11 +240,11 @@ final class OpenAICompletionsState: @unchecked Sendable {
     /// the stream reports a finish reason or runs out of events.
     func finalizeStreamingBlocks(emit: (AssistantMessageEvent) -> Void) {
         settleEmptyToolCallIds()
-        let indices = lock.withLock { order }
+        let indices = state.withLockedValue { $0.order }
         for idx in indices {
-            if endedIndices.contains(idx) { continue }
+            if state.withLockedValue({ $0.endedIndices.contains(idx) }) { continue }
             let partial = snapshot()
-            guard let block = lock.withLock({ blocks[idx] }) else { continue }
+            guard let block = state.withLockedValue({ $0.blocks[idx] }) else { continue }
             switch block {
             case .text(let t):
                 emit(.textEnd(contentIndex: idx, content: t.text, partial: partial))
@@ -255,7 +259,7 @@ final class OpenAICompletionsState: @unchecked Sendable {
                 )
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }
-            _ = lock.withLock { endedIndices.insert(idx) }
+            _ = state.withLockedValue { $0.endedIndices.insert(idx) }
         }
     }
 

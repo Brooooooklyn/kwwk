@@ -1,4 +1,6 @@
 import Foundation
+import DequeModule
+import NIOConcurrencyHelpers
 
 /// An async sequence of `AssistantMessageEvent` values that also exposes the
 /// final settled `AssistantMessage` via `result()`. The stream never throws
@@ -77,113 +79,118 @@ public final class AssistantMessageStream: AsyncSequence, Sendable {
 }
 
 /// Thread-safe queue + awaiters for `AssistantMessageStream`.
-public final class StreamState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer: [AssistantMessageEvent] = []
-    private var eventWaiters: [(id: UUID, cont: CheckedContinuation<AssistantMessageEvent?, Never>)] = []
-    private var resultWaiters: [(id: UUID, cont: CheckedContinuation<AssistantMessage, Never>)] = []
-    private var ended = false
-    private var finalMessage: AssistantMessage?
-    private var latestPartial: AssistantMessage?
+public final class StreamState: Sendable {
+    private typealias EventWaiter = (id: UUID, cont: CheckedContinuation<AssistantMessageEvent?, Never>)
+    private typealias ResultWaiter = (id: UUID, cont: CheckedContinuation<AssistantMessage, Never>)
 
-    // Called under the state lock. A thrown error must not erase prior output.
-    private func settleFailure(_ input: AssistantMessage) -> AssistantMessage {
-        guard input.stopReason == .error || input.stopReason == .aborted else { return input }
-        var message = input
-        if message.content.isEmpty, let partial = latestPartial {
-            message.content = partial.content
-            message.usage = partial.usage
-            message.responseId = message.responseId ?? partial.responseId
+    private struct State {
+        var buffer: Deque<AssistantMessageEvent> = []
+        var eventWaiters: Deque<EventWaiter> = []
+        var resultWaiters: [ResultWaiter] = []
+        var ended = false
+        var finalMessage: AssistantMessage?
+        var latestPartial: AssistantMessage?
+
+        // A thrown error must not erase prior output.
+        func settleFailure(_ input: AssistantMessage) -> AssistantMessage {
+            guard input.stopReason == .error || input.stopReason == .aborted else { return input }
+            var message = input
+            if message.content.isEmpty, let partial = latestPartial {
+                message.content = partial.content
+                message.usage = partial.usage
+                message.responseId = message.responseId ?? partial.responseId
+            }
+            if message.stopReason == .error, message.failure == nil {
+                message.failure = ProviderFailure(message: message.errorMessage ?? "Unknown provider error")
+            }
+            message.errorMessage = message.errorMessage ?? message.failure?.message
+            return message
         }
-        if message.stopReason == .error, message.failure == nil {
-            message.failure = ProviderFailure(message: message.errorMessage ?? "Unknown provider error")
-        }
-        message.errorMessage = message.errorMessage ?? message.failure?.message
-        return message
     }
+    private let state = NIOLockedValueBox(State())
 
     func push(_ event: AssistantMessageEvent) {
-        lock.lock()
-        if ended {
-            lock.unlock()
-            return
+        let delivery = state.withLockedValue { state -> (waiter: EventWaiter, event: AssistantMessageEvent)? in
+            if state.ended {
+                return nil
+            }
+            var delivered = event
+            switch delivered {
+            case .start(let partial), .textStart(_, let partial), .textDelta(_, _, let partial),
+                 .textEnd(_, _, let partial), .thinkingStart(_, let partial), .thinkingDelta(_, _, let partial),
+                 .thinkingEnd(_, _, let partial), .toolCallStart(_, let partial), .toolCallDelta(_, _, let partial),
+                 .toolCallEnd(_, _, let partial):
+                state.latestPartial = partial
+            case .error(let reason, let message):
+                delivered = .error(reason: reason, error: state.settleFailure(message))
+            case .done: break
+            }
+            if let waiter = state.eventWaiters.popFirst() {
+                return (waiter, delivered)
+            }
+            state.buffer.append(delivered)
+            return nil
         }
-        var event = event
-        switch event {
-        case .start(let partial), .textStart(_, let partial), .textDelta(_, _, let partial),
-             .textEnd(_, _, let partial), .thinkingStart(_, let partial), .thinkingDelta(_, _, let partial),
-             .thinkingEnd(_, _, let partial), .toolCallStart(_, let partial), .toolCallDelta(_, _, let partial),
-             .toolCallEnd(_, _, let partial):
-            latestPartial = partial
-        case .error(let reason, let message): event = .error(reason: reason, error: settleFailure(message))
-        case .done: break
-        }
-        if let waiter = eventWaiters.first {
-            eventWaiters.removeFirst()
-            lock.unlock()
+        if let (waiter, event) = delivery {
             waiter.cont.resume(returning: event)
-            return
         }
-        buffer.append(event)
-        lock.unlock()
     }
 
     func end(_ message: AssistantMessage) {
-        let eventWaitersToNotify: [(id: UUID, cont: CheckedContinuation<AssistantMessageEvent?, Never>)]
-        let resultWaitersToNotify: [(id: UUID, cont: CheckedContinuation<AssistantMessage, Never>)]
-        lock.lock()
-        if ended {
-            lock.unlock()
-            return
+        let settled = state.withLockedValue { state -> (
+            message: AssistantMessage,
+            eventWaiters: Deque<EventWaiter>,
+            resultWaiters: [ResultWaiter]
+        )? in
+            if state.ended {
+                return nil
+            }
+            state.ended = true
+            let settledMessage = state.settleFailure(message)
+            state.finalMessage = settledMessage
+            let eventWaitersToNotify = state.eventWaiters
+            state.eventWaiters.removeAll()
+            let resultWaitersToNotify = state.resultWaiters
+            state.resultWaiters.removeAll()
+            return (settledMessage, eventWaitersToNotify, resultWaitersToNotify)
         }
-        ended = true
-        let message = settleFailure(message)
-        finalMessage = message
-        eventWaitersToNotify = eventWaiters
-        eventWaiters.removeAll()
-        resultWaitersToNotify = resultWaiters
-        resultWaiters.removeAll()
-        lock.unlock()
-        for w in eventWaitersToNotify { w.cont.resume(returning: nil) }
-        for w in resultWaitersToNotify { w.cont.resume(returning: message) }
+        guard let settled else { return }
+        for w in settled.eventWaiters { w.cont.resume(returning: nil) }
+        for w in settled.resultWaiters { w.cont.resume(returning: settled.message) }
     }
 
     func nextEvent() async -> AssistantMessageEvent? {
         let id = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<AssistantMessageEvent?, Never>) in
-                lock.lock()
-                if !buffer.isEmpty {
-                    let event = buffer.removeFirst()
-                    lock.unlock()
+                let (resume, event) = state.withLockedValue { state -> (Bool, AssistantMessageEvent?) in
+                    if let buffered = state.buffer.popFirst() {
+                        return (true, buffered)
+                    }
+                    if state.ended {
+                        return (true, nil)
+                    }
+                    if Task.isCancelled {
+                        return (true, nil)
+                    }
+                    state.eventWaiters.append((id: id, cont: cont))
+                    return (false, nil)
+                }
+                if resume {
                     cont.resume(returning: event)
-                    return
                 }
-                if ended {
-                    lock.unlock()
-                    cont.resume(returning: nil)
-                    return
-                }
-                if Task.isCancelled {
-                    lock.unlock()
-                    cont.resume(returning: nil)
-                    return
-                }
-                eventWaiters.append((id: id, cont: cont))
-                lock.unlock()
             }
         } onCancel: {
             // End iteration promptly on consumer-task cancellation. Whichever of
             // this and a concurrent `push`/`end` removes the waiter first owns
             // the resume, so there is no double-resume.
-            lock.lock()
-            guard let index = eventWaiters.firstIndex(where: { $0.id == id }) else {
-                lock.unlock()
-                return
+            let waiter = state.withLockedValue { state -> EventWaiter? in
+                guard let index = state.eventWaiters.firstIndex(where: { $0.id == id }) else {
+                    return nil
+                }
+                return state.eventWaiters.remove(at: index)
             }
-            let waiter = eventWaiters.remove(at: index)
-            lock.unlock()
-            waiter.cont.resume(returning: nil)
+            waiter?.cont.resume(returning: nil)
         }
     }
 
@@ -191,29 +198,28 @@ public final class StreamState: @unchecked Sendable {
         let id = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<AssistantMessage, Never>) in
-                lock.lock()
-                if let message = finalMessage {
-                    lock.unlock()
-                    cont.resume(returning: message)
-                    return
+                let (resume, message) = state.withLockedValue { state -> (Bool, AssistantMessage?) in
+                    if let finalMessage = state.finalMessage {
+                        return (true, finalMessage)
+                    }
+                    if Task.isCancelled {
+                        return (true, nil)
+                    }
+                    state.resultWaiters.append((id: id, cont: cont))
+                    return (false, nil)
                 }
-                if Task.isCancelled {
-                    lock.unlock()
-                    cont.resume(returning: Self.cancelledResult())
-                    return
+                if resume {
+                    cont.resume(returning: message ?? Self.cancelledResult())
                 }
-                resultWaiters.append((id: id, cont: cont))
-                lock.unlock()
             }
         } onCancel: {
-            lock.lock()
-            guard let index = resultWaiters.firstIndex(where: { $0.id == id }) else {
-                lock.unlock()
-                return
+            let waiter = state.withLockedValue { state -> ResultWaiter? in
+                guard let index = state.resultWaiters.firstIndex(where: { $0.id == id }) else {
+                    return nil
+                }
+                return state.resultWaiters.remove(at: index)
             }
-            let waiter = resultWaiters.remove(at: index)
-            lock.unlock()
-            waiter.cont.resume(returning: Self.cancelledResult())
+            waiter?.cont.resume(returning: Self.cancelledResult())
         }
     }
 

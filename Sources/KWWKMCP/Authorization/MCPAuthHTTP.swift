@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import NIOConcurrencyHelpers
 
 /// One HTTP request of the authorization flow (metadata discovery, client
 /// registration, token requests).
@@ -162,11 +163,10 @@ public final class URLSessionMCPAuthHTTPClient: MCPAuthHTTPClient, @unchecked Se
             var data = Data()
         }
 
-        private let lock = NSLock()
-        private var pending: [Int: Pending] = [:]
+        private let pending = NIOLockedValueBox<[Int: Pending]>([:])
 
         func register(task: URLSessionTask, url: URL, continuation: CheckedContinuation<MCPAuthHTTPResponse, Error>) {
-            lock.withLock { pending[task.taskIdentifier] = Pending(url: url, continuation: continuation) }
+            pending.withLockedValue { $0[task.taskIdentifier] = Pending(url: url, continuation: continuation) }
         }
 
         func urlSession(
@@ -185,16 +185,16 @@ public final class URLSessionMCPAuthHTTPClient: MCPAuthHTTPClient, @unchecked Se
             didReceive response: URLResponse,
             completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
         ) {
-            lock.withLock { pending[dataTask.taskIdentifier]?.response = response as? HTTPURLResponse }
+            pending.withLockedValue { $0[dataTask.taskIdentifier]?.response = response as? HTTPURLResponse }
             completionHandler(.allow)
         }
 
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-            lock.withLock { pending[dataTask.taskIdentifier]?.data.append(data) }
+            pending.withLockedValue { $0[dataTask.taskIdentifier]?.data.append(data) }
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-            guard let entry = lock.withLock({ pending.removeValue(forKey: task.taskIdentifier) }) else { return }
+            guard let entry = pending.withLockedValue({ $0.removeValue(forKey: task.taskIdentifier) }) else { return }
             if let error {
                 entry.continuation.resume(throwing: error)
                 return

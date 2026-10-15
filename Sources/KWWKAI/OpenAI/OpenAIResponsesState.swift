@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 // MARK: - Mutable state
 
@@ -18,15 +19,17 @@ final class OpenAIResponsesState: @unchecked Sendable {
         case thinking(ThinkingContent)
         case toolUse(id: String, name: String, json: String)
     }
-    private let lock = NSLock()
-    private var blocks: [Int: Block] = [:]
-    private var order: [Int] = []
-    /// Output-index → content-index for each kind of item. Kept separate so
-    /// that a reasoning + message + function_call under the same output_index
-    /// can coexist (rare, but legal).
-    private var textByOutput: [Int: Int] = [:]
-    private var reasoningByOutput: [Int: Int] = [:]
-    private var toolCallByOutput: [Int: Int] = [:]
+    private struct State {
+        var blocks: [Int: Block] = [:]
+        var order: [Int] = []
+        /// Output-index → content-index for each kind of item. Kept separate so
+        /// that a reasoning + message + function_call under the same output_index
+        /// can coexist (rare, but legal).
+        var textByOutput: [Int: Int] = [:]
+        var reasoningByOutput: [Int: Int] = [:]
+        var toolCallByOutput: [Int: Int] = [:]
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, provider: String, modelId: String) {
         self.api = api
@@ -40,44 +43,44 @@ final class OpenAIResponsesState: @unchecked Sendable {
     }
 
     func noteTextPart(outputIndex: Int) -> Int {
-        lock.withLock {
-            if let existing = textByOutput[outputIndex] { return existing }
-            let idx = order.count
-            textByOutput[outputIndex] = idx
-            order.append(idx)
-            blocks[idx] = .text(TextContent(text: ""))
+        state.withLockedValue { state in
+            if let existing = state.textByOutput[outputIndex] { return existing }
+            let idx = state.order.count
+            state.textByOutput[outputIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .text(TextContent(text: ""))
             return idx
         }
     }
 
     func noteReasoningItem(outputIndex: Int) -> Int {
-        lock.withLock {
-            if let existing = reasoningByOutput[outputIndex] { return existing }
-            let idx = order.count
-            reasoningByOutput[outputIndex] = idx
-            order.append(idx)
-            blocks[idx] = .thinking(ThinkingContent(thinking: ""))
+        state.withLockedValue { state in
+            if let existing = state.reasoningByOutput[outputIndex] { return existing }
+            let idx = state.order.count
+            state.reasoningByOutput[outputIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .thinking(ThinkingContent(thinking: ""))
             return idx
         }
     }
 
     func noteFunctionCallItem(outputIndex: Int, callId: String, name: String, arguments: String = "") -> Int {
-        lock.withLock {
-            if let existing = toolCallByOutput[outputIndex] { return existing }
-            let idx = order.count
-            toolCallByOutput[outputIndex] = idx
-            order.append(idx)
-            blocks[idx] = .toolUse(id: callId, name: name, json: arguments)
+        state.withLockedValue { state in
+            if let existing = state.toolCallByOutput[outputIndex] { return existing }
+            let idx = state.order.count
+            state.toolCallByOutput[outputIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .toolUse(id: callId, name: name, json: arguments)
             return idx
         }
     }
 
     func updateFunctionCallItem(outputIndex: Int, callId: String?, name: String?, arguments: String?) {
-        lock.withLock {
-            guard let index = toolCallByOutput[outputIndex],
-                  case .toolUse(let currentId, let currentName, let currentJSON) = blocks[index]
+        state.withLockedValue { state in
+            guard let index = state.toolCallByOutput[outputIndex],
+                  case .toolUse(let currentId, let currentName, let currentJSON) = state.blocks[index]
             else { return }
-            blocks[index] = .toolUse(
+            state.blocks[index] = .toolUse(
                 id: callId ?? currentId,
                 name: name ?? currentName,
                 json: arguments ?? currentJSON
@@ -86,78 +89,78 @@ final class OpenAIResponsesState: @unchecked Sendable {
     }
 
     func textIndex(for outputIndex: Int) -> Int? {
-        lock.withLock { textByOutput[outputIndex] }
+        state.withLockedValue { $0.textByOutput[outputIndex] }
     }
     func reasoningIndex(for outputIndex: Int) -> Int? {
-        lock.withLock { reasoningByOutput[outputIndex] }
+        state.withLockedValue { $0.reasoningByOutput[outputIndex] }
     }
     func toolCallIndex(for outputIndex: Int) -> Int? {
-        lock.withLock { toolCallByOutput[outputIndex] }
+        state.withLockedValue { $0.toolCallByOutput[outputIndex] }
     }
 
     func appendText(at index: Int, text: String) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.text += text
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
     }
 
     func appendThinking(at index: Int, text: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinking += text
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func setThinkingSignature(at index: Int, signature: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinkingSignature = signature
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func thinkingSignature(at index: Int) -> String? {
-        lock.withLock {
-            if case .thinking(let th) = blocks[index] { return th.thinkingSignature }
+        state.withLockedValue { state in
+            if case .thinking(let th) = state.blocks[index] { return th.thinkingSignature }
             return nil
         }
     }
 
     func appendToolCallArgs(at index: Int, chunk: String) {
-        lock.withLock {
-            if case .toolUse(let id, let name, let json) = blocks[index] {
-                blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
+        state.withLockedValue { state in
+            if case .toolUse(let id, let name, let json) = state.blocks[index] {
+                state.blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
             }
         }
     }
 
     func textValue(at index: Int) -> String {
-        lock.withLock {
-            if case .text(let t) = blocks[index] { return t.text } else { return "" }
+        state.withLockedValue { state in
+            if case .text(let t) = state.blocks[index] { return t.text } else { return "" }
         }
     }
 
     func thinkingValue(at index: Int) -> String {
-        lock.withLock {
-            if case .thinking(let th) = blocks[index] { return th.thinking } else { return "" }
+        state.withLockedValue { state in
+            if case .thinking(let th) = state.blocks[index] { return th.thinking } else { return "" }
         }
     }
 
     func toolCallValue(at index: Int) -> ToolCall? {
-        lock.withLock {
-            guard case .toolUse(let id, let name, let json) = blocks[index] else { return nil }
+        state.withLockedValue { state in
+            guard case .toolUse(let id, let name, let json) = state.blocks[index] else { return nil }
             return ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
         }
     }
 
     func hasToolCalls() -> Bool {
-        lock.withLock { !toolCallByOutput.isEmpty }
+        state.withLockedValue { !$0.toolCallByOutput.isEmpty }
     }
 
     func applyUsage(_ obj: [String: JSONValue]) {
@@ -186,10 +189,10 @@ final class OpenAIResponsesState: @unchecked Sendable {
     func snapshot() -> AssistantMessage { buildMessage(parseToolArgs: false) }
 
     private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             AssistantMessage(
-                content: order.compactMap { idx -> AssistantBlock? in
-                    switch blocks[idx] {
+                content: state.order.compactMap { idx -> AssistantBlock? in
+                    switch state.blocks[idx] {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json):

@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 // MARK: - Attachment bookkeeping
 
@@ -257,35 +258,38 @@ private func jsonCost(_ value: JSONValue?) -> Cost? {
     )
 }
 
-final class AgentBackgroundAttachmentList: @unchecked Sendable {
-    private let lock = NSLock()
-    private var attachments: [BackgroundAttachment] = []
-    private var terminalSubagents: [String: SubagentRunSummary] = [:]
-    private var terminalOrder: [String] = []
+final class AgentBackgroundAttachmentList: Sendable {
+    private struct State {
+        var attachments: [BackgroundAttachment] = []
+        var terminalSubagents: [String: SubagentRunSummary] = [:]
+        var terminalOrder: [String] = []
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     func append(_ attachment: BackgroundAttachment) {
-        lock.withLock {
-            attachments.append(attachment)
+        state.withLockedValue {
+            $0.attachments.append(attachment)
         }
     }
 
     func remove(bridgeId: UUID) {
-        lock.withLock {
-            attachments.removeAll { $0.bridgeId == bridgeId }
+        state.withLockedValue { state in
+            state.attachments.removeAll { $0.bridgeId == bridgeId }
         }
     }
 
     func list() -> [BackgroundAttachment] {
-        lock.withLock { attachments }
+        state.withLockedValue { $0.attachments }
     }
 
     func record(_ event: SubagentLifecycleEvent) -> Bool {
         guard let taskId = event.backgroundTaskId,
               event.kind == .completed || event.kind == .failed else { return false }
-        return lock.withLock {
-            guard terminalSubagents[taskId] == nil else { return false }
-            terminalOrder.append(taskId)
-            terminalSubagents[taskId] = SubagentRunSummary(
+        return state.withLockedValue { state in
+            guard state.terminalSubagents[taskId] == nil else { return false }
+            state.terminalOrder.append(taskId)
+            state.terminalSubagents[taskId] = SubagentRunSummary(
                 subagentType: event.subagentType,
                 childSessionId: event.childSessionId,
                 description: event.description,
@@ -305,6 +309,8 @@ final class AgentBackgroundAttachmentList: @unchecked Sendable {
     }
 
     func backgroundSubagentRuns() -> [SubagentRunSummary] {
-        lock.withLock { terminalOrder.compactMap { terminalSubagents[$0] } }
+        state.withLockedValue { state in
+            state.terminalOrder.compactMap { state.terminalSubagents[$0] }
+        }
     }
 }

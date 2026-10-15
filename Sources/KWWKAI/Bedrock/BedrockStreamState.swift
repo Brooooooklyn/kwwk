@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 // MARK: - Mutable state
 
@@ -17,12 +18,14 @@ final class BedrockStreamState: @unchecked Sendable {
         case toolUse(id: String, name: String, json: String)
     }
 
-    private let lock = NSLock()
-    private var blocks: [Int: Block] = [:]
-    /// Bedrock's `contentBlockIndex` → our ordinal index in `order`.
-    private var blockByIndex: [Int: Int] = [:]
-    private var order: [Int] = []
-    private var endedIndices: Set<Int> = []
+    private struct State {
+        var blocks: [Int: Block] = [:]
+        /// Bedrock's `contentBlockIndex` → our ordinal index in `order`.
+        var blockByIndex: [Int: Int] = [:]
+        var order: [Int] = []
+        var endedIndices: Set<Int> = []
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, provider: String, modelId: String) {
         self.api = api
@@ -31,73 +34,73 @@ final class BedrockStreamState: @unchecked Sendable {
     }
 
     func noteTextBlock(at blockIndex: Int) -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let existing = blockByIndex[blockIndex] { return (existing, false) }
-            let idx = order.count
-            blockByIndex[blockIndex] = idx
-            order.append(idx)
-            blocks[idx] = .text(TextContent(text: ""))
+        state.withLockedValue { state in
+            if let existing = state.blockByIndex[blockIndex] { return (existing, false) }
+            let idx = state.order.count
+            state.blockByIndex[blockIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .text(TextContent(text: ""))
             return (idx, true)
         }
     }
 
     func noteThinkingBlock(at blockIndex: Int) -> (index: Int, firstSeen: Bool) {
-        lock.withLock {
-            if let existing = blockByIndex[blockIndex] { return (existing, false) }
-            let idx = order.count
-            blockByIndex[blockIndex] = idx
-            order.append(idx)
-            blocks[idx] = .thinking(ThinkingContent(thinking: ""))
+        state.withLockedValue { state in
+            if let existing = state.blockByIndex[blockIndex] { return (existing, false) }
+            let idx = state.order.count
+            state.blockByIndex[blockIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .thinking(ThinkingContent(thinking: ""))
             return (idx, true)
         }
     }
 
     func noteToolUseBlock(at blockIndex: Int, id: String, name: String) -> Int {
-        lock.withLock {
-            if let existing = blockByIndex[blockIndex] { return existing }
-            let idx = order.count
-            blockByIndex[blockIndex] = idx
-            order.append(idx)
-            blocks[idx] = .toolUse(id: id, name: name, json: "")
+        state.withLockedValue { state in
+            if let existing = state.blockByIndex[blockIndex] { return existing }
+            let idx = state.order.count
+            state.blockByIndex[blockIndex] = idx
+            state.order.append(idx)
+            state.blocks[idx] = .toolUse(id: id, name: name, json: "")
             return idx
         }
     }
 
     func toolCallIndex(at blockIndex: Int) -> Int? {
-        lock.withLock { blockByIndex[blockIndex] }
+        state.withLockedValue { $0.blockByIndex[blockIndex] }
     }
 
     func appendText(index: Int, text: String) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] { t.text += text; blocks[index] = .text(t) }
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] { t.text += text; state.blocks[index] = .text(t) }
         }
     }
     func appendThinking(index: Int, text: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] { th.thinking += text; blocks[index] = .thinking(th) }
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] { th.thinking += text; state.blocks[index] = .thinking(th) }
         }
     }
     func appendSignature(index: Int, signature: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinkingSignature = (th.thinkingSignature ?? "") + signature
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
     func appendToolCallArgs(index: Int, chunk: String) {
-        lock.withLock {
-            if case .toolUse(let id, let name, let json) = blocks[index] {
-                blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
+        state.withLockedValue { state in
+            if case .toolUse(let id, let name, let json) = state.blocks[index] {
+                state.blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
             }
         }
     }
 
     func finishBlock(at blockIndex: Int, emit: (AssistantMessageEvent) -> Void) {
-        let idx: Int? = lock.withLock { blockByIndex[blockIndex] }
-        guard let idx, !endedIndices.contains(idx) else { return }
+        let idx: Int? = state.withLockedValue { $0.blockByIndex[blockIndex] }
+        guard let idx, !state.withLockedValue({ $0.endedIndices.contains(idx) }) else { return }
         let partial = snapshot()
-        guard let block = lock.withLock({ blocks[idx] }) else { return }
+        guard let block = state.withLockedValue({ $0.blocks[idx] }) else { return }
         switch block {
         case .text(let t):
             emit(.textEnd(contentIndex: idx, content: t.text, partial: partial))
@@ -107,14 +110,14 @@ final class BedrockStreamState: @unchecked Sendable {
             let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
             emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
         }
-        _ = lock.withLock { endedIndices.insert(idx) }
+        _ = state.withLockedValue { $0.endedIndices.insert(idx) }
     }
 
     func finalizePending(emit: (AssistantMessageEvent) -> Void) {
-        let indices = lock.withLock { order }
-        for idx in indices where !endedIndices.contains(idx) {
+        let indices = state.withLockedValue { $0.order }
+        for idx in indices where !state.withLockedValue({ $0.endedIndices.contains(idx) }) {
             let partial = snapshot()
-            guard let block = lock.withLock({ blocks[idx] }) else { continue }
+            guard let block = state.withLockedValue({ $0.blocks[idx] }) else { continue }
             switch block {
             case .text(let t):
                 emit(.textEnd(contentIndex: idx, content: t.text, partial: partial))
@@ -124,7 +127,7 @@ final class BedrockStreamState: @unchecked Sendable {
                 let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }
-            _ = lock.withLock { endedIndices.insert(idx) }
+            _ = state.withLockedValue { $0.endedIndices.insert(idx) }
         }
     }
 
@@ -148,10 +151,10 @@ final class BedrockStreamState: @unchecked Sendable {
     func snapshot() -> AssistantMessage { buildMessage(parseToolArgs: false) }
 
     private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             AssistantMessage(
-                content: order.compactMap { idx -> AssistantBlock? in
-                    switch blocks[idx] {
+                content: state.order.compactMap { idx -> AssistantBlock? in
+                    switch state.blocks[idx] {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json):

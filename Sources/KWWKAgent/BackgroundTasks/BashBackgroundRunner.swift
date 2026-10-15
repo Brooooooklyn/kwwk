@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Musl)
@@ -380,36 +381,39 @@ struct SpawnedBashProcess: Sendable {
 
 /// Sendable-safe controller over a running `Process`. Lets detached cancel
 /// listeners and timeouts signal the process without directly capturing it.
-final class BashProcessControl: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pid: pid_t
-    private var _terminated = false
-    private var _didCancel = false
-    private var _didTimeOut = false
+final class BashProcessControl: Sendable {
+    private struct State {
+        var pid: pid_t
+        var terminated = false
+        var didCancel = false
+        var didTimeOut = false
+    }
 
-    init(pid: pid_t) { self.pid = pid }
+    private let state: NIOLockedValueBox<State>
 
-    func setPid(_ pid: pid_t) { lock.withLock { self.pid = pid } }
+    init(pid: pid_t) { self.state = NIOLockedValueBox(State(pid: pid)) }
 
-    var didCancel: Bool { lock.withLock { _didCancel } }
-    var didTimeOut: Bool { lock.withLock { _didTimeOut } }
+    func setPid(_ pid: pid_t) { state.withLockedValue { $0.pid = pid } }
+
+    var didCancel: Bool { state.withLockedValue { $0.didCancel } }
+    var didTimeOut: Bool { state.withLockedValue { $0.didTimeOut } }
 
     func terminate() {
-        let pid: pid_t = lock.withLock {
-            if _terminated { return 0 }
-            _terminated = true
-            _didCancel = true
-            return self.pid
+        let pid: pid_t = state.withLockedValue { state in
+            if state.terminated { return 0 }
+            state.terminated = true
+            state.didCancel = true
+            return state.pid
         }
         escalate(pid)
     }
 
     func timeoutAndTerminate() {
-        let pid: pid_t = lock.withLock {
-            if _terminated { return 0 }
-            _terminated = true
-            _didTimeOut = true
-            return self.pid
+        let pid: pid_t = state.withLockedValue { state in
+            if state.terminated { return 0 }
+            state.terminated = true
+            state.didTimeOut = true
+            return state.pid
         }
         escalate(pid)
     }

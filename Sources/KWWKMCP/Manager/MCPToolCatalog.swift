@@ -1,6 +1,7 @@
 import Foundation
 import KWWKAgent
 import KWWKAI
+import NIOConcurrencyHelpers
 
 extension MCPManager {
     /// Prefix of every MCP tool name (`mcp__<server>__<tool>`).
@@ -51,12 +52,11 @@ extension MCPManager {
 }
 
 /// The id of an observer, readable from inside the observer itself.
-private final class ObserverRegistration: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: UUID?
+private final class ObserverRegistration: Sendable {
+    private let value = NIOLockedValueBox<UUID?>(nil)
 
     var id: UUID? {
-        get { lock.withLock { value } }
-        set { lock.withLock { value = newValue } }
+        get { value.withLockedValue { $0 } }
+        set { value.withLockedValue { $0 = newValue } }
     }
 }
