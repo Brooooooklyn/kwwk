@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import KWWKAI
 
@@ -29,60 +30,42 @@ import KWWKAI
 /// are updated together.
 ///
 @main
-struct GenerateDevinModels {
+struct GenerateDevinModels: AsyncParsableCommand {
     static let defaultOutputPath = "Sources/KWWKAI/Resources/devin-models.json"
 
-    static let usage = """
-    usage: kwwk-generate-devin-models [--seed-only] [output.json]
+    static let configuration = CommandConfiguration(
+        commandName: "kwwk-generate-devin-models",
+        abstract: "Regenerate the bundled Devin model catalog from Codeium Cascade's GetCliModelConfigs RPC.",
+        discussion: """
+        Auth: the DEVIN_API_KEY environment variable, or a `devin` login in ~/.kwwk/oauth.json; with neither \\
+        present a browser login is started and persisted.
 
-    arguments:
-      output.json    optional output path; defaults to \(defaultOutputPath)
+        Also run `swift run kwwk-generate-models …` when syncing: the regular catalog (models.json) is \\
+        regenerated separately.
+        """
+    )
 
-    auth:
-      DEVIN_API_KEY env var, or a `devin` login in ~/.kwwk/oauth.json;
-      with neither present a browser login is started and persisted
+    @Flag(name: .customLong("seed-only"), help: "Skip discovery; write only the curated SWE-1.6 seed.")
+    var seedOnly = false
 
-    options:
-      --seed-only    skip discovery; write only the curated SWE-1.6 seed
-      -h, --help     show this help
+    @Argument(help: ArgumentHelp("Output path.", valueName: "output.json"))
+    var outputPath: String = Self.defaultOutputPath
 
-    note: also run `swift run kwwk-generate-models …` when syncing — the
-    regular catalog (models.json) is regenerated separately.
-    """
-
-    static func main() async {
-        var arguments = Array(CommandLine.arguments.dropFirst())
-        let seedOnly = arguments.contains("--seed-only")
-        arguments.removeAll { $0 == "--seed-only" }
-        if arguments.contains("-h") || arguments.contains("--help") {
-            print(usage)
-            exit(0)
+    func run() async throws {
+        let models: [Model]
+        if seedOnly {
+            models = DevinModels.seedModels.sorted { $0.id < $1.id }
+        } else {
+            let token = try await Self.resolveToken()
+            models = try await DevinModels.fetch(apiKey: token)
         }
-        guard arguments.count <= 1, !(arguments.first?.hasPrefix("-") ?? false) else {
-            FileHandle.standardError.write(Data("unexpected arguments\n\n\(usage)\n".utf8))
-            exit(1)
-        }
-        let outputPath = arguments.first ?? defaultOutputPath
-
-        do {
-            let models: [Model]
-            if seedOnly {
-                models = DevinModels.seedModels.sorted { $0.id < $1.id }
-            } else {
-                let token = try await resolveToken()
-                models = try await DevinModels.fetch(apiKey: token)
-            }
-            try write(models, to: outputPath)
-            print("generated \(outputPath)")
-            print("  models: \(models.count)")
-            for model in models {
-                let thinking = model.reasoning ? " (reasoning)" : ""
-                let router = model.compat?.modelRouter == true ? " (router)" : ""
-                print("    \(model.id)  \(model.name)\(thinking)\(router)")
-            }
-        } catch {
-            FileHandle.standardError.write(Data("kwwk-generate-devin-models: \(error)\n".utf8))
-            exit(1)
+        try Self.write(models, to: outputPath)
+        print("generated \(outputPath)")
+        print("  models: \(models.count)")
+        for model in models {
+            let thinking = model.reasoning ? " (reasoning)" : ""
+            let router = model.compat?.modelRouter == true ? " (router)" : ""
+            print("    \(model.id)  \(model.name)\(thinking)\(router)")
         }
     }
 

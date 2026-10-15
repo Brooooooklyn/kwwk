@@ -11,7 +11,9 @@ public enum GenerateModelsCore {
         let raw = try String(contentsOf: inputURL, encoding: .utf8)
         let overrides = try overridesFile.map { try Data(contentsOf: $0) }
         return try generate(
-            from: raw, resolvingImportsRelativeTo: inputURL.deletingLastPathComponent(), overrides: overrides
+            from: raw,
+            resolvingImportsRelativeTo: inputURL.deletingLastPathComponent(),
+            overrides: overrides
         )
     }
 
@@ -48,14 +50,13 @@ public enum GenerateModelsCore {
     }
 
     private static func generate(
-        from raw: String, resolvingImportsRelativeTo baseURL: URL?, overrides: Data?
+        from raw: String,
+        resolvingImportsRelativeTo baseURL: URL?,
+        overrides: Data?
     ) throws -> ModelGenerationResult {
         let expanded = try inlineImportedModelObjects(in: raw, baseURL: baseURL)
         let json = try convert(expanded)
-
-        guard let data = json.data(using: .utf8) else {
-            throw GenerateModelsCoreError.conversion("failed to encode converted JSON")
-        }
+        let data = Data(json.utf8)
 
         let parsed: Any
         do {
@@ -68,9 +69,7 @@ public enum GenerateModelsCore {
             throw GenerateModelsCoreError.conversion("top-level catalog is not an object")
         }
         let overlaid = try overrides.map { try applying(overrides: $0, to: parsedRoot) } ?? parsedRoot
-        guard let root = normalizeJSONNumbers(overlaid) as? [String: Any] else {
-            throw GenerateModelsCoreError.conversion("top-level catalog is not an object")
-        }
+        let root = overlaid.mapValues(normalizeJSONNumbers)
 
         let outputData = try JSONSerialization.data(
             withJSONObject: root,
@@ -237,11 +236,7 @@ public enum GenerateModelsCore {
             )
         }
 
-        guard let data = json.data(using: .utf8) else {
-            throw GenerateModelsCoreError.conversion(
-                "could not decode provider JSON for \(constant) as UTF-8"
-            )
-        }
+        let data = Data(json.utf8)
         let parsed: Any
         do {
             parsed = try JSONSerialization.jsonObject(with: data)
@@ -250,19 +245,14 @@ public enum GenerateModelsCore {
                 "invalid provider JSON for \(constant): \(error)"
             )
         }
-        guard parsed is [String: Any] else {
+        guard let object = parsed as? [String: Any] else {
             throw GenerateModelsCoreError.conversion(
                 "provider JSON for \(constant) is not an object"
             )
         }
         if flattenedImport != nil {
-            guard let groups = parsed as? [String: Any] else {
-                throw GenerateModelsCoreError.conversion(
-                    "grouped provider JSON for \(constant) is not an object"
-                )
-            }
             var models: [String: Any] = [:]
-            for (groupName, value) in groups {
+            for (groupName, value) in object {
                 guard let group = value as? [String: Any] else {
                     throw GenerateModelsCoreError.conversion(
                         "provider JSON group \(groupName) for \(constant) is not an object"
@@ -288,12 +278,7 @@ public enum GenerateModelsCore {
                 }
             }
             let flattened = try JSONSerialization.data(withJSONObject: models, options: [.sortedKeys])
-            guard let flattenedJSON = String(data: flattened, encoding: .utf8) else {
-                throw GenerateModelsCoreError.conversion(
-                    "could not encode flattened provider JSON for \(constant)"
-                )
-            }
-            return flattenedJSON
+            return String(decoding: flattened, as: UTF8.self)
         }
         return json
     }
@@ -304,7 +289,6 @@ public enum GenerateModelsCore {
 
         var imports: [String: String] = [:]
         for match in matches {
-            guard match.count == 2 else { continue }
             for name in match[0].split(separator: ",") {
                 let constant = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !constant.isEmpty, !constant.hasPrefix("type ") else { continue }
@@ -320,7 +304,6 @@ public enum GenerateModelsCore {
 
         var imports: [String: String] = [:]
         for match in matches {
-            guard match.count == 2 else { continue }
             imports[match[0]] = match[1]
         }
         return imports
@@ -331,10 +314,7 @@ public enum GenerateModelsCore {
 
         let pattern = #"(?m)^\s*"([^"]+)"\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*$"#
         let matches = regexMatches(pattern, in: modelsObject)
-        return matches.compactMap { match in
-            guard match.count == 2 else { return nil }
-            return (provider: match[0], constant: match[1])
-        }
+        return matches.map { (provider: $0[0], constant: $0[1]) }
     }
 
     private static func objectLiteral(named constant: String, in raw: String) throws -> String {

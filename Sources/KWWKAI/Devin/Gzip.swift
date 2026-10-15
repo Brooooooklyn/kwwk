@@ -38,8 +38,14 @@ enum Gzip {
     static func compress(_ input: Data, level: Int32 = Z_DEFAULT_COMPRESSION) throws -> Data {
         var stream = z_stream()
         var status = deflateInit2_(
-            &stream, level, Z_DEFLATED, gzipWindowBits, 8, Z_DEFAULT_STRATEGY,
-            ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)
+            &stream,
+            level,
+            Z_DEFLATED,
+            gzipWindowBits,
+            8,
+            Z_DEFAULT_STRATEGY,
+            ZLIB_VERSION,
+            Int32(MemoryLayout<z_stream>.size)
         )
         guard status == Z_OK else { throw GzipError.zlib(operation: "deflateInit", code: status) }
         defer { deflateEnd(&stream) }
@@ -73,7 +79,10 @@ enum Gzip {
     static func decompress(_ input: Data, limit: Int = 64 * 1024 * 1024) throws -> Data {
         var stream = z_stream()
         var status = inflateInit2_(
-            &stream, autoDetectWindowBits, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)
+            &stream,
+            autoDetectWindowBits,
+            ZLIB_VERSION,
+            Int32(MemoryLayout<z_stream>.size)
         )
         guard status == Z_OK else { throw GzipError.zlib(operation: "inflateInit", code: status) }
         defer { inflateEnd(&stream) }

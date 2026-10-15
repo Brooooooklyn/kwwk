@@ -259,7 +259,9 @@ enum KiroRequest {
             let schema: JSONValue = tool.parameters == .null ? emptySchema : tool.parameters
             offered.insert(name)
             wireTools.append(Tool(
-                name: name, description: tool.description.isEmpty ? tool.name : tool.description, schema: schema
+                name: name,
+                description: tool.description.isEmpty ? tool.name : tool.description,
+                schema: schema
             ))
         }
         for entry in entries {
@@ -309,7 +311,11 @@ enum KiroRequest {
                         if !text.text.isEmpty { texts.append(text.text) }
                     case .toolCall(let call):
                         let input: JSONValue = call.arguments.objectValue == nil ? .object([:]) : call.arguments
-                        reply.toolUses.append(ToolUse(name: toolName(call.name), toolUseId: toolID(call.id), input: input))
+                        reply.toolUses.append(ToolUse(
+                            name: toolName(call.name),
+                            toolUseId: toolID(call.id),
+                            input: input
+                        ))
                     case .thinking, .fallback:
                         break
                     }
@@ -333,7 +339,10 @@ enum KiroRequest {
                         if !text.text.isEmpty { texts.append(text.text) }
                     case .image(let image):
                         if !image.data.isEmpty {
-                            user.images.append(Image(format: imageFormat(image.mimeType), source: .init(bytes: image.data)))
+                            user.images.append(Image(
+                                format: imageFormat(image.mimeType),
+                                source: .init(bytes: image.data)
+                            ))
                         }
                     }
                 }
@@ -348,7 +357,10 @@ enum KiroRequest {
                         // A tool's images (a screenshot, a file read) go with
                         // the message, as Kiro's tool results carry text alone.
                         if !image.data.isEmpty {
-                            user.images.append(Image(format: imageFormat(image.mimeType), source: .init(bytes: image.data)))
+                            user.images.append(Image(
+                                format: imageFormat(image.mimeType),
+                                source: .init(bytes: image.data)
+                            ))
                         }
                     }
                 }
@@ -358,7 +370,8 @@ enum KiroRequest {
                 }
                 if output.isEmpty { output = "(no output)" }
                 user.toolResults = [ToolResult(
-                    toolUseId: toolID(result.toolCallId), status: result.isError ? "error" : "success",
+                    toolUseId: toolID(result.toolCallId),
+                    status: result.isError ? "error" : "success",
                     content: [.init(text: output)]
                 )]
             }

@@ -71,7 +71,6 @@ public enum KWWK {
         }
         try await runCodingTUIInternal(
             model: resolved.model,
-            modelLabel: resolved.modelLabel,
             cwd: workDir,
             tools: tools,
             builtinSubagents: builtinSubagents,

@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import KWWKAI
 
@@ -23,52 +24,34 @@ import KWWKAI
 /// are updated together.
 ///
 @main
-struct GenerateCursorModels {
+struct GenerateCursorModels: AsyncParsableCommand {
     static let defaultOutputPath = "Sources/KWWKAI/Resources/cursor-models.json"
 
-    static let usage = """
-    usage: kwwk-generate-cursor-models [output.json]
+    static let configuration = CommandConfiguration(
+        commandName: "kwwk-generate-cursor-models",
+        abstract: "Regenerate the bundled Cursor model catalog from Cursor's GetUsableModels RPC.",
+        discussion: """
+        Auth: the CURSOR_ACCESS_TOKEN environment variable, or a `cursor` login in ~/.kwwk/oauth.json; with neither \\
+        present a browser login is started and persisted.
 
-    arguments:
-      output.json    optional output path; defaults to \(defaultOutputPath)
+        Also run `swift run kwwk-generate-models …` when syncing: the regular catalog (models.json) is \\
+        regenerated separately.
+        """
+    )
 
-    auth:
-      CURSOR_ACCESS_TOKEN env var, or a `cursor` login in ~/.kwwk/oauth.json;
-      with neither present a browser login is started and persisted
+    @Argument(help: ArgumentHelp("Output path.", valueName: "output.json"))
+    var outputPath: String = Self.defaultOutputPath
 
-    options:
-      -h, --help     show this help
-
-    note: also run `swift run kwwk-generate-models …` when syncing — the
-    regular catalog (models.json) is regenerated separately.
-    """
-
-    static func main() async {
-        let arguments = CommandLine.arguments.dropFirst()
-        if arguments.contains("-h") || arguments.contains("--help") {
-            print(usage)
-            exit(0)
-        }
-        guard arguments.count <= 1, !(arguments.first?.hasPrefix("-") ?? false) else {
-            FileHandle.standardError.write(Data("unexpected arguments\n\n\(usage)\n".utf8))
-            exit(1)
-        }
-        let outputPath = arguments.first ?? defaultOutputPath
-
-        do {
-            let token = try await resolveToken()
-            let fetched = try await CursorModelCatalog.fetchUsableModels(apiKey: token)
-            let models = withAutoDefault(fetched)
-            try write(models, to: outputPath)
-            print("generated \(outputPath)")
-            print("  models: \(models.count)")
-            for model in models {
-                let thinking = model.reasoning ? " (reasoning)" : ""
-                print("    \(model.id)  \(model.name)\(thinking)")
-            }
-        } catch {
-            FileHandle.standardError.write(Data("kwwk-generate-cursor-models: \(error)\n".utf8))
-            exit(1)
+    func run() async throws {
+        let token = try await Self.resolveToken()
+        let fetched = try await CursorModelCatalog.fetchUsableModels(apiKey: token)
+        let models = Self.withAutoDefault(fetched)
+        try Self.write(models, to: outputPath)
+        print("generated \(outputPath)")
+        print("  models: \(models.count)")
+        for model in models {
+            let thinking = model.reasoning ? " (reasoning)" : ""
+            print("    \(model.id)  \(model.name)\(thinking)")
         }
     }
 

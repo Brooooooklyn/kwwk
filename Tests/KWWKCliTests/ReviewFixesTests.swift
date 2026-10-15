@@ -121,11 +121,22 @@ struct AdoptFieldsMaxTokensTests {
 @Suite("adoptFields session routing")
 struct AdoptFieldsSessionRoutingTests {
     private func model(
-        id: String, api: String, provider: String, baseURL: String, maxTokens: Int = 4096
+        id: String,
+        api: String,
+        provider: String,
+        baseURL: String,
+        maxTokens: Int = 4096
     ) -> Model {
         Model(
-            id: id, name: id, api: api, provider: provider, baseURL: baseURL,
-            reasoning: false, input: [.text], contextWindow: 0, maxTokens: maxTokens
+            id: id,
+            name: id,
+            api: api,
+            provider: provider,
+            baseURL: baseURL,
+            reasoning: false,
+            input: [.text],
+            contextWindow: 0,
+            maxTokens: maxTokens
         )
     }
 

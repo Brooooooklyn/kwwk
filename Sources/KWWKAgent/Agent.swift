@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Listener invoked for every `AgentEvent`. Async listeners are awaited in
 /// subscription order before the agent returns to idle, matching pi-agent-core.
@@ -8,243 +9,55 @@ public typealias AgentListener = @Sendable (AgentEvent, CancellationHandle?) asy
 /// Handle returned from `subscribe`. Call to unsubscribe.
 public typealias Unsubscribe = @Sendable () -> Void
 
-public struct AgentInitialState: Sendable {
-    public var systemPrompt: String
-    public var model: Model
-    public var thinkingLevel: ThinkingLevel
-    public var thinkingDisplay: ThinkingDisplay
-    public var verboseEnabled: Bool
-    public var tools: [AgentTool]
-    public var messages: [Message]
-
-    public init(
-        systemPrompt: String = "",
-        model: Model,
-        thinkingLevel: ThinkingLevel = .off,
-        thinkingDisplay: ThinkingDisplay = .collapsed,
-        verboseEnabled: Bool = false,
-        tools: [AgentTool] = [],
-        messages: [Message] = []
-    ) {
-        self.systemPrompt = systemPrompt
-        self.model = model
-        self.thinkingLevel = thinkingLevel
-        self.thinkingDisplay = thinkingDisplay
-        self.verboseEnabled = verboseEnabled
-        self.tools = tools
-        self.messages = messages
-    }
-}
-
-public enum AgentError: Error, Equatable {
-    case noMessagesToContinue
-    case cannotContinueFromRole(String)
-    case alreadyRunning
-    case maxRetriesExceeded
-    case aborted
-}
-
-enum AgentContextPreflightError: Error, LocalizedError, Sendable {
-    case irreducible(tokens: Int, inputBudget: Int)
-    case compactionFailed(AgentContextCompactionOutcome)
-
-    var errorDescription: String? {
-        switch self {
-        case .irreducible(let tokens, let inputBudget):
-            return "context requires approximately \(tokens) input tokens, exceeding the usable \(inputBudget)-token input budget even after compaction"
-        case .compactionFailed(let outcome):
-            if case .failed(let reason) = outcome {
-                return "context is too large and compaction failed: \(reason)"
-            }
-            return "context is too large and could not be compacted"
-        }
-    }
-}
-
-public struct AgentAutoCompactOptions: Sendable {
-    public var threshold: Double?
-    public var config: AgentContextCompactionConfig
-    public var backgroundManager: BackgroundTaskManager?
-
-    public init(
-        threshold: Double? = 0.75,
-        config: AgentContextCompactionConfig = .init(),
-        backgroundManager: BackgroundTaskManager? = nil
-    ) {
-        self.threshold = threshold
-        self.config = config
-        self.backgroundManager = backgroundManager
-    }
-}
-
-/// Compact the transcript after the agent has sat idle for a while, so the
-/// next prompt starts from a small context instead of re-sending (and, once
-/// the provider's prompt cache has expired, re-billing) a large one.
-///
-/// The countdown starts whenever the agent becomes idle — a run or a
-/// maintenance window ends — and is cancelled by the next run. Hosts with
-/// their own notion of activity (keystrokes, an open dialog) push it back with
-/// `Agent.noteIdleActivity()` and veto a due compaction with `canCompact`.
-///
-/// An agent waiting on background tasks is not idle: if
-/// `autoCompact.backgroundManager` reports active tasks for the session, the
-/// compaction is skipped so their completion notifications continue from the
-/// full context. Idle compaction reuses `autoCompact`'s compaction config and
-/// reports through the same `compactStart` / `compactEnd` events.
-/// How full the context must be before an idle agent is compacted.
-public enum AgentIdleCompactThreshold: Sendable, Equatable {
-    /// Fraction of the current model's context window, e.g. `0.5`.
-    case ratio(Double)
-    /// Absolute estimated prompt tokens, independent of the model's window —
-    /// the natural unit when the concern is the cost of re-sending an uncached
-    /// prompt. A value above the window never triggers.
-    case tokens(Int)
-
-    func isReached(by usage: AgentContextUsage) -> Bool {
-        switch self {
-        case .ratio(let ratio):
-            guard ratio.isFinite, ratio > 0, usage.window > 0 else { return false }
-            return usage.ratio >= ratio
-        case .tokens(let tokens):
-            return tokens > 0 && usage.tokens >= tokens
-        }
-    }
-}
-
-public struct AgentIdleCompactOptions: Sendable {
-    /// Typically lower than `AgentAutoCompactOptions.threshold`: idle time is
-    /// free, a turn blocked on compaction is not.
-    public var threshold: AgentIdleCompactThreshold
-    /// Seconds of inactivity before compacting.
-    public var delay: TimeInterval
-    /// Host veto, consulted once the delay has elapsed and the built-in checks
-    /// passed. Return `false` to skip this idle period (for example while the
-    /// user has an unsent draft). The next activity re-arms the countdown.
-    public var canCompact: (@Sendable () async -> Bool)?
-
-    public init(
-        threshold: AgentIdleCompactThreshold = .ratio(0.5),
-        delay: TimeInterval = 300,
-        canCompact: (@Sendable () async -> Bool)? = nil
-    ) {
-        self.threshold = threshold
-        self.delay = delay
-        self.canCompact = canCompact
-    }
-}
-
-public struct AgentOptions: Sendable {
-    public var initialState: AgentInitialState
-    public var streamFn: StreamFn?
-    public var toolExecution: ToolExecutionMode
-    public var toolChoice: ToolChoice?
-    public var parallelToolCalls: Bool?
-    public var steeringMode: QueueMode
-    public var followUpMode: QueueMode
-    public var sessionId: String?
-    /// Workspace root forwarded to server-driven providers (Cursor). Nil =
-    /// don't report one.
-    public var cwd: String?
-    public var thinkingBudgets: ThinkingBudgets?
-    public var maxRetryDelayMs: Int?
-    /// Hard cap on assistant turns per run. Nil = unlimited.
-    public var maxTurns: Int?
-    /// Subagent-only lifecycle policy. Kept internal so the public Agent SDK's
-    /// maxTurns contract remains a strict hard stop by default.
-    var finalTextOnlyOnLastTurn = false
-    var terminalToolName: String?
-    var terminalToolReminderLimit = 0
-    public var beforeToolCall: BeforeToolCallHook?
-    public var afterToolCall: AfterToolCallHook?
-    public var userPromptSubmit: UserPromptSubmitHook?
-    public var convertToLlm: ConvertToLlmHook?
-    public var transformContext: TransformContextHook?
-    public var betweenTurns: BetweenTurnsHook?
-    public var beforeRunEnd: BeforeRunEndHook?
-    /// Automatic context compaction. Enabled by default at 75% of the model's
-    /// context window; pass `nil` to opt out of proactive compaction and
-    /// provider-overflow recovery.
-    public var autoCompact: AgentAutoCompactOptions?
-    /// Idle-time context compaction. Off (`nil`) by default.
-    public var idleCompact: AgentIdleCompactOptions?
-    /// Optional model used only to generate context-compaction summaries.
-    /// `nil` follows the agent's current `state.model` dynamically. Trigger
-    /// thresholds and recovery targets always use the current model, even
-    /// when summary generation is delegated to this model.
-    public var compactionModel: Model?
-    public var authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)?
-
-    public init(
-        initialState: AgentInitialState,
-        streamFn: StreamFn? = nil,
-        toolExecution: ToolExecutionMode = .parallel,
-        toolChoice: ToolChoice? = nil,
-        parallelToolCalls: Bool? = nil,
-        steeringMode: QueueMode = .oneAtATime,
-        followUpMode: QueueMode = .oneAtATime,
-        sessionId: String? = nil,
-        cwd: String? = nil,
-        thinkingBudgets: ThinkingBudgets? = nil,
-        maxRetryDelayMs: Int? = nil,
-        maxTurns: Int? = nil,
-        beforeToolCall: BeforeToolCallHook? = nil,
-        afterToolCall: AfterToolCallHook? = nil,
-        userPromptSubmit: UserPromptSubmitHook? = nil,
-        convertToLlm: ConvertToLlmHook? = nil,
-        transformContext: TransformContextHook? = nil,
-        betweenTurns: BetweenTurnsHook? = nil,
-        beforeRunEnd: BeforeRunEndHook? = nil,
-        autoCompact: AgentAutoCompactOptions? = AgentAutoCompactOptions(),
-        idleCompact: AgentIdleCompactOptions? = nil,
-        compactionModel: Model? = nil,
-        authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)? = nil
-    ) {
-        self.initialState = initialState
-        self.streamFn = streamFn
-        self.toolExecution = toolExecution
-        self.toolChoice = toolChoice
-        self.parallelToolCalls = parallelToolCalls
-        self.steeringMode = steeringMode
-        self.followUpMode = followUpMode
-        self.sessionId = sessionId
-        self.cwd = cwd
-        self.thinkingBudgets = thinkingBudgets
-        self.maxRetryDelayMs = maxRetryDelayMs
-        self.maxTurns = maxTurns
-        self.beforeToolCall = beforeToolCall
-        self.afterToolCall = afterToolCall
-        self.userPromptSubmit = userPromptSubmit
-        self.convertToLlm = convertToLlm
-        self.transformContext = transformContext
-        self.betweenTurns = betweenTurns
-        self.beforeRunEnd = beforeRunEnd
-        self.autoCompact = autoCompact
-        self.idleCompact = idleCompact
-        self.compactionModel = compactionModel
-        self.authResolver = authResolver
-    }
-}
-
 /// Stateful agent that drives turn/tool loops against an LLM. Mirrors
 /// pi-agent-core's `Agent` class but with Swift-native concurrency semantics.
-public final class Agent: @unchecked Sendable {
+public final class Agent: Sendable {
     public let state: AgentState
     private let streamFn: StreamFn
     private let usesCustomStream: Bool
 
-    private let lock = NSLock()
-    private var listeners: [(id: UUID, handler: AgentListener)] = []
-    private var activeCancellation: CancellationHandle?
-    /// Exclusive non-generation work (currently manual context compaction).
-    /// A maintenance owner and a model run are mutually exclusive. Keeping
-    /// this beside `activeCancellation` makes the check-and-acquire atomic,
-    /// rather than relying on the UI's eventually-consistent streaming flag.
-    private var maintenanceCancellation: CancellationHandle?
-    /// Permanently closes this Agent instance to new runs. Session rotation
-    /// uses this before detaching bridges so already-scheduled wake tasks can
-    /// never revive the outgoing session.
-    private var retired = false
-    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Run ownership, listeners, and the mutable run configuration, all
+    /// guarded by one lock so multi-field checks (e.g. acquire-run) stay atomic.
+    private struct LockedState {
+        var listeners: [(id: UUID, handler: AgentListener)] = []
+        var activeCancellation: CancellationHandle?
+        /// Exclusive non-generation work (currently manual context compaction).
+        /// A maintenance owner and a model run are mutually exclusive. Keeping
+        /// this beside `activeCancellation` makes the check-and-acquire atomic,
+        /// rather than relying on the UI's eventually-consistent streaming flag.
+        var maintenanceCancellation: CancellationHandle?
+        /// Permanently closes this Agent instance to new runs. Session rotation
+        /// uses this before detaching bridges so already-scheduled wake tasks can
+        /// never revive the outgoing session.
+        var retired = false
+        var idleWaiters: [CheckedContinuation<Void, Never>] = []
+
+        // Mutable run configuration. `loopConfig()` reads these on the run's task
+        // while the public setters may be invoked from any thread (steer() is
+        // documented "from any thread"), so every access funnels through
+        // `lockedState` — mirrors AgentState, whose fields are all guarded the
+        // same way.
+        var thinkingBudgets: ThinkingBudgets?
+        var maxRetryDelayMs: Int?
+        var maxTurns: Int?
+        var toolExecution: ToolExecutionMode
+        var toolChoice: ToolChoice?
+        var parallelToolCalls: Bool?
+        var beforeToolCall: BeforeToolCallHook?
+        var afterToolCall: AfterToolCallHook?
+        var userPromptSubmit: UserPromptSubmitHook?
+        var convertToLlm: ConvertToLlmHook?
+        var transformContext: TransformContextHook?
+        var betweenTurns: BetweenTurnsHook?
+        var beforeRunEnd: BeforeRunEndHook?
+        var autoCompact: AgentAutoCompactOptions?
+        var idleCompact: AgentIdleCompactOptions?
+        var compactionModel: Model?
+        var authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)?
+        var retryBaseDelayMs: UInt64 = 1_000
+    }
+
+    private let lockedState: NIOLockedValueBox<LockedState>
 
     /// Immutable session identity: one `Agent` == one session. Rotating to a
     /// new session means building a fresh `Agent`/`SessionRecorder` through the
@@ -257,98 +70,75 @@ public final class Agent: @unchecked Sendable {
     /// Workspace root forwarded to server-driven providers (Cursor).
     public let cwd: String?
 
-    // Mutable run configuration. `loopConfig()` reads these on the run's task
-    // while the public setters may be invoked from any thread (steer() is
-    // documented "from any thread"), so every access funnels through `lock`.
-    // This is what justifies the `@unchecked Sendable` annotation — mirrors
-    // AgentState, whose fields are all lock-guarded the same way.
-    private var _thinkingBudgets: ThinkingBudgets?
-    private var _maxRetryDelayMs: Int?
-    private var _maxTurns: Int?
     private let finalTextOnlyOnLastTurn: Bool
     private let terminalToolName: String?
     private let terminalToolReminderLimit: Int
-    private var _toolExecution: ToolExecutionMode
-    private var _toolChoice: ToolChoice?
-    private var _parallelToolCalls: Bool?
-    private var _beforeToolCall: BeforeToolCallHook?
-    private var _afterToolCall: AfterToolCallHook?
-    private var _userPromptSubmit: UserPromptSubmitHook?
-    private var _convertToLlm: ConvertToLlmHook?
-    private var _transformContext: TransformContextHook?
-    private var _betweenTurns: BetweenTurnsHook?
-    private var _beforeRunEnd: BeforeRunEndHook?
-    private var _autoCompact: AgentAutoCompactOptions?
-    private var _idleCompact: AgentIdleCompactOptions?
     let idleCompactionTimer = IdleCompactionTimer()
-    private var _compactionModel: Model?
-    private var _authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)?
-    private var _retryBaseDelayMs: UInt64 = 1_000
 
     public var thinkingBudgets: ThinkingBudgets? {
-        get { lock.withLock { _thinkingBudgets } }
-        set { lock.withLock { _thinkingBudgets = newValue } }
+        get { lockedState.withLockedValue { $0.thinkingBudgets } }
+        set { lockedState.withLockedValue { $0.thinkingBudgets = newValue } }
     }
     public var maxRetryDelayMs: Int? {
-        get { lock.withLock { _maxRetryDelayMs } }
-        set { lock.withLock { _maxRetryDelayMs = newValue } }
+        get { lockedState.withLockedValue { $0.maxRetryDelayMs } }
+        set { lockedState.withLockedValue { $0.maxRetryDelayMs = newValue } }
     }
     public var maxTurns: Int? {
-        get { lock.withLock { _maxTurns } }
-        set { lock.withLock { _maxTurns = newValue } }
+        get { lockedState.withLockedValue { $0.maxTurns } }
+        set { lockedState.withLockedValue { $0.maxTurns = newValue } }
     }
     public var toolExecution: ToolExecutionMode {
-        get { lock.withLock { _toolExecution } }
-        set { lock.withLock { _toolExecution = newValue } }
+        get { lockedState.withLockedValue { $0.toolExecution } }
+        set { lockedState.withLockedValue { $0.toolExecution = newValue } }
     }
     public var toolChoice: ToolChoice? {
-        get { lock.withLock { _toolChoice } }
-        set { lock.withLock { _toolChoice = newValue } }
+        get { lockedState.withLockedValue { $0.toolChoice } }
+        set { lockedState.withLockedValue { $0.toolChoice = newValue } }
     }
     public var parallelToolCalls: Bool? {
-        get { lock.withLock { _parallelToolCalls } }
-        set { lock.withLock { _parallelToolCalls = newValue } }
+        get { lockedState.withLockedValue { $0.parallelToolCalls } }
+        set { lockedState.withLockedValue { $0.parallelToolCalls = newValue } }
     }
     public var beforeToolCall: BeforeToolCallHook? {
-        get { lock.withLock { _beforeToolCall } }
-        set { lock.withLock { _beforeToolCall = newValue } }
+        get { lockedState.withLockedValue { $0.beforeToolCall } }
+        set { lockedState.withLockedValue { $0.beforeToolCall = newValue } }
     }
     public var afterToolCall: AfterToolCallHook? {
-        get { lock.withLock { _afterToolCall } }
-        set { lock.withLock { _afterToolCall = newValue } }
+        get { lockedState.withLockedValue { $0.afterToolCall } }
+        set { lockedState.withLockedValue { $0.afterToolCall = newValue } }
     }
     public var userPromptSubmit: UserPromptSubmitHook? {
-        get { lock.withLock { _userPromptSubmit } }
-        set { lock.withLock { _userPromptSubmit = newValue } }
+        get { lockedState.withLockedValue { $0.userPromptSubmit } }
+        set { lockedState.withLockedValue { $0.userPromptSubmit = newValue } }
     }
     public var convertToLlm: ConvertToLlmHook? {
-        get { lock.withLock { _convertToLlm } }
-        set { lock.withLock { _convertToLlm = newValue } }
+        get { lockedState.withLockedValue { $0.convertToLlm } }
+        set { lockedState.withLockedValue { $0.convertToLlm = newValue } }
     }
     public var transformContext: TransformContextHook? {
-        get { lock.withLock { _transformContext } }
-        set { lock.withLock { _transformContext = newValue } }
+        get { lockedState.withLockedValue { $0.transformContext } }
+        set { lockedState.withLockedValue { $0.transformContext = newValue } }
     }
     public var betweenTurns: BetweenTurnsHook? {
-        get { lock.withLock { _betweenTurns } }
-        set { lock.withLock { _betweenTurns = newValue } }
+        get { lockedState.withLockedValue { $0.betweenTurns } }
+        set { lockedState.withLockedValue { $0.betweenTurns = newValue } }
     }
     public var beforeRunEnd: BeforeRunEndHook? {
-        get { lock.withLock { _beforeRunEnd } }
-        set { lock.withLock { _beforeRunEnd = newValue } }
+        get { lockedState.withLockedValue { $0.beforeRunEnd } }
+        set { lockedState.withLockedValue { $0.beforeRunEnd = newValue } }
     }
     public var autoCompact: AgentAutoCompactOptions? {
-        get { lock.withLock { _autoCompact } }
-        set { lock.withLock { _autoCompact = newValue } }
+        get { lockedState.withLockedValue { $0.autoCompact } }
+        set { lockedState.withLockedValue { $0.autoCompact = newValue } }
     }
 
     /// Idle-time compaction. Assigning restarts the idle countdown from now
     /// (or cancels it for `nil`), so a change made while the agent is already
     /// idle takes effect without waiting for another run.
     public var idleCompact: AgentIdleCompactOptions? {
-        get { lock.withLock { _idleCompact } }
+        get { lockedState.withLockedValue { $0.idleCompact } }
         set {
-            lock.withLock { _idleCompact = newValue }
+            lockedState.withLockedValue { $0.idleCompact = newValue }
             idleCompactionTimer.cancel()
             noteIdleActivity()
         }
@@ -356,19 +146,19 @@ public final class Agent: @unchecked Sendable {
     /// Model used for compaction summaries. Assign `nil` to follow the live
     /// conversation model again. This never mutates `state.model`.
     public var compactionModel: Model? {
-        get { lock.withLock { _compactionModel } }
-        set { lock.withLock { _compactionModel = newValue } }
+        get { lockedState.withLockedValue { $0.compactionModel } }
+        set { lockedState.withLockedValue { $0.compactionModel = newValue } }
     }
     public var authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)? {
-        get { lock.withLock { _authResolver } }
-        set { lock.withLock { _authResolver = newValue } }
+        get { lockedState.withLockedValue { $0.authResolver } }
+        set { lockedState.withLockedValue { $0.authResolver = newValue } }
     }
 
     /// Base delay (ms) used for exponential backoff between stream retries.
     /// Exposed internally so tests can shrink the 1-second default.
     internal var retryBaseDelayMs: UInt64 {
-        get { lock.withLock { _retryBaseDelayMs } }
-        set { lock.withLock { _retryBaseDelayMs = newValue } }
+        get { lockedState.withLockedValue { $0.retryBaseDelayMs } }
+        set { lockedState.withLockedValue { $0.retryBaseDelayMs = newValue } }
     }
 
     private let steeringQueue: PendingMessageQueue
@@ -413,29 +203,31 @@ public final class Agent: @unchecked Sendable {
         }
         self.sessionId = options.sessionId
         self.cwd = options.cwd
-        // Assign backing storage directly — the public accessors are
+        // Build the locked storage directly — the public accessors are
         // lock-guarded computed properties, so they can't be used until every
         // stored property is initialized.
-        self._toolExecution = options.toolExecution
-        self._toolChoice = options.toolChoice
-        self._parallelToolCalls = options.parallelToolCalls
-        self._thinkingBudgets = options.thinkingBudgets
-        self._maxRetryDelayMs = options.maxRetryDelayMs
-        self._maxTurns = options.maxTurns
+        self.lockedState = NIOLockedValueBox(LockedState(
+            thinkingBudgets: options.thinkingBudgets,
+            maxRetryDelayMs: options.maxRetryDelayMs,
+            maxTurns: options.maxTurns,
+            toolExecution: options.toolExecution,
+            toolChoice: options.toolChoice,
+            parallelToolCalls: options.parallelToolCalls,
+            beforeToolCall: options.beforeToolCall,
+            afterToolCall: options.afterToolCall,
+            userPromptSubmit: options.userPromptSubmit,
+            convertToLlm: options.convertToLlm,
+            transformContext: options.transformContext,
+            betweenTurns: options.betweenTurns,
+            beforeRunEnd: options.beforeRunEnd,
+            autoCompact: options.autoCompact,
+            idleCompact: options.idleCompact,
+            compactionModel: options.compactionModel,
+            authResolver: options.authResolver
+        ))
         self.finalTextOnlyOnLastTurn = options.finalTextOnlyOnLastTurn
         self.terminalToolName = options.terminalToolName
         self.terminalToolReminderLimit = max(0, options.terminalToolReminderLimit)
-        self._beforeToolCall = options.beforeToolCall
-        self._afterToolCall = options.afterToolCall
-        self._userPromptSubmit = options.userPromptSubmit
-        self._convertToLlm = options.convertToLlm
-        self._transformContext = options.transformContext
-        self._betweenTurns = options.betweenTurns
-        self._beforeRunEnd = options.beforeRunEnd
-        self._autoCompact = options.autoCompact
-        self._idleCompact = options.idleCompact
-        self._compactionModel = options.compactionModel
-        self._authResolver = options.authResolver
         self.steeringQueue = PendingMessageQueue(mode: options.steeringMode)
         self.followUpQueue = PendingMessageQueue(mode: options.followUpMode)
         self.runtimeAsideQueue = PendingMessageQueue(mode: .all)
@@ -559,33 +351,33 @@ public final class Agent: @unchecked Sendable {
 
     public func subscribe(_ handler: @escaping AgentListener) -> Unsubscribe {
         let id = UUID()
-        lock.withLock { listeners.append((id, handler)) }
+        lockedState.withLockedValue { $0.listeners.append((id, handler)) }
         return { [weak self] in
             guard let self else { return }
-            self.lock.withLock {
-                self.listeners.removeAll { $0.id == id }
+            self.lockedState.withLockedValue { state in
+                state.listeners.removeAll { $0.id == id }
             }
         }
     }
 
     private func snapshotListeners() -> [AgentListener] {
-        lock.withLock { listeners.map { $0.handler } }
+        lockedState.withLockedValue { state in state.listeners.map { $0.handler } }
     }
 }
 
 /// Tiny Sendable mutable boolean for closure capture.
-final class FlagBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Bool
-    init(initial: Bool) { self.value = initial }
+final class FlagBox: Sendable {
+    private let value: NIOLockedValueBox<Bool>
+    init(initial: Bool) { self.value = NIOLockedValueBox(initial) }
     /// If true, flip to false and return true. Otherwise return false.
     func swapFalse() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if value { value = false; return true }
-        return false
+        value.withLockedValue { value in
+            if value { value = false; return true }
+            return false
+        }
     }
-    func set(_ v: Bool) { lock.withLock { value = v } }
-    func get() -> Bool { lock.withLock { value } }
+    func set(_ v: Bool) { value.withLockedValue { $0 = v } }
+    func get() -> Bool { value.withLockedValue { $0 } }
 }
 
 extension Agent {
@@ -697,8 +489,8 @@ extension Agent {
     }
 
     public func abort() {
-        let cancellations = lock.withLock {
-            [activeCancellation, maintenanceCancellation].compactMap { $0 }
+        let cancellations = lockedState.withLockedValue { state in
+            [state.activeCancellation, state.maintenanceCancellation].compactMap { $0 }
         }
         for cancellation in cancellations {
             cancellation.cancel(reason: "aborted")
@@ -709,9 +501,9 @@ extension Agent {
     /// Existing work is cancelled; callers may await `waitForIdle()` before
     /// closing provider resources.
     public func retire() {
-        let cancellations = lock.withLock { () -> [CancellationHandle] in
-            retired = true
-            return [activeCancellation, maintenanceCancellation].compactMap { $0 }
+        let cancellations: [CancellationHandle] = lockedState.withLockedValue { state in
+            state.retired = true
+            return [state.activeCancellation, state.maintenanceCancellation].compactMap { $0 }
         }
         for cancellation in cancellations {
             cancellation.cancel(reason: "session retired")
@@ -722,9 +514,9 @@ extension Agent {
 
     public func waitForIdle() async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            let shouldResume: Bool = lock.withLock {
-                if activeCancellation == nil && maintenanceCancellation == nil { return true }
-                idleWaiters.append(cont)
+            let shouldResume: Bool = lockedState.withLockedValue { state in
+                if state.activeCancellation == nil && state.maintenanceCancellation == nil { return true }
+                state.idleWaiters.append(cont)
                 return false
             }
             if shouldResume { cont.resume() }
@@ -742,12 +534,12 @@ extension Agent {
     public func withMaintenance<T: Sendable>(
         _ body: @escaping @Sendable (CancellationHandle) async -> T
     ) async throws -> T {
-        let cancellation = try lock.withLock { () throws -> CancellationHandle in
-            if retired || activeCancellation != nil || maintenanceCancellation != nil {
+        let cancellation: CancellationHandle = try lockedState.withLockedValue { state in
+            if state.retired || state.activeCancellation != nil || state.maintenanceCancellation != nil {
                 throw AgentError.alreadyRunning
             }
             let cancellation = CancellationHandle()
-            maintenanceCancellation = cancellation
+            state.maintenanceCancellation = cancellation
             return cancellation
         }
 
@@ -874,22 +666,25 @@ extension Agent {
     }
 
     private func runLifecycle(
-        _ executor: @escaping @Sendable (_ cancellation: CancellationHandle, _ emit: @escaping AgentEventSink) async throws -> Void
+        _ executor: @escaping @Sendable (
+            _ cancellation: CancellationHandle,
+            _ emit: @escaping AgentEventSink
+        ) async throws -> Void
     ) async throws {
         let cancellation = try acquireRun()
         await runOwnedLifecycle(cancellation: cancellation, executor)
     }
 
     private func acquireRun() throws -> CancellationHandle {
-        try lock.withLock { () throws -> Void in
-            if retired || activeCancellation != nil || maintenanceCancellation != nil {
+        try lockedState.withLockedValue { (state: inout LockedState) throws -> Void in
+            if state.retired || state.activeCancellation != nil || state.maintenanceCancellation != nil {
                 throw AgentError.alreadyRunning
             }
             let handle = CancellationHandle()
-            activeCancellation = handle
+            state.activeCancellation = handle
         }
 
-        let cancellation = lock.withLock { activeCancellation! }
+        let cancellation = lockedState.withLockedValue { $0.activeCancellation! }
         idleCompactionTimer.cancel()
         state.setStreaming(true)
         state.setStreamingMessage(nil)
@@ -899,7 +694,10 @@ extension Agent {
 
     private func runOwnedLifecycle(
         cancellation: CancellationHandle,
-        _ executor: @escaping @Sendable (_ cancellation: CancellationHandle, _ emit: @escaping AgentEventSink) async throws -> Void
+        _ executor: @escaping @Sendable (
+            _ cancellation: CancellationHandle,
+            _ emit: @escaping AgentEventSink
+        ) async throws -> Void
     ) async {
         let emit: AgentEventSink = { [weak self] event in
             await self?.processEvent(event, cancellation: cancellation)
@@ -921,10 +719,10 @@ extension Agent {
         state.setStreaming(false)
         state.setStreamingMessage(nil)
         state.clearPendingToolCalls()
-        let waiters: [CheckedContinuation<Void, Never>] = lock.withLock {
-            activeCancellation = nil
-            let drained = idleWaiters
-            idleWaiters.removeAll()
+        let waiters: [CheckedContinuation<Void, Never>] = lockedState.withLockedValue { state in
+            state.activeCancellation = nil
+            let drained = state.idleWaiters
+            state.idleWaiters.removeAll()
             return drained
         }
         for waiter in waiters { waiter.resume() }
@@ -932,11 +730,11 @@ extension Agent {
     }
 
     private func finishMaintenance(_ cancellation: CancellationHandle) {
-        let waiters: [CheckedContinuation<Void, Never>] = lock.withLock {
-            guard maintenanceCancellation === cancellation else { return [] }
-            maintenanceCancellation = nil
-            let drained = idleWaiters
-            idleWaiters.removeAll()
+        let waiters: [CheckedContinuation<Void, Never>] = lockedState.withLockedValue { state in
+            guard state.maintenanceCancellation === cancellation else { return [] }
+            state.maintenanceCancellation = nil
+            let drained = state.idleWaiters
+            state.idleWaiters.removeAll()
             return drained
         }
         for waiter in waiters { waiter.resume() }
@@ -1007,7 +805,7 @@ extension Agent {
             context: measuredContext,
             model: model
         )
-        let inputBudget = automaticInputBudget(for: model)
+        let inputBudget = AgentRequestBudget.inputTokens(for: model)
         let isBlockingPreflight: Bool = {
             guard case .preflight(let pendingMessages) = trigger else { return false }
             return pendingMessages.isEmpty && usage.tokens >= inputBudget
@@ -1160,13 +958,9 @@ extension Agent {
             1,
             min(
                 Int(Double(window) * triggerRatio * recoveryRatio),
-                automaticInputBudget(for: model)
+                AgentRequestBudget.inputTokens(for: model)
             )
         )
-    }
-
-    private func automaticInputBudget(for model: Model) -> Int {
-        AgentRequestBudget.inputTokens(for: model)
     }
 
     private func emitSynthetic(_ event: AgentEvent, cancellation: CancellationHandle?) async {
@@ -1199,7 +993,7 @@ extension Agent {
         )
         state.appendMessage(.assistant(failure))
         state.setErrorMessage(failure.errorMessage)
-        let cancellation = lock.withLock { activeCancellation }
+        let cancellation = lockedState.withLockedValue { $0.activeCancellation }
         let listeners = snapshotListeners()
         // Emit the synthetic failure as a normal message pair so
         // transcript renderers show it as `✗ err` instead of silently

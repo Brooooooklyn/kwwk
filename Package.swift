@@ -5,8 +5,12 @@ let package = Package(
     name: "kwwk",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17),
-        .macCatalyst(.v17),
+        // iOS 15 is where Swift Concurrency became part of the OS; nothing in
+        // the tree needs a later iOS API. SwiftPM raises every target to this
+        // floor, so a `--triple arm64-apple-ios15.0` build only gets an iOS 15
+        // binary when it says 15 here too.
+        .iOS(.v15),
+        .macCatalyst(.v15),
     ],
     products: [
         // Provider sign-in, token refresh and subscription usage with no
@@ -44,6 +48,12 @@ let package = Package(
         // over the system zlib.h clashes with both this module and the Apple
         // SDK's `zlib` module in any package graph that loads either.
         .package(url: "https://github.com/the-swift-collective/zlib.git", from: "1.3.1"),
+        // Command-line parsing for `kwwk`, `kwwk mcp` and the catalog generators: options, help and
+        // usage errors come from one declaration instead of hand-rolled argv loops.
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // `Deque` for the FIFO queues on the streaming and input paths, where
+        // `Array.removeFirst()` would shift every element on each pop.
+        .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
     ],
     targets: [
         .target(
@@ -52,6 +62,8 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/KWWKAuth"
         ),
@@ -65,6 +77,8 @@ let package = Package(
                 .product(name: "ZLibC", package: "zlib", condition: .when(platforms: [.linux])),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
                 .product(name: "NIOHTTP2", package: "swift-nio-http2"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "stb_image", package: "Cstb"),
@@ -78,7 +92,10 @@ let package = Package(
         ),
         .target(
             name: "KWWKAgent",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+            ],
             path: "Sources/KWWKAgent"
         ),
         .target(
@@ -87,12 +104,20 @@ let package = Package(
                 "KWWKAI",
                 "KWWKAgent",
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
             ],
             path: "Sources/KWWKMCP"
         ),
         .target(
             name: "KWWKCli",
-            dependencies: ["KWWKAI", "KWWKAgent", "KWWKMCP"],
+            dependencies: [
+                "KWWKAI",
+                "KWWKAgent",
+                "KWWKMCP",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
+            ],
             path: "Sources/KWWKCli"
         ),
         .target(
@@ -101,22 +126,34 @@ let package = Package(
         ),
         .executableTarget(
             name: "kwwk",
-            dependencies: ["KWWKCli"],
+            dependencies: [
+                "KWWKCli",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Sources/kwwk"
         ),
         .executableTarget(
             name: "kwwk-generate-models",
-            dependencies: ["KWWKGenerateModelsCore"],
+            dependencies: [
+                "KWWKGenerateModelsCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateModels"
         ),
         .executableTarget(
             name: "kwwk-generate-cursor-models",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateCursorModels"
         ),
         .executableTarget(
             name: "kwwk-generate-devin-models",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateDevinModels"
         ),
         .testTarget(
@@ -127,7 +164,9 @@ let package = Package(
         .testTarget(
             name: "KWWKAITests",
             dependencies: ["KWWKAI", "KWWKAuth", "KWWKGenerateModelsCore"],
-            path: "Tests/KWWKAITests"
+            path: "Tests/KWWKAITests",
+            // Read from the source tree by path (see ProviderErrorFixtureTests).
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "KWWKAgentTests",
@@ -143,6 +182,11 @@ let package = Package(
             name: "KWWKCliTests",
             dependencies: ["KWWKCli", "KWWKAgent", "KWWKAI"],
             path: "Tests/KWWKCliTests"
+        ),
+        .testTarget(
+            name: "kwwkTests",
+            dependencies: ["kwwk"],
+            path: "Tests/kwwkTests"
         ),
     ],
     swiftLanguageModes: [.v6]

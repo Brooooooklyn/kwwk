@@ -322,7 +322,10 @@ enum DevinProto {
     // MARK: - Router assignment (AssignModel)
 
     static func encodeAssignModelRequest(
-        metadata: Metadata, modelRouterUid: String, cascadeId: String, prompt: ChatMessagePrompt?
+        metadata: Metadata,
+        modelRouterUid: String,
+        cascadeId: String,
+        prompt: ChatMessagePrompt?
     ) -> Data {
         var w = ProtoWriter()
         w.bytesField(1, metadata.encode())

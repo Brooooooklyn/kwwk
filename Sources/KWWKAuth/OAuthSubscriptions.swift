@@ -41,6 +41,7 @@ public enum OAuthSubscriptions {
         Provider(id: "kimi-coding", name: "Kimi For Coding", upkeep: .refreshed),
         Provider(id: "xai", name: "Grok", upkeep: .refreshed),
         Provider(id: "zai", name: "Z.ai Coding Plan", upkeep: .permanent),
+        Provider(id: ZaiSite.china.id, name: "BigModel Coding Plan", upkeep: .permanent),
         Provider(id: "openrouter", name: "OpenRouter", upkeep: .permanent),
     ]
 
@@ -93,8 +94,10 @@ public enum OAuthSubscriptions {
             return try await OAuthLogin.loginKimiCoding(identity: kimiIdentity, callbacks: callbacks, client: client)
         case "xai":
             return try await OAuthLogin.loginXai(callbacks: callbacks, client: client)
-        case "zai":
-            return try await OAuthLogin.loginZai(callbacks: callbacks, client: client)
+        case ZaiSite.global.id:
+            return try await OAuthLogin.loginZai(site: .global, callbacks: callbacks, client: client)
+        case ZaiSite.china.id:
+            return try await OAuthLogin.loginZai(site: .china, callbacks: callbacks, client: client)
         case "openrouter":
             return try await OAuthLogin.loginOpenRouter(callbacks: callbacks, client: client)
         default:
@@ -106,7 +109,8 @@ public enum OAuthSubscriptions {
     /// with nothing to renew. `kimiIdentity` is sent for a Kimi login that
     /// recorded no device id of its own; nil uses this machine's.
     public static func refresher(
-        providerId: String, kimiIdentity: KimiDeviceIdentity? = nil
+        providerId: String,
+        kimiIdentity: KimiDeviceIdentity? = nil
     ) -> (any OAuthProvider)? {
         switch providerId {
         case "anthropic": AnthropicOAuthProvider()

@@ -32,8 +32,23 @@ struct MCPProtocolTests {
         #expect(throws: MCPError.self) { try JSONRPCMessage.decodeAll(Data("nope".utf8)) }
         #expect(throws: MCPError.self) { try JSONRPCMessage.decodeAll(Data(#"{"jsonrpc":"2.0"}"#.utf8)) }
         // A null id on an error response is allowed.
-        let error = try JSONRPCMessage.decodeAll(Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"bad"}}"#.utf8))
+        let error = try JSONRPCMessage.decodeAll(
+            Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"bad"}}"#.utf8)
+        )
         #expect(error == [.error(id: nil, error: JSONRPCErrorObject(code: -32700, message: "bad"))])
+    }
+
+    @Test("error codes outside the Int range fall back to internalError")
+    func outOfRangeErrorCode() throws {
+        let huge = try JSONRPCMessage.decodeAll(
+            Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":1e20,"message":"x"}}"#.utf8)
+        )
+        #expect(huge == [.error(id: .int(1), error: JSONRPCErrorObject(code: JSONRPCErrorObject.internalError, message: "x"))])
+        // A fractional in-range code is still truncated.
+        let fractional = try JSONRPCMessage.decodeAll(
+            Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601.7,"message":"x"}}"#.utf8)
+        )
+        #expect(fractional == [.error(id: .int(1), error: JSONRPCErrorObject(code: -32601, message: "x"))])
     }
 
     @Test("newline framing splits lines across chunks")
@@ -150,7 +165,11 @@ struct MCPProtocolTests {
             try MCPToolAdapter.convert(server: "s", tool: "t", result: result)
         }
         do {
-            _ = try MCPToolAdapter.convert(server: "s", tool: "t", result: MCPCallToolResult(content: [], isError: true))
+            _ = try MCPToolAdapter.convert(
+                server: "s",
+                tool: "t",
+                result: MCPCallToolResult(content: [], isError: true)
+            )
         } catch {
             #expect(error.localizedDescription == "MCP tool s/t returned an error")
         }

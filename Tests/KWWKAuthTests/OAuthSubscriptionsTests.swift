@@ -39,8 +39,16 @@ struct OAuthSubscriptionsTests {
 
     @Test("A Kimi refresher carries the fingerprint a host hands it")
     func kimiIdentity() {
-        let identity = KimiDeviceIdentity(deviceId: "abc", deviceName: "server", deviceModel: "Linux", osVersion: "Linux")
-        let kimi = OAuthSubscriptions.refresher(providerId: "kimi-coding", kimiIdentity: identity) as? KimiCodingOAuthProvider
+        let identity = KimiDeviceIdentity(
+            deviceId: "abc",
+            deviceName: "server",
+            deviceModel: "Linux",
+            osVersion: "Linux"
+        )
+        let kimi = OAuthSubscriptions.refresher(
+            providerId: "kimi-coding",
+            kimiIdentity: identity
+        ) as? KimiCodingOAuthProvider
         #expect(kimi?.identity?.deviceId == "abc")
     }
 

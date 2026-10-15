@@ -9,7 +9,6 @@ import KWWKAgent
 @MainActor
 func runCodingTUIInternal(
     model: Model,
-    modelLabel: String,
     cwd: String,
     tools: CodingTools,
     builtinSubagents: BuiltinSubagentSelection = .all,
@@ -252,9 +251,11 @@ func runCodingTUIInternal(
         frame.stateLine = codingFrameStateLine(
             mode: frameStatus.mode,
             isStreaming: agent.state.isStreaming,
+            hasDraft: !frame.input.value.isEmpty,
             runningBackgroundTasks: frameStatus.runningBackgroundTasks,
             queuedPrompts: agent.queuedSteeringCount(),
-            spinner: frame.spinner
+            spinner: frame.spinner,
+            notice: frameStatus.notice
         )
         // Surface the pending queue as a live list above the input (omp-style).
         frame.queuedPrompts = agent.queuedSteeringMessages().map { queuedPromptPreview($0) }
@@ -277,6 +278,24 @@ func runCodingTUIInternal(
             ? "not signed in"
             : ProviderAttribution.getProviderDisplayName(agent.state.model.provider)
         welcomeHeader.update(header)
+    }
+
+    // Show a one-line notice in the state line under the prompt box and drop
+    // it after `seconds`, instead of committing it to scrollback. A newer
+    // notice replaces an older one; the older one's timer then does nothing.
+    let flashNotice: @MainActor @Sendable (String, TimeInterval) -> Void = { text, seconds in
+        frameStatus.noticeToken += 1
+        let token = frameStatus.noticeToken
+        frameStatus.notice = text
+        updateFrameStatus()
+        runner.tui.requestRender()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard frameStatus.noticeToken == token else { return }
+            frameStatus.notice = nil
+            updateFrameStatus()
+            runner.tui.requestRender()
+        }
     }
 
     let recomputeTranscript: @MainActor @Sendable () -> Void = {
@@ -885,6 +904,7 @@ func runCodingTUIInternal(
         SlashCommandInfo(name: $0.name, description: $0.description, aliases: $0.aliases)
     }
     frame.slashCommands = slashCommandInfos
+    frame.atPathCwd = cwd
     frame.promptRow.ghostHintProvider = { input in
         // Suppress the inline ghost suffix while the slash popup is open — the
         // menu already shows (and highlights) the completion target, so a
@@ -986,6 +1006,7 @@ func runCodingTUIInternal(
         }
     }
     slashContext.idleCompactVeto = idleCompactVeto
+    slashContext.flashNotice = { text in flashNotice(text, transientNoticeSeconds) }
     agent.idleCompact = idleCompaction.agentOptions(canCompact: idleCompactVeto)
     runner.onInputActivity = { agentBox.agent.noteIdleActivity() }
 
@@ -1005,11 +1026,36 @@ func runCodingTUIInternal(
             }
             // Slash popup open → resolve the highlighted command, so Enter on
             // `/comp` runs `/compact` rather than failing on the partial name.
+            // A loose (non-prefix) match runs only once the user picked it
+            // with ↑/↓; otherwise a bare unknown `/name` is reported below.
+            // A lone `/` with nothing picked yet keeps the popup open rather
+            // than sending `/` to the model.
+            if frame.slashSubmitKeepsMenuOpen() { return }
+            // `@` popup with a row picked via ↑/↓ → Enter accepts that path
+            // instead of sending the half-typed one.
+            if let completed = frame.atPathCompletionForSubmit() {
+                frame.input.value = completed
+                frame.input.moveEnd()
+                runner.tui.requestRender()
+                return
+            }
             var text = frame.input.value
-            if frame.slashMenuActive, let name = frame.selectedSlashCommandName() {
+            if frame.slashMenuActive, let name = frame.slashCommandNameForSubmit() {
                 text = "/\(name)"
             }
             guard !text.isEmpty else { return }
+
+            if let unknown = unknownBareSlashCommand(text, registry: slashRegistry) {
+                frame.input.value = ""
+                runner.tui.commit([
+                    "",
+                    Style.error("  unknown command: /\(unknown)"),
+                    "",
+                ])
+                updateFrameStatus()
+                runner.tui.requestRender()
+                return
+            }
 
             // Submission only dispatches exact registered names/aliases.
             // Fuzzy matching is an explicit popup/completion affordance; if
@@ -1047,11 +1093,14 @@ func runCodingTUIInternal(
             switch parsed {
             case .command(let name, let args):
                 // Commands mutate shared session state and therefore remain
-                // idle-only.
+                // idle-only. The rejected command goes into ↑ history: the
+                // first Esc clears it from the editor (the slash popup step)
+                // before the second one stops the agent.
                 guard !busy else {
+                    frame.input.addToHistory(text)
                     runner.tui.commit([
                         "",
-                        Style.error("  slash commands run only when the agent is idle — stop it first (Esc) or wait"),
+                        Style.error(busySlashCommandNotice),
                         "",
                     ])
                     updateFrameStatus()
@@ -1171,6 +1220,10 @@ func runCodingTUIInternal(
             if frame.slashMenuActive, let name = frame.selectedSlashCommandName() {
                 frame.input.value = "/\(name) "
                 frame.input.moveEnd()
+            } else if let completed = frame.atPathCompletionForTab() {
+                // `@` popup open → complete the path to the highlighted row.
+                frame.input.value = completed
+                frame.input.moveEnd()
             } else if frame.input.cursor == frame.input.value.count,
                let completion = slashCompletion(for: frame.input.value, commands: slashCommandInfos) {
                 frame.input.value = completion.completedInput
@@ -1191,6 +1244,7 @@ func runCodingTUIInternal(
         Task { @MainActor in
             if modal.isOpen { modal.routeUp() }
             else if frame.slashMenuActive { frame.menuMove(-1); runner.tui.requestRender() }
+            else if frame.atMenuActive { frame.atMenuMove(-1); runner.tui.requestRender() }
             else { frame.input.cursorUp(); updateFrameStatus(); runner.tui.requestRender() }
         }
     }
@@ -1198,6 +1252,7 @@ func runCodingTUIInternal(
         Task { @MainActor in
             if modal.isOpen { modal.routeDown() }
             else if frame.slashMenuActive { frame.menuMove(1); runner.tui.requestRender() }
+            else if frame.atMenuActive { frame.atMenuMove(1); runner.tui.requestRender() }
             else { frame.input.cursorDown(); updateFrameStatus(); runner.tui.requestRender() }
         }
     }
@@ -1269,10 +1324,12 @@ func runCodingTUIInternal(
                     retry.trackedActive = false
                 }
             } else if !frame.input.value.isEmpty {
+                // The hint lives only as long as the exit arm, in the state
+                // line rather than scrollback, so it never outlasts its truth.
                 frame.input.value = ""
-                runner.tui.commit(["", Style.dimmed("  cleared — press Ctrl-C again to exit")])
+                flashNotice("cleared — press Ctrl-C again to exit", CtrlCState.window)
             } else {
-                runner.tui.commit(["", Style.dimmed("  press Ctrl-C again to exit")])
+                flashNotice("press Ctrl-C again to exit", CtrlCState.window)
             }
             updateFrameStatus()
             runner.tui.requestRender()
@@ -1297,15 +1354,22 @@ func runCodingTUIInternal(
         runner.tui.forceRepaint()
     }
 
-    // Esc. Three modes of operation:
+    // Esc. Each press does the first of these that applies:
     //   1. modal open → cancel the modal (no agent state touched).
-    //   2. agent streaming or manual compacting → abort the active owner.
-    //   3. idle with an empty editor → arm double-Esc; a second press
+    //   2. the `@` file popup open → close it, keeping the draft.
+    //   3. a bare `/query` in the editor → close the slash popup and drop
+    //      the query.
+    //   4. any other draft in the editor → clear it (kept in ↑ history).
+    //   5. agent streaming or manual compacting → abort the active owner.
+    //   6. idle with an empty editor → arm double-Esc; a second press
     //      within the window opens the rewind-to-message selector.
+    //
+    // So with a draft in the editor it takes two presses to stop the agent;
+    // the state line says "Esc twice to cancel" then.
     //
     // Double-Esc invariant: only an Esc that did NOTHING else may count as a
     // tap of the double-tap. Every branch that consumes the press for another
-    // purpose (modal cancel or abort) — and any press with draft text
+    // purpose (modal cancel, draft clear or abort) — and any press with draft text
     // in the editor — resets the arm, so cancelling a modal and then pressing
     // Esc again can never surprise-open the selector.
     let doubleEsc = DoubleEscState()
@@ -1315,6 +1379,26 @@ func runCodingTUIInternal(
             if modal.isOpen {
                 doubleEsc.lastPress = nil
                 modal.routeCancel()
+                return
+            }
+            // Draft text comes before the agent: the first Esc closes an open
+            // slash popup (dropping its `/query`), the next clears any other
+            // draft (kept in ↑ history so it isn't lost), and only an empty
+            // editor lets Esc interrupt the agent.
+            // An open `@` popup closes first, keeping the draft as typed.
+            if frame.dismissAtMenu() {
+                doubleEsc.lastPress = nil
+                runner.tui.requestRender()
+                return
+            }
+            if let dismissesSlashMenu = escapeClearsSlashMenu(frame.input.value) {
+                doubleEsc.lastPress = nil
+                if !dismissesSlashMenu {
+                    frame.input.addToHistory(frame.input.value)
+                }
+                frame.input.value = ""
+                updateFrameStatus()
+                runner.tui.requestRender()
                 return
             }
             let wasStreaming = agent.state.isStreaming
@@ -1458,28 +1542,6 @@ func runCodingTUIInternal(
 
 // MARK: - Helpers
 
-/// Lock-protected snapshot of the welcome card's context, bridging the
-/// MainActor (where login/logout/model-switch state changes) and the render
-/// path (where the @Sendable `headerProvider` re-renders the header on a
-/// resize full-repaint). Writers call `update` from the MainActor; readers
-/// take an immutable copy under the lock — no unsynchronized MainActor reads.
-final class WelcomeHeaderState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var context: WelcomeContext
-
-    init(_ context: WelcomeContext) {
-        self.context = context
-    }
-
-    func update(_ context: WelcomeContext) {
-        lock.withLock { self.context = context }
-    }
-
-    func snapshot() -> WelcomeContext {
-        lock.withLock { context }
-    }
-}
-
 /// Tracks the last Ctrl-C press so a second press within `window` exits while
 /// a lone press cancels/clears (pi's two-stage Ctrl-C). Reference type so the
 /// @MainActor keybinding closure can mutate it under Swift 6 concurrency.
@@ -1504,6 +1566,10 @@ private final class FrameStatusState {
     var isPreparingAttachments = false
     var isRewinding = false
     var isSessionSwitching = false
+    /// Transient one-line notice for the state line; `noticeToken` lets an
+    /// expiry timer clear only the notice it was scheduled for.
+    var notice: String?
+    var noticeToken = 0
 
     func reconcileMode(messageCount: Int, isStreaming: Bool) {
         switch mode {
@@ -1553,58 +1619,6 @@ final class PollHandle {
     var task: Task<Void, Never>?
 }
 
-/// Owns the complete session-scoped coding runtime. An Agent's session id and
-/// its bash/task/subagent tools are immutable by design, so a hot session switch
-/// replaces this whole value rather than mutating transcript state in place.
-@MainActor
-final class AgentSessionBox {
-    private(set) var codingAgent: CodingAgent
-    var eventUnsubscribe: Unsubscribe?
-    private(set) var generation: UInt64 = 0
-
-    init(_ codingAgent: CodingAgent) {
-        self.codingAgent = codingAgent
-    }
-
-    var agent: Agent { codingAgent.agent }
-    var sessionId: String { agent.sessionId ?? "" }
-
-    func replace(with replacement: CodingAgent) {
-        codingAgent = replacement
-        generation &+= 1
-    }
-
-    func isCurrent(agent expectedAgent: Agent, generation expectedGeneration: UInt64) -> Bool {
-        generation == expectedGeneration && agent === expectedAgent
-    }
-}
-
-/// Carry user/runtime preferences across a session replacement without
-/// copying session-scoped tools, queues, listeners, messages, or background
-/// attachments. Those are intentionally rebuilt for the new identity.
-@MainActor
-func copyAgentRuntimePreferences(from source: Agent, to destination: Agent) {
-    destination.state.systemPrompt = source.state.systemPrompt
-    destination.state.model = source.state.model
-    destination.state.thinkingLevel = source.state.thinkingLevel
-    destination.state.thinkingDisplay = source.state.thinkingDisplay
-    destination.state.verboseEnabled = source.state.verboseEnabled
-    destination.thinkingBudgets = source.thinkingBudgets
-    destination.maxRetryDelayMs = source.maxRetryDelayMs
-    destination.maxTurns = source.maxTurns
-    destination.toolExecution = source.toolExecution
-    destination.toolChoice = source.toolChoice
-    destination.parallelToolCalls = source.parallelToolCalls
-    destination.beforeToolCall = source.beforeToolCall
-    destination.afterToolCall = source.afterToolCall
-    destination.userPromptSubmit = source.userPromptSubmit
-    destination.convertToLlm = source.convertToLlm
-    destination.transformContext = source.transformContext
-    destination.betweenTurns = source.betweenTurns
-    destination.compactionModel = source.compactionModel
-    destination.idleCompact = source.idleCompact
-}
-
 /// Whether the goal-continuation loop's logged-out "/login" hint has already
 /// been shown for the current logged-out stretch. Reference type so the
 /// @MainActor `kickGoalContinuation` closure can mutate it (a captured `var`
@@ -1614,76 +1628,7 @@ final class GoalLoggedOutHintState {
     var shown = false
 }
 
-/// Mutable holder for the live session recorder + its agent subscription.
-/// `/resume` swaps both to repoint persistence at the restored session file;
-/// a reference type lets the resume closure mutate them without capturing a
-/// `var` (rejected under Swift 6 strict concurrency).
-@MainActor
-final class RecorderBox {
-    var recorder: SessionRecorder
-    var unsubscribe: Unsubscribe
-    var sessionId: String
-
-    init(recorder: SessionRecorder, unsubscribe: @escaping Unsubscribe, sessionId: String) {
-        self.recorder = recorder
-        self.unsubscribe = unsubscribe
-        self.sessionId = sessionId
-    }
-}
-
-/// Tracks the most recent prompt submission so `/retry` can resubmit it when
-/// the turn ended in error or was interrupted. A reference type so the submit
-/// path, the failure edges (catch / Esc-abort), and the `/retry` handler all
-/// share one mutable record under Swift 6 strict concurrency.
-@MainActor
-final class TurnRetryState {
-    /// The built prompt text of the last submission (already attachment-expanded).
-    var lastText: String?
-    /// The built image attachments of the last submission.
-    var lastImages: [ImageContent] = []
-    /// True when the last turn ended in error or was aborted — the only state
-    /// in which `/retry` resubmits.
-    var failed = false
-    /// True while a user-initiated turn (direct submit or steer) is in flight
-    /// and eligible for `/retry`. Command-driven prompts (`/init`, custom
-    /// commands) never set this, so a failure on one of those internal turns
-    /// can't arm `/retry` with a stale internal prompt. Consumed (reset to
-    /// false) at every `.agentEnd` and on Esc-abort.
-    var trackedActive = false
-
-    func clear() {
-        lastText = nil
-        lastImages.removeAll(keepingCapacity: false)
-        failed = false
-        trackedActive = false
-    }
-}
-
-/// Concatenated text of a queued user message's text blocks (image blocks
-/// are ignored). Used to restore a popped prompt back into the editor.
-@MainActor
-func queuedMessageBodyText(_ msg: Message) -> String {
-    guard case .user(let u) = msg else { return "" }
-    return u.content.compactMap { block -> String? in
-        if case .text(let t) = block { return t.text }
-        return nil
-    }.joined(separator: "\n")
-}
-
-/// One-line preview of a queued prompt for the live pending list: text blocks
-/// flattened onto a single line, with an `[image]` marker appended when the
-/// queued message also carries image content.
-@MainActor
-func queuedPromptPreview(_ msg: Message) -> String {
-    var text = queuedMessageBodyText(msg).replacingOccurrences(of: "\n", with: " ")
-    if case .user(let u) = msg,
-       u.content.contains(where: { if case .image = $0 { return true } else { return false } }) {
-        text = text.isEmpty ? "[image]" : text + "  [image]"
-    }
-    return text
-}
-
-private enum CodingFrameMode {
+enum CodingFrameMode {
     case idle
     case aborting
     case compacting(messageCount: Int)
@@ -1713,60 +1658,32 @@ func abortInteractiveAgentWork(
     return true
 }
 
-/// Tracks the prompt most recently popped back into the editor by Alt+↑ so a
-/// repeat press can keep cycling through the remaining queued items instead of
-/// stopping after one. Reference type so the @MainActor keybinding closures can
-/// mutate it without capturing a `var` (rejected under Swift 6 concurrency).
-@MainActor
-final class DequeueCycleState {
-    var last: Message?
+/// What an Esc press clears before it may touch the agent: nil for an empty
+/// editor (Esc falls through to abort / double-Esc); otherwise whether the
+/// clear dismisses the slash popup (the draft is a bare `/query`) rather
+/// than dropping an ordinary draft. A path-like bare draft (`/Users/me/file`)
+/// counts as an ordinary draft, so Esc keeps it in ↑ history.
+func escapeClearsSlashMenu(_ input: String) -> Bool? {
+    guard !input.isEmpty else { return nil }
+    guard let name = bareSlashQuery(input) else { return false }
+    return !slashQueryLooksLikePath(name)
 }
 
-/// Whether a finished run should be marked retryable for `/retry`: true when it
-/// ended in a hard error (retries exhausted / turn cap / synthetic failure) or
-/// was aborted by the user. This is the authoritative failure signal — genuine
-/// failures return normally from `agent.prompt()` and surface only as an
-/// `.agentEnd` whose `summary.finalStopReason` is `.error` / `.aborted`.
-func turnEndedRetryable(_ summary: AgentRunSummary) -> Bool {
-    summary.finalStopReason == .error || summary.finalStopReason == .aborted
+/// Whether a bare slash query reads as a file path rather than a command
+/// name, so it is treated as prompt text instead of a command.
+func slashQueryLooksLikePath(_ name: String) -> Bool {
+    name.contains(where: { $0 == "/" || $0 == "." || $0 == "\\" })
 }
 
-/// Derive the `/retry` target for a just-finished (or just-aborted) turn, or
-/// `nil` when the turn must not arm `/retry`. Two gates must both hold:
-///
-///   1. The turn is *retryable*: it was aborted by the user (`aborted`), or its
-///      `summary.finalStopReason` is `.error` / `.aborted` (see
-///      `turnEndedRetryable`).
-///   2. The turn was *user-initiated*: `trackedActive` is true. Command-driven
-///      turns (`/init`, custom commands) never set it, so a failed internal
-///      prompt can't leak into `/retry`.
-///
-/// When both hold, the target is derived from the LAST `.user` message actually
-/// in `messages` — the message the agent was executing — so a direct submit, a
-/// steered follow-up, or a `/retry` resubmit all resolve to the real prompt in
-/// flight rather than any separately-recorded copy. Text is the message's
-/// `.text` blocks joined with newlines; images are its `.image` blocks.
+/// The command name when Enter on `text` should report an unknown command
+/// instead of running or sending anything: a bare `/name` (no arguments)
+/// that no command or alias answers to. Path-like text (`/Users/me/file`,
+/// `/notes.md`) is left alone so it is still sent as a prompt.
 @MainActor
-func retryArmTarget(
-    summary: AgentRunSummary?,
-    aborted: Bool,
-    trackedActive: Bool,
-    messages: [Message]
-) -> (text: String, images: [ImageContent])? {
-    guard trackedActive else { return nil }
-    let retryable = aborted || (summary.map(turnEndedRetryable) ?? false)
-    guard retryable else { return nil }
-    guard let last = messages.last(where: { if case .user = $0 { return true } else { return false } }),
-          case .user(let u) = last else { return nil }
-    let text = u.content.compactMap { block -> String? in
-        if case .text(let t) = block { return t.text }
-        return nil
-    }.joined(separator: "\n")
-    let images = u.content.compactMap { block -> ImageContent? in
-        if case .image(let i) = block { return i }
-        return nil
-    }
-    return (text: text, images: images)
+func unknownBareSlashCommand(_ text: String, registry: SlashCommandRegistry) -> String? {
+    guard let name = bareSlashQuery(text), !name.isEmpty else { return nil }
+    guard !slashQueryLooksLikePath(name) else { return nil }
+    return registry.find(name) == nil ? name : nil
 }
 
 /// Submit a direct prompt without losing it if another run acquires ownership
@@ -1789,137 +1706,6 @@ func promptPreservingContention(
         await agent.waitForIdle()
         try? await agent.continue()
     }
-}
-
-/// Reset the per-session transient state that must not survive a session swap
-/// (`/new` or `/resume`): drain the steering queue, clear the `/retry` record,
-/// drop outgoing attachments, and forget the Alt+↑ dequeue cursor. Shared by both
-/// session-swap paths so neither leaks stale state into the incoming session
-/// (e.g. a `failed`/`lastText` record that `/retry` would resubmit into the
-/// wrong transcript). Does NOT touch `agent.state.messages` or the input
-/// buffer — each caller manages those (clear vs. load).
-@MainActor
-func resetSessionTransientState(
-    agent: Agent,
-    retry: TurnRetryState,
-    attachments: AttachmentStore,
-    dequeueCycle: DequeueCycleState,
-    discardingAttachments snapshot: AttachmentPromptSnapshot? = nil
-) {
-    agent.clearSteeringQueue()
-    retry.clear()
-    if let snapshot {
-        attachments.consume(snapshot)
-    } else {
-        attachments.clear()
-    }
-    dequeueCycle.last = nil
-}
-
-/// Start a fresh, empty session in place: repoint persistence at a brand-new
-/// session file, clear the live agent context + steering queue, reset retry and
-/// attachment state, and commit a labeled separator to scrollback. A draft
-/// composed while the async handoff is running belongs to the new session and
-/// is preserved. This helper is extracted from the `/new` handler so the reset
-/// is unit-testable.
-@MainActor
-func performNewSession(
-    newId: String = UUID().uuidString,
-    recorderBox: RecorderBox,
-    sessionStore: SessionStore,
-    agent: Agent,
-    replaceSessionAgent: (@MainActor @Sendable (String, [Message]) async -> Agent)? = nil,
-    cwd: String,
-    attachments: AttachmentStore,
-    retry: TurnRetryState,
-    dequeueCycle: DequeueCycleState,
-    frame: CodingFrame,
-    width: Int,
-    commit: ([String]) -> Void,
-    recompute: () -> Void,
-    updateStatus: () -> Void,
-    requestRender: () -> Void
-) async {
-    let inputBeforeSwitch = frame.input.value
-    let attachmentsBeforeSwitch = attachments.promptSnapshot(for: inputBeforeSwitch)
-
-    // Stop the outgoing recorder before the runtime replacement so a late
-    // callback cannot append to the new session file.
-    recorderBox.unsubscribe()
-    let sessionAgent: Agent
-    if let replaceSessionAgent {
-        sessionAgent = await replaceSessionAgent(newId, [])
-    } else {
-        // Retained for focused helper tests and embedders that don't own a
-        // rebuild factory. The interactive TUI always supplies the factory.
-        agent.state.messages = []
-        sessionAgent = agent
-    }
-    let recorder = SessionRecorder(
-        store: sessionStore,
-        sessionId: newId,
-        cwd: cwd,
-        model: sessionAgent.state.model.id,
-        provider: sessionAgent.state.model.provider,
-        persistedCount: 0
-    )
-    await recorder.ensureCreated()
-    recorderBox.recorder = recorder
-    recorderBox.unsubscribe = recorder.attach(to: sessionAgent)
-    recorderBox.sessionId = newId
-
-    // Reset the live context. Native scrollback can't be cleared, so the prior
-    // conversation stays above a labeled separator and the fresh session begins
-    // below it.
-    resetSessionTransientState(
-        agent: sessionAgent,
-        retry: retry,
-        attachments: attachments,
-        dequeueCycle: dequeueCycle,
-        discardingAttachments: attachmentsBeforeSwitch
-    )
-    if frame.input.value == inputBeforeSwitch {
-        frame.input.value = ""
-    }
-
-    commit([
-        "",
-        Theme.borderText(String(repeating: "─", count: max(8, width - 2))),
-        Theme.accentText("✦ new session \(newId.prefix(8))", bold: false),
-    ])
-
-    recompute()
-    updateStatus()
-    requestRender()
-}
-
-/// One Alt+↑ dequeue-cycle step. Returns the new single-line input value to
-/// install, or `nil` for a no-op (the editor holds an edited draft, or the
-/// steering queue is empty). Extracted from the keybinding so the cycle logic —
-/// draft protection, LIFO rotation, and newline flattening — is unit-testable.
-///
-/// `input` is the current editor text; `state.last` is the prompt most recently
-/// popped back into the editor. When `input` still equals that popped prompt
-/// (unedited), the prompt is returned to the front of the queue before the next
-/// pop, so repeated presses rotate through every queued item without loss.
-@MainActor
-func dequeueCycleStep(input: String, state: DequeueCycleState, agent: Agent) -> String? {
-    let matchesLast = state.last.map {
-        input == queuedMessageBodyText($0).replacingOccurrences(of: "\n", with: " ")
-    } ?? false
-    // Never clobber a draft the user is mid-composing.
-    guard input.isEmpty || matchesLast else { return nil }
-    // Cycling onward: return the unedited prompt to the front so the next pop
-    // walks back to the prior item rather than re-popping it.
-    if matchesLast, let last = state.last {
-        agent.pushFrontSteeringMessage(last)
-    }
-    guard let msg = agent.popLastSteeringMessage() else {
-        state.last = nil
-        return nil
-    }
-    state.last = msg
-    return queuedMessageBodyText(msg).replacingOccurrences(of: "\n", with: " ")
 }
 
 /// Gate a prompt submission when the session has no registered provider
@@ -1971,26 +1757,48 @@ private func promptMetaLabel(
     }
     let capacity = ANSI.stripEscapes(capacityHint)
     if !capacity.isEmpty {
-        let short = capacity.split(separator: "·").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? capacity
+        let short = capacity.split(separator: "·").first.map { String($0).trimmingCharacters(in: .whitespaces) }
+            ?? capacity
         parts.append(short.hasPrefix("●") ? Theme.paint(short, Theme.warn) : Theme.faintText(short))
     }
     return parts.joined(separator: Theme.faintText(" · "))
 }
 
-private func codingFrameStateLine(
+/// Shown when Enter on a slash command is rejected because the agent is
+/// busy. Esc clears a draft before it interrupts, so stopping the agent from
+/// here takes two presses; the command is kept in ↑ history meanwhile.
+let busySlashCommandNotice =
+    "  slash commands run only when the agent is idle — wait, or Esc twice to stop it (↑ recalls the command)"
+
+/// The idle prompt-box hint: the keys that act on the draft.
+let idlePromptHint = "↵ send · / commands · @ attach · ⇧↵ newline"
+
+/// How long a transient state-line notice (`/model: cancelled`, …) stays up.
+let transientNoticeSeconds: TimeInterval = 4
+
+/// The state line under the prompt box. `hasDraft` reflects text in the
+/// editor: Esc clears that first, so the cancel hint asks for two presses.
+/// `notice` is a short-lived one-liner (see `SlashContext.notifyTransient`):
+/// while idle it takes the place of the key hint; while busy it goes after
+/// the spinner and cancel hint so truncation never cuts those.
+func codingFrameStateLine(
     mode: CodingFrameMode,
     isStreaming: Bool,
+    hasDraft: Bool,
     runningBackgroundTasks: Int,
     queuedPrompts: Int,
-    spinner: String
+    spinner: String,
+    notice: String? = nil
 ) -> String {
     var parts: [String] = []
+    let noticePart = notice.flatMap { $0.isEmpty ? nil : Theme.paint($0, Theme.accentDim) }
+    let cancelHint = hasDraft ? "Esc twice to cancel" : "Esc to cancel"
 
     switch mode {
     case .compacting(let count):
         parts.append(Theme.paint("\(spinner) compacting \(count) messages", Theme.warn, bold: true))
         parts.append(Theme.faintText("new prompts queue"))
-        parts.append(Theme.faintText("Esc to cancel"))
+        parts.append(Theme.faintText(cancelHint))
     case .shaking:
         parts.append(Theme.paint("\(spinner) shaking context", Theme.warn, bold: true))
     case .preparingAttachments:
@@ -2005,14 +1813,17 @@ private func codingFrameStateLine(
         if !reason.isEmpty {
             parts.append(Theme.faintText(String(reason.prefix(40))))
         }
-        parts.append(Theme.faintText("Esc to cancel"))
+        parts.append(Theme.faintText(cancelHint))
     case .idle:
         if isStreaming {
             parts.append(Theme.paint("\(spinner) generating", Theme.accent, bold: true))
-            parts.append(Theme.faintText("Esc to cancel"))
+            parts.append(Theme.faintText(cancelHint))
         } else {
-            parts.append(Theme.faintText("/ commands · @ attach · ⇧⏎ newline"))
+            parts.append(noticePart ?? Theme.faintText(idlePromptHint))
         }
+    }
+    if let noticePart, mode.isActive || isStreaming {
+        parts.append(noticePart)
     }
 
     if queuedPrompts > 0 {
@@ -2023,75 +1834,4 @@ private func codingFrameStateLine(
     }
 
     return parts.joined(separator: Theme.faintText("  ·  "))
-}
-
-/// Decide how to route a bracketed-paste body into the single-line
-/// input. Ordered checks:
-///   - NSPasteboard has an image (⌘V of a screenshot) → register
-///     with the attachment store as a clipboard image, insert
-///     `[image #N]`. The terminal's paste body is typically empty
-///     or garbage in this case, so we discard it.
-///   - single-line absolute/home/relative path → insert as `@<path> `
-///     so the token survives editing and resolves at submit time.
-///   - small single-line text (< 80 chars, no newlines) → insert
-///     inline verbatim.
-///   - anything else (multi-line, huge paste) → register with the
-///     attachment store and insert a short `[pasted-text #N]`
-///     placeholder so the user sees what's pending without the input
-///     line exploding.
-@MainActor
-func handlePastedBody(
-    _ body: String,
-    input: InputComponent,
-    attachments: AttachmentStore,
-    tui: TUI,
-    inlineLimit: Int = 80
-) {
-    // Pasted TEXT always wins. Only when the bracketed-paste body carries no
-    // text do we fall back to the clipboard image: on macOS a ⌘V of a
-    // screenshot delivers an empty/whitespace paste body while NSPasteboard
-    // holds the real image. Peeking the pasteboard first (the old behavior)
-    // discarded genuinely pasted text whenever a stale image lingered on the
-    // clipboard.
-    if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        if let image = ClipboardImageReader.readIfPresent() {
-            let token = attachments.addClipboardImage(data: image.data, mimeType: image.mimeType)
-            input.insert("\(token) ")
-            tui.requestRender()
-        }
-        // Empty paste with no clipboard image: nothing to insert.
-        return
-    }
-
-    if looksLikeSinglePath(body) {
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Strip surrounding quotes (Finder drag-n-drop wraps paths with
-        // whitespace in double quotes).
-        let unquoted: String = {
-            var t = trimmed
-            if t.count >= 2, let first = t.first, let last = t.last,
-               (first == "\"" && last == "\"") || (first == "'" && last == "'") {
-                t = String(t.dropFirst().dropLast())
-            }
-            return t
-        }()
-        input.insert("@\(unquoted) ")
-        tui.requestRender()
-        return
-    }
-
-    // Multi-line or long paste → promote to a pasted-text attachment.
-    // The threshold is generous enough that an IDE one-liner
-    // (e.g. a copied SQL query) still inserts directly, but a multi-
-    // paragraph paste goes through the attachment path.
-    if body.contains("\n") || body.count > inlineLimit {
-        let token = attachments.addPastedText(body)
-        input.insert("\(token) ")
-        tui.requestRender()
-        return
-    }
-
-    // Plain short paste: insert as-is, no transformation.
-    input.insert(body)
-    tui.requestRender()
 }

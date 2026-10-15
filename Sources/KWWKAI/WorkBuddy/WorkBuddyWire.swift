@@ -109,7 +109,10 @@ enum WorkBuddyWire {
             switch block {
             case .text(let text): return text.text
             case .image(let image):
-                let digest = SHA256.hash(data: Data(image.data.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+                let digest = SHA256.hash(data: Data(image.data.utf8))
+                    .prefix(4)
+                    .map { String(format: "%02x", $0) }
+                    .joined()
                 return "[image:\(digest)]"
             }
         }.joined()
@@ -224,7 +227,8 @@ enum WorkBuddyWire {
     static func unflagged(_ text: String) -> String {
         flagged.reduce(text) { text, rule in
             rule.0.stringByReplacingMatches(
-                in: text, range: NSRange(text.startIndex..., in: text),
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
                 withTemplate: NSRegularExpression.escapedTemplate(for: rule.1)
             )
         }
@@ -373,12 +377,14 @@ enum WorkBuddyWire {
         "WorkBuddy requires an active credit package even for 0-rate free models; check your account package balance"
 
     private static let refused = try! NSRegularExpression(
-        pattern: #"unapproved channel|illegal api invocation"#, options: .caseInsensitive
+        pattern: #"unapproved channel|illegal api invocation"#,
+        options: .caseInsensitive
     )
     /// The code is matched whole: one that only begins with 14018 is another
     /// error.
     private static let exhausted = try! NSRegularExpression(
-        pattern: #"credits exhausted|额度已用尽|["']code["']\s*:\s*["']?14018(?![\d.])"#, options: .caseInsensitive
+        pattern: #"credits exhausted|额度已用尽|["']code["']\s*:\s*["']?14018(?![\d.])"#,
+        options: .caseInsensitive
     )
 
     /// A failed chat's failure in WorkBuddy's own words. Its gateway answers
@@ -395,7 +401,13 @@ enum WorkBuddyWire {
             let error = object(root["error"]) ?? root
             code = [object(error["data"])?["code"], error["code"], root["code"], object(root["data"])?["code"]]
                 .lazy.compactMap(text).first ?? code
-            let said = [error["message"], object(error["data"])?["msg"], root["error"], root["msg"], object(root["data"])?["msg"]]
+            let said = [
+                error["message"],
+                object(error["data"])?["msg"],
+                root["error"],
+                root["msg"],
+                object(root["data"])?["msg"]
+            ]
                 .lazy.compactMap { value -> String? in
                     guard case .string(let words)? = value, !words.isEmpty else { return nil }
                     return words

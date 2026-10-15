@@ -59,8 +59,11 @@ public struct ToolCall: Codable, Sendable, Hashable {
     /// paired tool result arrives out-of-band via `CursorExecBridge.execute`.
     public var cursorExecResolved: Bool?
     public init(
-        id: String, name: String, arguments: JSONValue,
-        thoughtSignature: String? = nil, cursorExecResolved: Bool? = nil
+        id: String,
+        name: String,
+        arguments: JSONValue,
+        thoughtSignature: String? = nil,
+        cursorExecResolved: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -190,7 +193,13 @@ public struct Cost: Codable, Sendable, Hashable {
     public var cacheRead: Double
     public var cacheWrite: Double
     public var total: Double
-    public init(input: Double = 0, output: Double = 0, cacheRead: Double = 0, cacheWrite: Double = 0, total: Double = 0) {
+    public init(
+        input: Double = 0,
+        output: Double = 0,
+        cacheRead: Double = 0,
+        cacheWrite: Double = 0,
+        total: Double = 0
+    ) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead
@@ -213,7 +222,16 @@ public struct Usage: Codable, Sendable, Hashable {
     public var reasoning: Int
     public var totalTokens: Int
     public var cost: Cost
-    public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, reasoning: Int = 0, totalTokens: Int = 0, cost: Cost = .init()) {
+    public init(
+        input: Int = 0,
+        output: Int = 0,
+        cacheRead: Int = 0,
+        cacheWrite: Int = 0,
+        cacheWrite1h: Int = 0,
+        reasoning: Int = 0,
+        totalTokens: Int = 0,
+        cost: Cost = .init()
+    ) {
         self.input = input
         self.output = output
         self.cacheRead = cacheRead

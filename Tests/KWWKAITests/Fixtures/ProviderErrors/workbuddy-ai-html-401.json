@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-10-14T10:55:21.377Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true,
+    "outcome": "signInRequired"
+  },
+  "parser": "http",
+  "provider": "workbuddy-ai",
+  "request": {
+    "method": "POST",
+    "url": "https://www.workbuddy.ai/v2/chat/completions"
+  },
+  "response": {
+    "body": "<html>\r\n<head><title>401 Authorization Required</title></head>\r\n<body>\r\n<center><h1>401 Authorization Required</h1></center>\r\n<hr><center>openresty</center>\r\n<p><em>Powered by <a href=\"https://apisix.apache.org/\">APISIX</a>.</em></p></body>\r\n</html>\r\n",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "text/html; charset=utf-8",
+      "www-authenticate": "Bearer realm=\"copilot\", error=\"invalid_token\", error_description=\"invalid token\"",
+      "x-request-id": "b6dbbc9a7f34643b316cdf27926cf698"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

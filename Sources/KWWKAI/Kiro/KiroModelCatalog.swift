@@ -32,7 +32,8 @@ public enum KiroModels {
             "origin": "KIRO_CLI", "profileArn": KiroOAuth.profileArn(credentials) ?? "",
         ])
         let (response, body) = try await client.request(
-            url: URL(string: "\(KiroOAuth.managementURL(region: region))List-Available-Models?\(query)")!, method: "GET",
+            url: URL(string: "\(KiroOAuth.managementURL(region: region))List-Available-Models?\(query)")!,
+            method: "GET",
             headers: ["Authorization": "Bearer \(credentials.access)", "Accept": "application/json"],
             body: nil
         )
@@ -74,7 +75,10 @@ public enum KiroModels {
             if name.isEmpty || name == id { name = id == "auto" ? "Auto" : id }
             let images = (row.supportedInputTypes ?? []).contains { $0.uppercased() == "IMAGE" }
             let model = Model(
-                id: id, name: name, api: api, provider: "kiro",
+                id: id,
+                name: name,
+                api: api,
+                provider: "kiro",
                 baseURL: runtimeURL(region: region),
                 reasoning: thinks(id),
                 input: images ? [.text, .image] : [.text],
@@ -145,14 +149,16 @@ func kiroAuthResolver(
 ) -> @Sendable (Model, String?) async throws -> ResolvedProviderAuth? {
     { _, _ in
         do {
-            let token = try await manager.apiKey(for: "kiro")
+            let authorization = try await manager.authorization(for: "kiro")
             guard let credentials = try await manager.credentials(for: "kiro") else { return nil }
             var metadata: [String: JSONValue] = [:]
             if let profile = KiroOAuth.profileArn(credentials) { metadata["profileArn"] = .string(profile) }
             return ResolvedProviderAuth(
-                token: token, scheme: .bearer,
+                token: authorization.apiKey,
+                scheme: .bearer,
                 baseURL: KiroModels.runtimeURL(region: KiroOAuth.apiRegion(credentials)),
-                metadata: metadata
+                metadata: metadata,
+                onRejected: authorization.onRejected
             )
         } catch OAuthError.missing, OAuthError.unknownProvider {
             // Not logged in ⇒ anonymous; any other failure propagates.

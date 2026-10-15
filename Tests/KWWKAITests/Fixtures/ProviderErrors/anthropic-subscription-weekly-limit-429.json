@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-10-15T19:07:32.212Z",
+  "expect": {
+    "category": "quota",
+    "credentialRejection": false,
+    "outcome": "quotaExhausted"
+  },
+  "parser": "http",
+  "provider": "anthropic",
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages"
+  },
+  "response": {
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011Cg4YiK1pdddrjw8zm6W3W\"}",
+    "bodyTruncated": false,
+    "headers": {
+      "anthropic-ratelimit-unified-5h-reset": "1792108800",
+      "anthropic-ratelimit-unified-5h-status": "allowed",
+      "anthropic-ratelimit-unified-7d-reset": "1792371600",
+      "anthropic-ratelimit-unified-7d-status": "rejected",
+      "anthropic-ratelimit-unified-overage-status": "rejected",
+      "anthropic-ratelimit-unified-representative-claim": "seven_day",
+      "anthropic-ratelimit-unified-reset": "1792371600",
+      "anthropic-ratelimit-unified-status": "rejected",
+      "cf-ray": "a4b11b73583de36e-NRT",
+      "content-type": "application/json",
+      "request-id": "req_011Cg4YiK1pdddrjw8zm6W3W",
+      "retry-after": "280347",
+      "x-should-retry": "true"
+    },
+    "status": 429
+  },
+  "source": "live capture 2026-10-15 (kwwk PR #191 review): a Claude subscription whose weekly window was spent, one message sent through the real login"
+}

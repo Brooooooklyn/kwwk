@@ -36,7 +36,8 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
         let messages = TransformMessages.normalize(context.messages, model: model)
         let tools = context.tools ?? []
         let reply = KiroReply(
-            api: api, model: model,
+            api: api,
+            model: model,
             thinking: KiroRequest.thinks(model: model, reasoning: options?.reasoning),
             toolNames: KiroRequest.toolNames(tools: tools, messages: messages)
         )
@@ -51,15 +52,22 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
             var profileArn: String?
             if case .string(let profile)? = options?.resolvedAuth?.metadata["profileArn"] { profileArn = profile }
             let body = try KiroRequest.build(
-                model: model, systemPrompt: context.systemPrompt, messages: messages, tools: tools,
-                profileArn: profileArn, reasoning: options?.reasoning
+                model: model,
+                systemPrompt: context.systemPrompt,
+                messages: messages,
+                tools: tools,
+                profileArn: profileArn,
+                reasoning: options?.reasoning
             )
             var headers = Self.requestHeaders(token: token)
             for (key, value) in options?.headers ?? [:] { headers[key] = value }
             let baseURL = Self.baseURL(model: model, resolved: options?.resolvedAuth?.baseURL)
             let (response, stream) = try await client.stream(
-                url: URL(string: baseURL + "/generateAssistantResponse")!, method: "POST",
-                headers: headers, body: body, cancellation: cancellation
+                url: URL(string: baseURL + "/generateAssistantResponse")!,
+                method: "POST",
+                headers: headers,
+                body: body,
+                cancellation: cancellation
             )
             guard (200..<300).contains(response.statusCode) else {
                 throw await Self.httpFailure(response: response, body: stream)
@@ -161,19 +169,12 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
     // MARK: - Errors
 
     static func httpFailure(
-        response: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>
+        response: HTTPURLResponse,
+        body: AsyncThrowingStream<Data, Error>
     ) async -> ProviderFailure {
-        var bytes = Data()
-        do {
-            for try await chunk in body {
-                bytes.append(contentsOf: chunk.prefix(max(0, 4096 - bytes.count)))
-                if bytes.count >= 4096 { break }
-            }
-        } catch {}
+        let bytes = await ProviderFailure.readBoundedBody(body)
         var failure = httpFailure(status: response.statusCode, body: bytes)
-        failure.retryAfterMs = ProviderFailure.retryDelay(headers: response.allHeaderFields.reduce(into: [:]) { result, entry in
-            if let key = entry.key as? String { result[key.lowercased()] = String(describing: entry.value) }
-        })
+        failure.retryAfterMs = ProviderFailure.retryDelay(response: response)
         return failure
     }
 
@@ -202,7 +203,9 @@ public final class KiroProvider: APIProvider, @unchecked Sendable {
             message = "usage limit reached: " + message
         }
         return ProviderFailure(
-            message: "Kiro: " + message, httpStatus: status, providerCode: reason.isEmpty ? nil : reason
+            message: "Kiro: " + message,
+            httpStatus: status,
+            providerCode: reason.isEmpty ? nil : reason
         )
     }
 

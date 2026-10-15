@@ -1,6 +1,7 @@
 import Foundation
 import KWWKAI
 import KWWKAgent
+import NIOConcurrencyHelpers
 
 /// Internal implementation of `kwwk -p <prompt>` — a one-shot, non-interactive
 /// coding-agent run. Mirrors the ergonomics of `claude -p`:
@@ -29,7 +30,6 @@ func runHeadlessInternal(
     tools: CodingTools,
     builtinSubagents: BuiltinSubagentSelection = .all,
     thinkingLevel: ThinkingLevel = .medium,
-    autoCompactThreshold: Double? = 0.75,
     modelOverride: String? = nil,
     context1m: Bool = false,
     resume: SessionResume = .none
@@ -52,11 +52,10 @@ func runHeadlessInternal(
         tools: tools,
         contextFiles: loadProjectContextFiles(cwd: cwd),
         skillDirectories: Skills.defaultDirectories(cwd: cwd, includeUserDirectory: true),
-        backgroundAutoContinue: false,
         subagents: defaultCLISubagents(for: tools, selection: builtinSubagents),
         sessionId: sessionId,
         authResolver: resolved.authResolver,
-        autoCompactThreshold: autoCompactThreshold,
+        autoCompactThreshold: 0.75,
         bashEnvironment: environment,
         bashShellPath: cliShellPath(environment: environment),
         subagentTranscriptStore: store.subagentTranscripts
@@ -88,20 +87,19 @@ func runHeadlessInternal(
     // Shared mutable state carried out of the @Sendable listener. All
     // reads/writes go through the lock — listener callbacks can fire on
     // arbitrary threads.
-    final class Box: @unchecked Sendable {
+    struct Box: Sendable {
         var finalStopReason: StopReason?
         var needsTrailingNewline = false
-        let lock = NSLock()
     }
-    let box = Box()
+    let box = NIOLockedValueBox(Box())
 
     let unsubscribe = agent.subscribe { event, _ in
         switch event {
         case .messageUpdate(_, let inner):
             if case .textDelta(_, let delta, _) = inner {
                 writeStdout(delta)
-                box.lock.withLock {
-                    box.needsTrailingNewline = !delta.hasSuffix("\n")
+                box.withLockedValue {
+                    $0.needsTrailingNewline = !delta.hasSuffix("\n")
                 }
             }
 
@@ -109,15 +107,15 @@ func runHeadlessInternal(
             // Separate consecutive assistant messages (tool-use → text →
             // more text) with a newline so piped output doesn't run
             // together.
-            let needs = box.lock.withLock { () -> Bool in
-                let v = box.needsTrailingNewline
-                box.needsTrailingNewline = false
+            let needs = box.withLockedValue { state -> Bool in
+                let v = state.needsTrailingNewline
+                state.needsTrailingNewline = false
                 return v
             }
             if needs { writeStdout("\n") }
 
         case .agentEnd(_, let summary):
-            box.lock.withLock { box.finalStopReason = summary.finalStopReason }
+            box.withLockedValue { $0.finalStopReason = summary.finalStopReason }
             if summary.finalStopReason != .stop,
                let err = agent.state.errorMessage {
                 writeStderr("kwwk: \(err)\n")
@@ -138,7 +136,7 @@ func runHeadlessInternal(
         return 1
     }
 
-    let stop = box.lock.withLock { box.finalStopReason }
+    let stop = box.withLockedValue { $0.finalStopReason }
     await cleanupHeadlessAgent(agent)
     return stop == .stop ? 0 : 1
 }

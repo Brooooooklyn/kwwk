@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-10-14T10:55:11.901Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true,
+    "outcome": "signInRequired"
+  },
+  "parser": "kiro",
+  "provider": "kiro",
+  "request": {
+    "method": "POST",
+    "url": "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"
+  },
+  "response": {
+    "body": "{\"message\":\"The bearer token included in the request is invalid.\",\"reason\":null}",
+    "bodyTruncated": false,
+    "headers": {
+      "content-type": "application/json",
+      "x-amzn-errortype": "AccessDeniedException:http://internal.amazon.com/coral/com.amazon.kiro.runtimeservice/",
+      "x-amzn-requestid": "b2c2f270-d888-40d2-b4ac-4d858c667401"
+    },
+    "status": 403
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

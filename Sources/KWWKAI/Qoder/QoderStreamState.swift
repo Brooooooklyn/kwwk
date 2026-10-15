@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Lifts tool calls a model wrote into its text out of the stream. Qoder
 /// serves OpenAI's own `tool_calls` when asked with a tools array, so this is
@@ -83,10 +84,12 @@ struct QoderToolCallSplitter {
     }
 
     private static let function = try! NSRegularExpression(
-        pattern: "\u{3C}function=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/function\u{3E}", options: [.dotMatchesLineSeparators]
+        pattern: "\u{3C}function=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/function\u{3E}",
+        options: [.dotMatchesLineSeparators]
     )
     private static let parameter = try! NSRegularExpression(
-        pattern: "\u{3C}parameter=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/parameter\u{3E}", options: [.dotMatchesLineSeparators]
+        pattern: "\u{3C}parameter=([^\u{3E}]+)\u{3E}(.*?)\u{3C}/parameter\u{3E}",
+        options: [.dotMatchesLineSeparators]
     )
 
     /// Reads one block: a JSON `{name, arguments}`, or the XML
@@ -127,20 +130,21 @@ struct QoderToolCallSplitter {
 
 /// Accumulates the assistant message from Qoder's chunks and emits the
 /// matching `AssistantMessageEvent`s.
-final class QoderStreamState: @unchecked Sendable {
+final class QoderStreamState: Sendable {
     private let api: String
     private let model: Model
-    private let lock = NSLock()
-
-    private var blocks: [AssistantBlock] = []
-    private var textIndex: Int?
-    private var thinkingIndex: Int?
-    /// Tool-call block indexes in arrival order, each with its argument JSON
-    /// so far.
-    private var tools: [(index: Int, arguments: String)] = []
-    private var finishReason: String?
-    private var usage = Usage()
-    private var stopReasonOverride: StopReason?
+    private struct State {
+        var blocks: [AssistantBlock] = []
+        var textIndex: Int?
+        var thinkingIndex: Int?
+        /// Tool-call block indexes in arrival order, each with its argument JSON
+        /// so far.
+        var tools: [(index: Int, arguments: String)] = []
+        var finishReason: String?
+        var usage = Usage()
+        var stopReasonOverride: StopReason?
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, model: Model) {
         self.api = api
@@ -149,17 +153,17 @@ final class QoderStreamState: @unchecked Sendable {
 
     func appendThinking(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let index = thinkingIndex { return (index, false) }
-            blocks.append(.thinking(ThinkingContent(thinking: "")))
-            thinkingIndex = blocks.count - 1
-            return (blocks.count - 1, true)
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let index = state.thinkingIndex { return (index, false) }
+            state.blocks.append(.thinking(ThinkingContent(thinking: "")))
+            state.thinkingIndex = state.blocks.count - 1
+            return (state.blocks.count - 1, true)
         }
         if isNew { emit(.thinkingStart(contentIndex: index, partial: snapshot())) }
-        lock.withLock {
-            if case .thinking(var thinking) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var thinking) = state.blocks[index] {
                 thinking.thinking += delta
-                blocks[index] = .thinking(thinking)
+                state.blocks[index] = .thinking(thinking)
             }
         }
         emit(.thinkingDelta(contentIndex: index, delta: delta, partial: snapshot()))
@@ -167,17 +171,17 @@ final class QoderStreamState: @unchecked Sendable {
 
     func appendText(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
         endThinking(emit: emit)
-        let (index, isNew): (Int, Bool) = lock.withLock {
-            if let index = textIndex { return (index, false) }
-            blocks.append(.text(TextContent(text: "")))
-            textIndex = blocks.count - 1
-            return (blocks.count - 1, true)
+        let (index, isNew): (Int, Bool) = state.withLockedValue { state in
+            if let index = state.textIndex { return (index, false) }
+            state.blocks.append(.text(TextContent(text: "")))
+            state.textIndex = state.blocks.count - 1
+            return (state.blocks.count - 1, true)
         }
         if isNew { emit(.textStart(contentIndex: index, partial: snapshot())) }
-        lock.withLock {
-            if case .text(var text) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var text) = state.blocks[index] {
                 text.text += delta
-                blocks[index] = .text(text)
+                state.blocks[index] = .text(text)
             }
         }
         emit(.textDelta(contentIndex: index, delta: delta, partial: snapshot()))
@@ -188,19 +192,19 @@ final class QoderStreamState: @unchecked Sendable {
     func startToolCall(id: String, name: String, emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let index: Int = lock.withLock {
-            blocks.append(.toolCall(ToolCall(id: id, name: name, arguments: .object([:]))))
-            tools.append((blocks.count - 1, ""))
-            return blocks.count - 1
+        let index: Int = state.withLockedValue { state in
+            state.blocks.append(.toolCall(ToolCall(id: id, name: name, arguments: .object([:]))))
+            state.tools.append((state.blocks.count - 1, ""))
+            return state.blocks.count - 1
         }
         emit(.toolCallStart(contentIndex: index, partial: snapshot()))
     }
 
     func appendToolArguments(_ delta: String, emit: (AssistantMessageEvent) -> Void) {
-        let index: Int? = lock.withLock {
-            guard !tools.isEmpty else { return nil }
-            tools[tools.count - 1].arguments += delta
-            return tools[tools.count - 1].index
+        let index: Int? = state.withLockedValue { state in
+            guard !state.tools.isEmpty else { return nil }
+            state.tools[state.tools.count - 1].arguments += delta
+            return state.tools[state.tools.count - 1].index
         }
         if let index { emit(.toolCallDelta(contentIndex: index, delta: delta, partial: snapshot())) }
     }
@@ -208,39 +212,39 @@ final class QoderStreamState: @unchecked Sendable {
     /// Qoder counts the way OpenAI does: `prompt_tokens` holds the cached
     /// ones and `completion_tokens` the reasoning ones.
     func setUsage(prompt: Int, completion: Int, cached: Int, reasoning: Int) {
-        lock.withLock {
+        state.withLockedValue { state in
             let cached = min(max(cached, 0), prompt)
-            usage.input = prompt - cached
-            usage.cacheRead = cached
-            usage.output = completion
-            usage.reasoning = reasoning
-            usage.totalTokens = prompt + completion
+            state.usage.input = prompt - cached
+            state.usage.cacheRead = cached
+            state.usage.output = completion
+            state.usage.reasoning = reasoning
+            state.usage.totalTokens = prompt + completion
         }
     }
 
     func setFinishReason(_ reason: String) {
-        lock.withLock { finishReason = reason }
+        state.withLockedValue { $0.finishReason = reason }
     }
 
-    var sawFinishReason: Bool { lock.withLock { finishReason != nil } }
+    var sawFinishReason: Bool { state.withLockedValue { $0.finishReason != nil } }
 
     /// True when a tool call's arguments so far do not read as JSON — a
     /// stream that stopped inside one.
     var hasIncompleteToolArguments: Bool {
-        lock.withLock {
-            tools.contains { !$0.arguments.isEmpty && Self.decode($0.arguments) == nil }
+        state.withLockedValue { state in
+            state.tools.contains { !$0.arguments.isEmpty && Self.decode($0.arguments) == nil }
         }
     }
 
     func closeOpenBlocks(emit: (AssistantMessageEvent) -> Void) {
         endText(emit: emit)
         endThinking(emit: emit)
-        let completed: [(Int, ToolCall)] = lock.withLock {
+        let completed: [(Int, ToolCall)] = state.withLockedValue { state in
             var out: [(Int, ToolCall)] = []
-            for tool in tools {
-                guard case .toolCall(var call) = blocks[tool.index] else { continue }
+            for tool in state.tools {
+                guard case .toolCall(var call) = state.blocks[tool.index] else { continue }
                 call.arguments = Self.decode(tool.arguments) ?? .object([:])
-                blocks[tool.index] = .toolCall(call)
+                state.blocks[tool.index] = .toolCall(call)
                 out.append((tool.index, call))
             }
             return out
@@ -251,18 +255,19 @@ final class QoderStreamState: @unchecked Sendable {
     }
 
     private func endText(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let index = textIndex, case .text(let text) = blocks[index] else { return nil }
-            textIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let index = state.textIndex, case .text(let text) = state.blocks[index] else { return nil }
+            state.textIndex = nil
             return (index, text.text)
         }
         if let (index, content) = closed { emit(.textEnd(contentIndex: index, content: content, partial: snapshot())) }
     }
 
     private func endThinking(emit: (AssistantMessageEvent) -> Void) {
-        let closed: (Int, String)? = lock.withLock {
-            guard let index = thinkingIndex, case .thinking(let thinking) = blocks[index] else { return nil }
-            thinkingIndex = nil
+        let closed: (Int, String)? = state.withLockedValue { state in
+            guard let index = state.thinkingIndex, case .thinking(let thinking) = state.blocks[index]
+            else { return nil }
+            state.thinkingIndex = nil
             return (index, thinking.thinking)
         }
         if let (index, content) = closed {
@@ -275,28 +280,33 @@ final class QoderStreamState: @unchecked Sendable {
     }
 
     func snapshot() -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             // A turn that called a tool stops for it, whatever Qoder named
             // the finish; `length` is OpenAI's word for a spent output limit.
-            let derived: StopReason = !tools.isEmpty ? .toolUse : finishReason == "length" ? .length : .stop
-            var settled = usage
+            let derived: StopReason = !state.tools.isEmpty ? .toolUse : state.finishReason == "length" ? .length : .stop
+            var settled = state.usage
             settled.cost = calculateCost(model: model, usage: settled)
             return AssistantMessage(
-                content: blocks, api: api, provider: model.provider, model: model.id,
-                usage: settled, stopReason: stopReasonOverride ?? derived, timestamp: Timestamp.now()
+                content: state.blocks,
+                api: api,
+                provider: model.provider,
+                model: model.id,
+                usage: settled,
+                stopReason: state.stopReasonOverride ?? derived,
+                timestamp: Timestamp.now()
             )
         }
     }
 
     func aborted() -> AssistantMessage {
-        lock.withLock { stopReasonOverride = .aborted }
+        state.withLockedValue { $0.stopReasonOverride = .aborted }
         var message = snapshot()
         message.errorMessage = "Request was aborted"
         return message
     }
 
     func failed(_ failure: ProviderFailure) -> AssistantMessage {
-        lock.withLock { stopReasonOverride = .error }
+        state.withLockedValue { $0.stopReasonOverride = .error }
         var message = snapshot()
         message.errorMessage = failure.message
         message.failure = failure

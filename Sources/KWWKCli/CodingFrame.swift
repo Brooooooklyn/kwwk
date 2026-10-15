@@ -47,7 +47,26 @@ final class CodingFrame: Component, @unchecked Sendable {
     /// pinning the selection to the bottom row and scrolling on every step).
     private var menuScroll = 0
     private var menuFilter: String?
+    /// Whether the user moved the highlight with ↑/↓ since the query last
+    /// changed. Only then may Enter run a row the query doesn't prefix-match.
+    private var menuNavigated = false
     private static let menuMaxRows = 8
+
+    /// Directory `@path` completions resolve against. Nil (the default)
+    /// disables the `@` popup; the TUI sets it to the session's cwd.
+    var atPathCwd: String?
+    private var atSelection = 0
+    private var atScroll = 0
+    /// Whether the user moved the `@` highlight with ↑/↓ since the query
+    /// last changed. Only then does Enter accept the highlighted path
+    /// instead of submitting the prompt.
+    private var atNavigated = false
+    /// Candidates for the last query, so a render or key press doesn't
+    /// re-list the directory unless the typed path changed.
+    private var atCache: (key: String, candidates: [String])?
+    /// The query whose popup Esc closed. The popup stays shut until the
+    /// typed path changes.
+    private var atDismissedKey: String?
 
     private var liveLines: [String] = []
     private var modalLines: [String]?
@@ -100,11 +119,7 @@ final class CodingFrame: Component, @unchecked Sendable {
     // MARK: - Slash menu
 
     private func slashQuery() -> String? {
-        let v = input.value
-        guard v.hasPrefix("/") else { return nil }
-        let body = v.dropFirst()
-        if body.contains(where: { $0 == " " || $0 == "\t" || $0 == "\n" }) { return nil }
-        return String(body)
+        bareSlashQuery(input.value)
     }
 
     private func filteredCommands() -> [SlashCommandInfo] {
@@ -125,6 +140,7 @@ final class CodingFrame: Component, @unchecked Sendable {
         guard !matches.isEmpty else { return }
         syncSelection(matches)
         menuSelection = (menuSelection + delta + matches.count) % matches.count
+        menuNavigated = true
     }
 
     func selectedSlashCommandName() -> String? {
@@ -134,14 +150,116 @@ final class CodingFrame: Component, @unchecked Sendable {
         return matches[min(menuSelection, matches.count - 1)].name
     }
 
+    /// The command Enter should run for the open popup, or nil when it must
+    /// not run anything. A row runs only when the typed query is a prefix of
+    /// its name/alias, or the user picked it with ↑/↓ — so a stray `/nope`
+    /// never executes whatever loose match happens to be highlighted.
+    func slashCommandNameForSubmit() -> String? {
+        guard let query = slashQuery() else { return nil }
+        let matches = filteredCommands()
+        guard !matches.isEmpty else { return nil }
+        syncSelection(matches)
+        let selected = matches[min(menuSelection, matches.count - 1)]
+        guard enterRuns(selected, query: query) else { return nil }
+        return selected.name
+    }
+
+    /// Whether Enter on the open popup should do nothing and keep it open: a
+    /// lone `/` the user hasn't navigated yet. Without this the `/` would fall
+    /// through to the prompt path and be sent to the model.
+    func slashSubmitKeepsMenuOpen() -> Bool {
+        guard slashMenuActive, slashQuery() == "" else { return false }
+        return slashCommandNameForSubmit() == nil
+    }
+
+    /// The Enter rule shared by submission and the footer's "↵ run" hint.
+    private func enterRuns(_ selected: SlashCommandInfo, query: String) -> Bool {
+        menuNavigated || slashQueryIsPrefix(query, of: selected)
+    }
+
     private func syncSelection(_ matches: [SlashCommandInfo]) {
         let q = slashQuery()
         if q != menuFilter {
             menuFilter = q
             menuSelection = 0
             menuScroll = 0
+            menuNavigated = false
         }
         if menuSelection >= matches.count { menuSelection = max(0, matches.count - 1) }
+    }
+
+    // MARK: - @path popup
+
+    private func atQuery() -> AtPathQuery? {
+        guard atPathCwd != nil else { return nil }
+        return atPathQuery(in: input.value, cursor: input.cursor)
+    }
+
+    /// Candidates for the `@path` being typed, empty when the popup would
+    /// have nothing useful to offer (no match, or the only match is exactly
+    /// what's typed already).
+    private func atCandidates() -> [String] {
+        guard let cwd = atPathCwd, let query = atQuery() else {
+            // No `@` token any more: forget the listing and the dismissal so
+            // the next `@` lists the directory afresh.
+            atCache = nil
+            atDismissedKey = nil
+            return []
+        }
+        let key = cwd + "\u{0}" + query.path
+        if key == atDismissedKey { return [] }
+        if atDismissedKey != nil { atDismissedKey = nil }
+        let candidates: [String]
+        if let atCache, atCache.key == key {
+            candidates = atCache.candidates
+        } else {
+            candidates = atPathCandidates(for: query.path, cwd: cwd)
+            atCache = (key, candidates)
+            atSelection = 0
+            atScroll = 0
+            atNavigated = false
+        }
+        if candidates == [query.path] { return [] }
+        if atSelection >= candidates.count { atSelection = max(0, candidates.count - 1) }
+        return candidates
+    }
+
+    /// Whether the `@` file popup is showing. The slash popup and modals
+    /// take precedence, and a recalled history entry doesn't open it until
+    /// it's edited, so ↑/↓ keep walking history.
+    var atMenuActive: Bool {
+        modalLines == nil && slashQuery() == nil && !input.isBrowsingHistory
+            && !atCandidates().isEmpty
+    }
+
+    func atMenuMove(_ delta: Int) {
+        let candidates = atCandidates()
+        guard !candidates.isEmpty else { return }
+        atSelection = (atSelection + delta + candidates.count) % candidates.count
+        atNavigated = true
+    }
+
+    /// The editor value Tab produces: the `@path` token replaced by the
+    /// highlighted candidate. Nil when the popup is closed.
+    func atPathCompletionForTab() -> String? {
+        guard atMenuActive, let query = atQuery() else { return nil }
+        let candidates = atCandidates()
+        return atPathCompletedInput(query, candidate: candidates[atSelection])
+    }
+
+    /// The editor value Enter produces, only once the user picked a row
+    /// with ↑/↓; otherwise nil and Enter submits the prompt as typed.
+    func atPathCompletionForSubmit() -> String? {
+        guard atNavigated else { return nil }
+        return atPathCompletionForTab()
+    }
+
+    /// Close the `@` popup without touching the draft (first Esc). Returns
+    /// false when it wasn't open.
+    func dismissAtMenu() -> Bool {
+        guard atMenuActive, let cwd = atPathCwd, let query = atQuery() else { return false }
+        atDismissedKey = cwd + "\u{0}" + query.path
+        return true
     }
 
     // MARK: - Render
@@ -170,8 +288,11 @@ final class CodingFrame: Component, @unchecked Sendable {
             // pending queue list takes the same slot. (A modal replaces this
             // whole branch.)
             let menu = renderSlashMenu(width: safeWidth)
+            let atMenu = menu.isEmpty ? renderAtMenu(width: safeWidth) : []
             if !menu.isEmpty {
                 rows.append(contentsOf: menu)
+            } else if !atMenu.isEmpty {
+                rows.append(contentsOf: atMenu)
             } else {
                 rows.append(contentsOf: renderQueuedPrompts(width: safeWidth))
             }
@@ -229,14 +350,42 @@ final class CodingFrame: Component, @unchecked Sendable {
         guard modalLines == nil, !queuedPrompts.isEmpty else { return [] }
         let avail = max(0, width - 4)
         var out: [String] = []
-        let label = queuedPrompts.count == 1 ? "queued" : "queued (\(queuedPrompts.count))"
-        out.append("  " + Theme.accentText("↓ \(label)", bold: false))
+        out.append("  " + Theme.accentText("↓ queued (\(queuedPrompts.count))", bold: false))
         for prompt in queuedPrompts {
             let body = prompt.isEmpty ? "(empty)" : prompt
             out.append("  " + Theme.paint("↳ ", Theme.accentDim)
                 + ANSI.truncate(Theme.faintText(body), to: avail))
         }
         out.append("  " + Theme.faintText("⌥↑ edit · /queue clear to drop"))
+        return out
+    }
+
+    /// The `@path` completion list that floats above the prompt box, in the
+    /// same slot and style as the slash popup.
+    private func renderAtMenu(width: Int) -> [String] {
+        guard atMenuActive else { return [] }
+        let candidates = atCandidates()
+        let maxRows = min(Self.menuMaxRows, candidates.count)
+        atScroll = edgeScrollOffset(
+            selection: atSelection,
+            count: candidates.count,
+            windowSize: maxRows,
+            previous: atScroll
+        )
+        let start = atScroll
+        let visible = candidates[start..<min(candidates.count, start + maxRows)]
+        let avail = max(0, width - 4)
+        var out: [String] = []
+        for (offset, candidate) in visible.enumerated() {
+            let selected = start + offset == atSelection
+            let marker = selected ? Theme.accentText("❯ ", bold: false) : "  "
+            let raw = ANSI.fitTail("@" + candidate, to: avail)
+            let label = selected ? Theme.accentText(raw, bold: true) : Theme.mutedText(raw)
+            out.append("  " + marker + label)
+        }
+        let enterHint = atNavigated ? " · ↵ select" : ""
+        let position = candidates.count > maxRows ? "\(atSelection + 1)/\(candidates.count) · " : ""
+        out.append("  " + Theme.faintText("\(position)↑↓ move · Tab complete\(enterHint) · Esc close"))
         return out
     }
 
@@ -255,8 +404,10 @@ final class CodingFrame: Component, @unchecked Sendable {
         // Up/Down thus move the highlight within the window first and only scroll
         // once it reaches an edge.
         menuScroll = edgeScrollOffset(
-            selection: menuSelection, count: matches.count,
-            windowSize: maxRows, previous: menuScroll
+            selection: menuSelection,
+            count: matches.count,
+            windowSize: maxRows,
+            previous: menuScroll
         )
         let start = menuScroll
         let visible = matches[start..<min(matches.count, start + maxRows)]
@@ -272,16 +423,19 @@ final class CodingFrame: Component, @unchecked Sendable {
             // 2-space gutter + 2-wide marker so the selected '❯' aligns under
             // the queue list's "↓/↳" and unselected names align with bodies.
             let descAvail = max(0, width - 2 - 2 - nameW - 2)
-            let desc = ANSI.truncate(Theme.faintText(m.description), to: descAvail)
+            let desc = Theme.faintText(ANSI.fit(m.description, to: descAvail))
             out.append("  " + marker + Box.pad(name, to: nameW) + "  " + desc)
         }
         // Enter is rejected while the agent is busy (slash commands are
-        // idle-only), so don't advertise "↵ run" mid-stream — only Tab.
-        let runHint = isBusy ? "commands run when idle" : "↵ run"
+        // idle-only), so don't advertise "↵ run" mid-stream — only Tab. Idle,
+        // "↵ run" shows only when Enter would run the highlighted row (a
+        // prefix match or an ↑/↓ pick), not for a loose match or a lone `/`.
+        let selectedRunnable = enterRuns(matches[menuSelection], query: slashQuery() ?? "")
+        let runHint = isBusy ? " · commands run when idle" : (selectedRunnable ? " · ↵ run" : "")
         if matches.count > maxRows {
-            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete · \(runHint)"))
+            out.append("  " + Theme.faintText("\(menuSelection + 1)/\(matches.count) · ↑↓ move · Tab complete\(runHint) · Esc close"))
         } else {
-            out.append("  " + Theme.faintText("↑↓ move · Tab complete · \(runHint)"))
+            out.append("  " + Theme.faintText("↑↓ move · Tab complete\(runHint) · Esc close"))
         }
         return out
     }

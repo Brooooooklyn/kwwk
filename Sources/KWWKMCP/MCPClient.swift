@@ -240,8 +240,7 @@ public actor MCPClient {
         cancellation: CancellationHandle? = nil,
         onProgress: (@Sendable (MCPProgress) -> Void)? = nil
     ) async throws -> JSONValue {
-        guard !closed else { throw MCPError.notConnected }
-        guard started else { throw MCPError.notConnected }
+        guard started, !closed else { throw MCPError.notConnected }
         try cancellation?.throwIfCancelled()
         try Task.checkCancellation()
         let id = JSONRPCID.int(nextID)
@@ -271,12 +270,12 @@ public actor MCPClient {
                     } catch is CancellationError {
                         return
                     } catch {
-                        await self?.fail(id: id, error: error)
+                        await self?.finish(id: id, with: .failure(error))
                     }
                 }
                 if let total = maxTotalTimeoutSeconds {
                     entry.deadlineTask = Task { [weak self] in
-                        try? await Task.sleep(nanoseconds: UInt64(max(0, total) * 1_000_000_000))
+                        try? await Task.sleep(nanoseconds: MCPWait.nanoseconds(total))
                         guard !Task.isCancelled else { return }
                         await self?.deadlineReached(id: id, seconds: total)
                     }
@@ -307,7 +306,7 @@ public actor MCPClient {
         entry.timeoutTask?.cancel()
         let seconds = entry.timeoutSeconds
         entry.timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: MCPWait.nanoseconds(seconds))
             guard !Task.isCancelled else { return }
             await self?.timedOut(id: id)
         }
@@ -343,10 +342,6 @@ public actor MCPClient {
         Task { try? await transport.send(message) }
     }
 
-    private func fail(id: JSONRPCID, error: Error) {
-        finish(id: id, with: .failure(error))
-    }
-
     private func finish(id: JSONRPCID, with result: Result<JSONValue, Error>) {
         guard let entry = pending.removeValue(forKey: id) else { return }
         entry.timeoutTask?.cancel()
@@ -376,7 +371,10 @@ public actor MCPClient {
             } else {
                 reply = .error(
                     id: id,
-                    error: JSONRPCErrorObject(code: JSONRPCErrorObject.methodNotFound, message: "Method not found: \(method)")
+                    error: JSONRPCErrorObject(
+                        code: JSONRPCErrorObject.methodNotFound,
+                        message: "Method not found: \(method)"
+                    )
                 )
             }
             let transport = self.transport
@@ -414,7 +412,7 @@ public actor MCPClient {
         let wasConnected = isConnected
         isConnected = false
         let closeError: Error
-        if let error, error is MCPError {
+        if let error = error as? MCPError {
             closeError = error
         } else if let error {
             closeError = MCPError.connectionClosed(details: Self.describe(error))

@@ -37,7 +37,10 @@ enum CursorRequestBuilder {
 
         let turns = buildTurns(context.messages, activeIndex: activeIndex, blobStore: blobStore)
         var rootPromptIds = buildRootPromptIds(
-            context.messages, activeIndex: activeIndex, systemId: systemId, blobStore: blobStore
+            context.messages,
+            activeIndex: activeIndex,
+            systemId: systemId,
+            blobStore: blobStore
         )
         // The server puts its own system prompt in place of the first entry
         // and shows the model the client's rules (how the system prompt
@@ -48,7 +51,8 @@ enum CursorRequestBuilder {
         // prompt gave it answered that it knew none (measured 2026-10-11).
         if rootPromptIds.count > 1, let prompt = context.systemPrompt, !prompt.isEmpty {
             rootPromptIds.insert(
-                storeJSONBlob(["role": "user", "content": rulesMessage(prompt)], in: blobStore), at: 1
+                storeJSONBlob(["role": "user", "content": rulesMessage(prompt)], in: blobStore),
+                at: 1
             )
         }
 
@@ -58,7 +62,9 @@ enum CursorRequestBuilder {
             CursorProto.rootPromptIds(ofState: checkpoint).first == systemId ? checkpoint : nil
         }
         let conversationState = CursorProto.encodeConversationState(
-            rootPromptIds: rootPromptIds, turns: turns, preserving: preserved
+            rootPromptIds: rootPromptIds,
+            turns: turns,
+            preserving: preserved
         )
 
         let action: CursorProto.RunAction
@@ -129,7 +135,7 @@ enum CursorRequestBuilder {
         }.joined(separator: "\n")
     }
 
-    private static func toolResultText(_ tr: ToolResultMessage) -> String {
+    static func toolResultText(_ tr: ToolResultMessage) -> String {
         tr.content.compactMap { block -> String? in
             switch block {
             case .text(let t): return t.text
@@ -167,7 +173,10 @@ enum CursorRequestBuilder {
     /// on the next turn which tools it had run answered that it could not see
     /// any; in this shape it listed each call with its arguments.
     private static func buildRootPromptIds(
-        _ messages: [Message], activeIndex: Int?, systemId: Data, blobStore: CursorBlobStore
+        _ messages: [Message],
+        activeIndex: Int?,
+        systemId: Data,
+        blobStore: CursorBlobStore
     ) -> [Data] {
         let history = messages.prefix(activeIndex ?? messages.count)
         var results: [String: ToolResultMessage] = [:]
@@ -283,7 +292,9 @@ enum CursorRequestBuilder {
     /// deterministic so unchanged history re-encodes to identical blob IDs and
     /// stays cached server-side.
     private static func buildTurns(
-        _ messages: [Message], activeIndex: Int?, blobStore: CursorBlobStore
+        _ messages: [Message],
+        activeIndex: Int?,
+        blobStore: CursorBlobStore
     ) -> [Data] {
         var turns: [Data] = []
         var i = 0
@@ -296,7 +307,8 @@ enum CursorRequestBuilder {
             if text.isEmpty && images.isEmpty { i += 1; continue }
             let contentKey = "\(text)|\(images.map { "\($0.mimeType):\($0.data.prefix(64))" }.joined())"
             let userMessage = encodeUser(
-                u, messageId: deterministicUuid("u:\(turns.count):\(contentKey)")
+                u,
+                messageId: deterministicUuid("u:\(turns.count):\(contentKey)")
             )
             let userMessageId = blobStore.store(userMessage)
 

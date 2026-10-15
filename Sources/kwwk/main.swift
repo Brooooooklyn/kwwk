@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 #if canImport(Darwin)
 import Darwin
@@ -10,132 +11,186 @@ import KWWKAI
 import KWWKAgent
 import KWWKCli
 
-/// `kwwk` — coding-agent CLI. Dispatches on argv:
-///
-///   kwwk                    → interactive coding TUI (sign in via `/login`)
-///   kwwk -p <prompt>        → one-shot, non-interactive run (stdout = reply)
-///   kwwk --help             → usage
-///   kwwk --self-test        → verify bundled model resources without network access
-///
-/// Global flags (apply to both TUI and headless `-p`):
-///   `--thinking <off|minimal|low|medium|high|xhigh|max>` — reasoning effort,
-///                        defaulting to `medium`.
-///   `--model <id>`     — override the resolved provider's default model id
-///                        (e.g. `--model claude-opus-4-5`). Catalog metadata
-///                        is looked up by id; unknown ids fall back to sane
-///                        defaults for `contextWindow` / `maxTokens`.
-///   `--context-1m`     — opt into Anthropic's 1M-context beta. Adds
-///                        `context-1m-2025-08-07` to the `anthropic-beta`
-///                        header and bumps `contextWindow` to 1_000_000.
-///                        Requires the account to have long-context billing
-///                        enabled. Ignored for non-Anthropic providers.
-///   `--subagents <list>` — comma-separated built-in subagents to enable:
-///                        general, explore, plan, test-runner, code-reviewer,
-///                        read-only, all, none.
-///   `--no-subagents`    — disable built-in CLI subagents.
-///   `--idle-compact`    — (TUI only) compact the conversation after the
-///                        session has been idle for a while; tune in-session
-///                        with `/idle-compact`.
-@main
-struct KwwkCLI {
-    static func main() async {
-        var args = Array(CommandLine.arguments.dropFirst())
-        // `kwwk mcp` takes its arguments verbatim: a stdio server's own flags
-        // (after `--`) must not be read as kwwk's global options.
-        if args.first == "mcp" {
-            Foundation.exit(await KWWK.runMCPCommand(Array(args.dropFirst())))
-        }
-        let thinkingLevel: ThinkingLevel
-        (args, thinkingLevel) = extractThinking(args)
-        let modelOverride: String?
-        (args, modelOverride) = extractStringFlag(args, "--model")
-        let context1m: Bool
-        (args, context1m) = extractBoolFlag(args, "--context-1m")
-        let builtinSubagents: BuiltinSubagentSelection
-        (args, builtinSubagents) = extractBuiltinSubagents(args)
-        let resume: SessionResume
-        (args, resume) = extractResume(args)
-        let idleCompact: Bool
-        (args, idleCompact) = extractBoolFlag(args, "--idle-compact")
+/// What `kwwk` accepts on its command line. Declaration only: `KwwkCLI.main`
+/// parses it and acts on the result.
+struct KwwkCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "kwwk",
+        abstract: "Coding-agent CLI: an interactive TUI, or a one-shot prompt with -p.",
+        discussion: """
+        Sessions are persisted to ~/.kwwk/sessions/<id>.jsonl as an append-only log and replayed on resume.
 
-        let subcommand = args.first
+        MCP servers are read from ~/.kwwk/mcp.json (project servers in .kwwk/mcp.json need \
+        KWWK_ALLOW_PROJECT_MCP=1); manage them with `kwwk mcp` and see their status with /mcp.
 
-        switch subcommand {
-        case nil:
-            await runOrExit { try await KWWK.runCodingTUI(
-                builtinSubagents: builtinSubagents,
-                idleCompact: idleCompact,
-                thinkingLevel: thinkingLevel,
-                modelOverride: modelOverride,
-                context1m: context1m,
-                resume: resume
-            ) }
-        case "-p", "--print":
-            await runPrint(
-                rest: Array(args.dropFirst()),
-                thinkingLevel: thinkingLevel,
-                modelOverride: modelOverride,
-                context1m: context1m,
-                builtinSubagents: builtinSubagents,
-                resume: resume
-            )
-        case "-h", "--help":
-            printUsage()
-        case "--self-test":
-            runSelfTest()
-        default:
-            FileHandle.standardError.write(Data("kwwk: unknown subcommand '\(subcommand!)'\n\n".utf8))
-            printUsage()
-            Foundation.exit(2)
+        Credentials are read from the OAuth store at ~/.kwwk/oauth.json, with supported API-key environment \
+        variables as a fallback. With neither configured, launch kwwk and run /login to sign in to a provider.
+
+        `kwwk mcp <command>` manages MCP servers: add, add-json, list, get, remove, login, logout.
+        """
+    )
+
+    @Flag(
+        name: [.customShort("p"), .customLong("print")],
+        help: "Run a one-shot prompt and print the reply (read from stdin when no prompt or `-` is given)."
+    )
+    var printMode = false
+
+    @Flag(name: .customLong("self-test"), help: "Verify bundled installation resources.")
+    var selfTest = false
+
+    @Option(
+        help: ArgumentHelp("Reasoning effort: off, minimal, low, medium, high, xhigh, max.", valueName: "level"),
+        transform: KwwkCommand.thinkingLevel
+    )
+    var thinking: ThinkingLevel = .medium
+
+    @Option(help: ArgumentHelp("Override the provider's default model id (e.g. --model claude-opus-4-5).", valueName: "id"))
+    var model: String?
+
+    @Flag(
+        name: .customLong("context-1m"),
+        help: "Opt into the Anthropic 1M-context beta (long-context billing must be on)."
+    )
+    var context1m = false
+
+    @Option(
+        name: .customLong("subagents"),
+        help: ArgumentHelp("Built-in subagents to enable: \(BuiltinSubagentSelection.validNames).", valueName: "list"),
+        transform: KwwkCommand.subagentList
+    )
+    var subagents: BuiltinSubagentSelection?
+
+    @Flag(name: .customLong("no-subagents"), help: "Disable built-in CLI subagents.")
+    var noSubagents = false
+
+    @Flag(
+        name: .customLong("idle-compact"),
+        help: """
+        Compact the conversation while the TUI sits idle (default: after 5m at 50% of the context window; \
+        tune in-session, e.g. /idle-compact 150k 10m).
+        """
+    )
+    var idleCompact = false
+
+    @Flag(name: .customLong("continue"), help: "Resume the latest session for this directory (replays its transcript).")
+    var continueLatest = false
+
+    @Flag(name: .customLong("resume"), help: "Interactively pick any session to resume (across all projects).")
+    var pickSession = false
+
+    @Option(name: .customLong("session"), help: ArgumentHelp("Resume (or create) a specific session id.", valueName: "id"))
+    var sessionID: String?
+
+    /// The prompt words of `-p`. Unknown options land here too, so a prompt
+    /// may contain words that look like flags, as it always could.
+    @Argument(parsing: .allUnrecognized, help: "The prompt for -p; read from stdin when omitted or `-`.")
+    var prompt: [String] = []
+
+    func validate() throws {
+        if !printMode, !selfTest, let first = prompt.first {
+            throw ValidationError("unknown subcommand '\(first)'")
         }
     }
 
-    static func printUsage() {
-        print("""
-        kwwk — coding-agent CLI
+    /// `--subagents` and `--no-subagents` may both appear (an alias plus a
+    /// one-off override); the later one wins.
+    func builtinSubagents(_ argv: [String]) -> BuiltinSubagentSelection {
+        guard let subagents else { return noSubagents ? .none : .all }
+        guard noSubagents else { return subagents }
+        return Self.lastIndex(of: "--no-subagents", in: argv) > Self.lastIndex(of: "--subagents", in: argv)
+            ? .none
+            : subagents
+    }
 
-        usage:
-          kwwk                        launch the interactive coding TUI
-          kwwk -p <prompt>            run a one-shot prompt and print the reply
-          kwwk -p                     read the prompt from stdin
-          kwwk --help                 show this message
-          kwwk --self-test            verify bundled installation resources
-          kwwk mcp <command>          manage MCP servers: add, add-json, list,
-                                      get, remove, login, logout
+    /// `--continue`, `--resume` and `--session <id>` pick how to resume; when
+    /// more than one is given, the later one wins.
+    func resume(_ argv: [String]) -> SessionResume {
+        var picks: [(index: Int, resume: SessionResume)] = []
+        if continueLatest { picks.append((Self.lastIndex(of: "--continue", in: argv), .latestForCwd)) }
+        if pickSession { picks.append((Self.lastIndex(of: "--resume", in: argv), .pickInteractive)) }
+        if let sessionID { picks.append((Self.lastIndex(of: "--session", in: argv), .id(sessionID))) }
+        return picks.max { $0.index < $1.index }?.resume ?? .none
+    }
 
-        global options:
-          --thinking <level>          reasoning effort: off, minimal, low,
-                                      medium, high, xhigh, max
-                                      (default: medium)
-          --model <id>                override the provider's default model id
-                                      (e.g. --model claude-opus-4-5)
-          --context-1m                opt into Anthropic 1M-context beta
-                                      (long-context billing must be on)
-          --subagents <list>          built-in subagents to enable:
-                                      \(BuiltinSubagentSelection.validNames)
-          --no-subagents              disable built-in CLI subagents
-          --idle-compact              compact the conversation while the TUI
-                                      sits idle (default: after 5m at 50% of
-                                      the context window; tune in-session,
-                                      e.g. /idle-compact 150k 10m)
-          --continue                  resume the latest session for this
-                                      directory (replays its transcript)
-          --resume                    interactively pick any session to resume
-                                      (across all projects)
-          --session <id>              resume (or create) a specific session id
+    static func lastIndex(of flag: String, in argv: [String]) -> Int {
+        argv.lastIndex { $0 == flag || $0.hasPrefix(flag + "=") } ?? -1
+    }
 
-        Sessions are persisted to ~/.kwwk/sessions/<id>.jsonl as an
-        append-only log and replayed on resume.
+    static func thinkingLevel(_ raw: String) throws -> ThinkingLevel {
+        guard let level = ThinkingLevel(rawValue: raw) else {
+            throw ValidationError("--thinking needs one of: off, minimal, low, medium, high, xhigh, max")
+        }
+        return level
+    }
 
-        MCP servers are read from ~/.kwwk/mcp.json (project servers in
-        .kwwk/mcp.json need KWWK_ALLOW_PROJECT_MCP=1); manage them with
-        `kwwk mcp` and see their status with /mcp.
+    static func subagentList(_ raw: String) throws -> BuiltinSubagentSelection {
+        guard let selection = BuiltinSubagentSelection.parseList(raw) else {
+            throw ValidationError("--subagents needs one of: \(BuiltinSubagentSelection.validNames)")
+        }
+        return selection
+    }
+}
 
-        Credentials are read from the OAuth store at ~/.kwwk/oauth.json,
-        with supported API-key environment variables as a fallback. With
-        neither configured, launch kwwk and run /login to sign in to a
-        provider (OAuth subscription or API key).
-        """)
+/// `kwwk` — coding-agent CLI entry point. Flags are declared on
+/// `KwwkCommand`; `kwwk --help` prints them.
+///
+/// `--context-1m` adds `context-1m-2025-08-07` to the `anthropic-beta` header,
+/// so it only works for accounts with long-context billing enabled.
+@main
+struct KwwkCLI {
+    static func main() async {
+        let args = Array(CommandLine.arguments.dropFirst())
+        // Keep provider error bodies verbatim next to the logins, so a
+        // refusal can be read again and become a fixture
+        // (`KWWK_PROVIDER_ERROR_DIR` redirects it, `off` disables it).
+        ProviderErrorCapture.enable(
+            directory: OAuthStore.defaultURL().deletingLastPathComponent().appendingPathComponent("provider-errors")
+        )
+        // `kwwk mcp` parses its own arguments: a stdio server's flags (after
+        // `--`) must never be read as kwwk's global options.
+        if args.first == "mcp" {
+            Foundation.exit(await KWWK.runMCPCommand(Array(args.dropFirst())))
+        }
+        let command: KwwkCommand
+        do {
+            command = try KwwkCommand.parse(args)
+        } catch {
+            // Help is a clean exit to stdout; any other parse error is a bad
+            // invocation (exit 2, as `-p` documents).
+            guard KwwkCommand.exitCode(for: error) == .success else {
+                FileHandle.standardError.write(Data((KwwkCommand.fullMessage(for: error) + "\n").utf8))
+                Foundation.exit(2)
+            }
+            print(KwwkCommand.fullMessage(for: error))
+            Foundation.exit(0)
+        }
+
+        let thinkingLevel = command.thinking
+        let builtinSubagents = command.builtinSubagents(args)
+        let resume = command.resume(args)
+
+        if command.selfTest {
+            runSelfTest()
+        } else if command.printMode {
+            await runPrint(
+                rest: command.prompt,
+                thinkingLevel: thinkingLevel,
+                modelOverride: command.model,
+                context1m: command.context1m,
+                builtinSubagents: builtinSubagents,
+                resume: resume
+            )
+        } else {
+            await runOrExit { try await KWWK.runCodingTUI(
+                builtinSubagents: builtinSubagents,
+                idleCompact: command.idleCompact,
+                thinkingLevel: thinkingLevel,
+                modelOverride: command.model,
+                context1m: command.context1m,
+                resume: resume
+            ) }
+        }
     }
 
     /// Exercise the SwiftPM resource catalogs through `Bundle.module` without
@@ -177,136 +232,6 @@ struct KwwkCLI {
         Foundation.exit(0)
     }
 
-    /// Pull `--thinking <level>` out of argv and return the remaining args
-    /// plus the parsed level. A missing flag defaults to medium; an invalid
-    /// value exits with usage.
-    static func extractThinking(_ argv: [String]) -> ([String], ThinkingLevel) {
-        var out: [String] = []
-        var level: ThinkingLevel = .medium
-        var i = 0
-        while i < argv.count {
-            if argv[i] == "--thinking" {
-                guard i + 1 < argv.count, let parsed = ThinkingLevel(rawValue: argv[i + 1]) else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: --thinking needs one of: off, minimal, low, medium, high, xhigh, max\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                level = parsed
-                i += 2
-            } else {
-                out.append(argv[i])
-                i += 1
-            }
-        }
-        return (out, level)
-    }
-
-    /// Pull `<flag> <value>` out of argv and return the remaining args plus
-    /// the (optional) value. Missing flag → `nil`. Flag without a value →
-    /// usage error.
-    static func extractStringFlag(_ argv: [String], _ flag: String) -> ([String], String?) {
-        var out: [String] = []
-        var value: String? = nil
-        var i = 0
-        while i < argv.count {
-            if argv[i] == flag {
-                guard i + 1 < argv.count else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: \(flag) needs an argument\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                value = argv[i + 1]
-                i += 2
-            } else {
-                out.append(argv[i])
-                i += 1
-            }
-        }
-        return (out, value)
-    }
-
-    /// Pull a boolean `<flag>` out of argv. Returns `(remaining, true)` if
-    /// present, `(argv, false)` if not.
-    static func extractBoolFlag(_ argv: [String], _ flag: String) -> ([String], Bool) {
-        var out: [String] = []
-        var seen = false
-        for arg in argv {
-            if arg == flag { seen = true } else { out.append(arg) }
-        }
-        return (out, seen)
-    }
-
-    /// Pull session resume flags out of argv:
-    ///   `--continue`     → latest session for the current cwd;
-    ///   `--resume`       → interactively pick any session (all projects);
-    ///   `--session <id>` → a specific session id.
-    /// Later flags win if more than one is present. Missing → `.none`.
-    static func extractResume(_ argv: [String]) -> ([String], SessionResume) {
-        var out: [String] = []
-        var resume: SessionResume = .none
-        var i = 0
-        while i < argv.count {
-            switch argv[i] {
-            case "--continue":
-                resume = .latestForCwd
-                i += 1
-            case "--resume":
-                resume = .pickInteractive
-                i += 1
-            case "--session":
-                guard i + 1 < argv.count else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: --session needs a session id\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                resume = .id(argv[i + 1])
-                i += 2
-            default:
-                out.append(argv[i])
-                i += 1
-            }
-        }
-        return (out, resume)
-    }
-
-    /// Pull built-in subagent selection flags out of argv. `--subagents`
-    /// accepts a comma-separated list; `--no-subagents` is equivalent to
-    /// `--subagents none`. If both are present, the later flag wins.
-    static func extractBuiltinSubagents(_ argv: [String]) -> ([String], BuiltinSubagentSelection) {
-        var out: [String] = []
-        var selection: BuiltinSubagentSelection = .all
-        var i = 0
-        while i < argv.count {
-            switch argv[i] {
-            case "--no-subagents":
-                selection = .none
-                i += 1
-            case "--subagents":
-                guard i + 1 < argv.count else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: --subagents needs one of: \(BuiltinSubagentSelection.validNames)\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                guard let parsed = BuiltinSubagentSelection.parseList(argv[i + 1]) else {
-                    FileHandle.standardError.write(Data(
-                        "kwwk: --subagents needs one of: \(BuiltinSubagentSelection.validNames)\n".utf8
-                    ))
-                    Foundation.exit(2)
-                }
-                selection = parsed
-                i += 2
-            default:
-                out.append(argv[i])
-                i += 1
-            }
-        }
-        return (out, selection)
-    }
-
     /// Handle `-p` / `--print`. Everything after the flag is joined into
     /// the prompt; if nothing is supplied (or the token is a bare `-`),
     /// the prompt is read from stdin until EOF.
@@ -322,7 +247,7 @@ struct KwwkCLI {
         modelOverride: String?,
         context1m: Bool,
         builtinSubagents: BuiltinSubagentSelection,
-        resume: SessionResume = .none
+        resume: SessionResume
     ) async {
         // A picker can't run under -p (non-interactive). Use --session or
         // --continue instead.
@@ -357,21 +282,14 @@ struct KwwkCLI {
             Foundation.exit(2)
         }
 
-        do {
-            let code = try await KWWK.runHeadless(
-                prompt: prompt,
-                builtinSubagents: builtinSubagents,
-                thinkingLevel: thinkingLevel,
-                modelOverride: modelOverride,
-                context1m: context1m,
-                resume: resume
-            )
-            Foundation.exit(code)
-        } catch {
-            let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-            FileHandle.standardError.write(Data("kwwk: \(msg)\n".utf8))
-            Foundation.exit(1)
-        }
+        await runOrExit { Foundation.exit(try await KWWK.runHeadless(
+            prompt: prompt,
+            builtinSubagents: builtinSubagents,
+            thinkingLevel: thinkingLevel,
+            modelOverride: modelOverride,
+            context1m: context1m,
+            resume: resume
+        )) }
     }
 
     /// Run the async body and surface any thrown error on stderr before

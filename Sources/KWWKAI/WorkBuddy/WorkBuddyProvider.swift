@@ -151,12 +151,14 @@ func registerWorkBuddy(
         modelLabel: "\(model.id) · \(site.name)",
         authResolver: { _, _ in
             do {
-                let token = try await manager.apiKey(for: site.id)
+                let authorization = try await manager.authorization(for: site.id)
                 // Read after the token: a refresh may have changed the domain.
                 guard let credentials = try await manager.credentials(for: site.id) else { return nil }
                 return ResolvedProviderAuth(
-                    token: token, scheme: .bearer,
-                    headers: WorkBuddyOAuth.accountHeaders(credentials, site: site)
+                    token: authorization.apiKey,
+                    scheme: .bearer,
+                    headers: WorkBuddyOAuth.accountHeaders(credentials, site: site),
+                    onRejected: authorization.onRejected
                 )
             } catch OAuthError.missing, OAuthError.unknownProvider {
                 // Not signed in ⇒ anonymous, as the other stored logins'

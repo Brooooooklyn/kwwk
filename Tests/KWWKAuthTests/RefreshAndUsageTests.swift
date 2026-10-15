@@ -7,7 +7,8 @@ struct RefreshErrorTests {
     private let stale = OAuthCredentials(access: "old", refresh: "r-old", expires: 0)
 
     private func refreshError(
-        _ provider: any OAuthProvider, _ answer: QueuedHTTPClient.Answer
+        _ provider: any OAuthProvider,
+        _ answer: QueuedHTTPClient.Answer
     ) async -> OAuthRefreshError? {
         do {
             _ = try await provider.refresh(stale, using: QueuedHTTPClient([answer]))
@@ -27,7 +28,12 @@ struct RefreshErrorTests {
         let provider: any OAuthProvider = switch providerId {
         case "anthropic": AnthropicOAuthProvider()
         case "openai-codex": OpenAICodexOAuthProvider()
-        case "kimi-coding": KimiCodingOAuthProvider(identity: .init(deviceId: "d", deviceName: "n", deviceModel: "m", osVersion: "o"))
+        case "kimi-coding": KimiCodingOAuthProvider(identity: .init(
+            deviceId: "d",
+            deviceName: "n",
+            deviceModel: "m",
+            osVersion: "o"
+        ))
         case "xai": XaiOAuthProvider()
         default: CursorOAuthProvider()
         }
@@ -66,7 +72,8 @@ struct RefreshErrorTests {
     func missingExpiresIn() async throws {
         let before = Int64(Date().timeIntervalSince1970 * 1000)
         let refreshed = try await XaiOAuthProvider().refresh(
-            stale, using: QueuedHTTPClient([.response(status: 200, body: #"{"access_token":"a"}"#)])
+            stale,
+            using: QueuedHTTPClient([.response(status: 200, body: #"{"access_token":"a"}"#)])
         )
         #expect(refreshed.refresh == "r-old")
         #expect(refreshed.expires >= before + 55 * 60 * 1000)
@@ -77,7 +84,10 @@ struct RefreshErrorTests {
 @Suite("Kimi refresh presents the device its login was approved on")
 struct KimiDeviceRefreshTests {
     private let fallback = KimiDeviceIdentity(
-        deviceId: "fallback-id", deviceName: "airbuild-backend", deviceModel: "Linux x86_64", osVersion: "Linux"
+        deviceId: "fallback-id",
+        deviceName: "airbuild-backend",
+        deviceModel: "Linux x86_64",
+        osVersion: "Linux"
     )
 
     @Test("The id recorded in the credentials wins over the provider's own")
@@ -101,7 +111,8 @@ struct KimiDeviceRefreshTests {
             .response(status: 200, body: #"{"access_token":"ka2","refresh_token":"kr2","expires_in":900}"#),
         ])
         let refreshed = try await KimiCodingOAuthProvider(identity: fallback).refresh(
-            OAuthCredentials(access: "ka", refresh: "kr", expires: 0), using: client
+            OAuthCredentials(access: "ka", refresh: "kr", expires: 0),
+            using: client
         )
         #expect(client.header("X-Msh-Device-Id", request: 0) == "fallback-id")
         #expect(refreshed.extras["deviceId"] == .string("fallback-id"))
@@ -183,17 +194,20 @@ struct UsageTests {
         let creds = OAuthCredentials(access: "t", refresh: "", expires: .max)
         await #expect(throws: OAuthUsageError.rateLimited(retryAfterSeconds: 30)) {
             _ = try await KimiCodingUsageReader().usage(
-                creds, using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "30"])])
+                creds,
+                using: QueuedHTTPClient([.response(status: 429, body: "", headers: ["Retry-After": "30"])])
             )
         }
         await #expect(throws: OAuthUsageError.rateLimited(retryAfterSeconds: 120)) {
             _ = try await KimiCodingUsageReader().usage(
-                creds, using: QueuedHTTPClient([.response(status: 429, body: "")])
+                creds,
+                using: QueuedHTTPClient([.response(status: 429, body: "")])
             )
         }
         await #expect(throws: OAuthUsageError.unavailable(providerId: "kimi-coding", status: 502, detail: "bad gateway")) {
             _ = try await KimiCodingUsageReader().usage(
-                creds, using: QueuedHTTPClient([.response(status: 502, body: "bad gateway")])
+                creds,
+                using: QueuedHTTPClient([.response(status: 502, body: "bad gateway")])
             )
         }
     }

@@ -52,11 +52,7 @@ public struct OAuthCredentials: Codable, Sendable, Hashable {
     }
 }
 
-/// A single OAuth provider's refresh flow. `login()` (device flow + local
-/// callback server) is intentionally NOT in this protocol — it requires
-/// browser + HTTP server integration that's out of scope for kw's runtime.
-/// Callers obtain initial credentials elsewhere (e.g. via pi's CLI or by
-/// hand) and drop them in the `OAuthStore`. We handle the refresh path.
+/// A single OAuth provider's refresh flow; sign-in lives in `OAuthLogin`.
 public protocol OAuthProvider: Sendable {
     /// Stable identifier used as the store key: `"anthropic"`,
     /// `"github-copilot"`, etc.
@@ -67,9 +63,8 @@ public protocol OAuthProvider: Sendable {
     /// credentials for the caller to persist.
     func refresh(_ credentials: OAuthCredentials, using client: HTTPClient) async throws -> OAuthCredentials
 
-    /// Convert credentials to the api-key string the provider expects. For
-    /// most vendors this is just `credentials.access`; GitHub Copilot
-    /// exchanges it for a short-lived session token on every call.
+    /// Convert credentials to the api-key string the provider expects.
+    /// Defaults to `credentials.access`.
     func apiKey(from credentials: OAuthCredentials, using client: HTTPClient) async throws -> String
 }
 
@@ -231,20 +226,45 @@ public actor OAuthStore {
     public func get(_ providerId: String) -> OAuthCredentials? { credentials[providerId] }
 
     public func set(_ credentials: OAuthCredentials, for providerId: String) throws {
+        reloadFromDisk()
         self.credentials[providerId] = credentials
         try persist()
     }
 
+    /// Re-read one entry from disk, adopting what another process wrote
+    /// since this store loaded. Used before a forced refresh, where acting on
+    /// a stale in-memory copy would spend a refresh token already rotated
+    /// elsewhere. No-op for an in-memory store or an unreadable file.
+    public func reloadEntry(_ providerId: String) throws {
+        guard isPersistent, FileManager.default.fileExists(atPath: url.path) else { return }
+        let disk = try JSONDecoder().decode([String: OAuthCredentials].self, from: Data(contentsOf: url))
+        if let entry = disk[providerId] { credentials[providerId] = entry }
+    }
+
     public func remove(_ providerId: String) throws {
+        reloadFromDisk()
         credentials.removeValue(forKey: providerId)
         try persist()
+    }
+
+    /// Another store on this file (the CLI opens one per /login, /logout and
+    /// registration) may have written since init; start from its entries so a
+    /// write here doesn't resurrect or drop them. A missing or unreadable file
+    /// keeps the in-memory snapshot.
+    private func reloadFromDisk() {
+        guard isPersistent,
+              let data = try? Data(contentsOf: url),
+              let onDisk = try? JSONDecoder().decode([String: OAuthCredentials].self, from: data) else { return }
+        credentials = onDisk
     }
 
     private func persist() throws {
         guard isPersistent else { return }
         let dir = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -257,7 +277,9 @@ public actor OAuthStore {
         // persist best-effort.
         let tmp = dir.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         guard FileManager.default.createFile(
-            atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600]
+            atPath: tmp.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
         ) else {
             throw OAuthError.persistFailed("could not create temp store at \(tmp.path)")
         }

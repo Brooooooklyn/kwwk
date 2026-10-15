@@ -77,7 +77,7 @@ extension JSONValue: ExpressibleByDictionaryLiteral {
 }
 
 public extension JSONValue {
-    /// Convenience: return contained object, or an empty dictionary if not an object.
+    /// The contained object, or nil when this is not an object.
     var objectValue: [String: JSONValue]? {
         if case .object(let v) = self { return v } else { return nil }
     }

@@ -199,16 +199,17 @@ enum CursorConnect {
             connection = try await ClientBootstrap(group: group)
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .channelInitializer { channel in
+                    // The initializer runs on the channel's event loop, so the
+                    // non-Sendable TLS handler goes in synchronously.
                     do {
                         let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
-                        return channel.pipeline.addHandler(ssl).flatMap {
-                            channel.configureHTTP2Pipeline(mode: .client) { _ in
-                                channel.eventLoop.makeSucceededVoidFuture()
-                            }.map { _ in }
-                        }
+                        try channel.pipeline.syncOperations.addHandler(ssl)
                     } catch {
                         return channel.eventLoop.makeFailedFuture(error)
                     }
+                    return channel.configureHTTP2Pipeline(mode: .client) { _ in
+                        channel.eventLoop.makeSucceededVoidFuture()
+                    }.map { _ in }
                 }
                 .connect(host: host, port: port)
                 .get()
@@ -216,17 +217,27 @@ enum CursorConnect {
             throw CursorConnectError.connectionFailed(String(describing: error))
         }
 
-        let multiplexer = try await connection.pipeline.handler(type: HTTP2StreamMultiplexer.self).get()
-
         let (stream, continuation) = AsyncThrowingStream<CursorConnectFrame, Error>.makeStream()
         let handler = CursorStreamHandler(
-            host: host, path: path, headers: headers, initialBody: initialBody,
+            host: host,
+            path: path,
+            headers: headers,
+            initialBody: initialBody,
             continuation: continuation
         )
 
+        // The multiplexer is not Sendable: look it up and open the stream on
+        // the connection's event loop rather than carrying it out of there.
         let streamChannelPromise = connection.eventLoop.makePromise(of: Channel.self)
-        multiplexer.createStreamChannel(promise: streamChannelPromise) { streamChannel in
-            streamChannel.pipeline.addHandler(handler)
+        connection.eventLoop.execute {
+            do {
+                let multiplexer = try connection.pipeline.syncOperations.handler(type: HTTP2StreamMultiplexer.self)
+                multiplexer.createStreamChannel(promise: streamChannelPromise) { streamChannel in
+                    streamChannel.pipeline.addHandler(handler)
+                }
+            } catch {
+                streamChannelPromise.fail(error)
+            }
         }
 
         let streamChannel: Channel
@@ -266,9 +277,13 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
     /// Whether a Connect end-of-stream frame (flags 0b10) was seen — after it,
     /// connection teardown is a clean end rather than truncation.
     private var sawConnectEndStream = false
+    private var captureURL: URL { URL(string: "https://\(host)\(path)") ?? URL(fileURLWithPath: "/") }
 
     init(
-        host: String, path: String, headers: [(String, String)], initialBody: Data,
+        host: String,
+        path: String,
+        headers: [(String, String)],
+        initialBody: Data,
         continuation: AsyncThrowingStream<CursorConnectFrame, Error>.Continuation
     ) {
         self.host = host
@@ -316,7 +331,10 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
             // Trailing gRPC status on the closing HEADERS frame.
             if let grpcStatus = headerFrame.headers.first(name: "grpc-status"), grpcStatus != "0" {
                 let msg = headerFrame.headers.first(name: "grpc-message") ?? ""
-                finish(throwing: CursorConnectError.grpc(status: grpcStatus, message: msg.removingPercentEncoding ?? msg))
+                finish(throwing: CursorConnectError.grpc(
+                    status: grpcStatus,
+                    message: msg.removingPercentEncoding ?? msg
+                ))
             }
             // END_STREAM riding a HEADERS frame ends the response too —
             // headers-only errors (e.g. a body-less 401) and clean trailers
@@ -346,6 +364,10 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
 
             if flags & 0b0000_0010 != 0 {
                 sawConnectEndStream = true
+                if CursorConnectResponse.errorFromEndStream(messageBytes) != nil {
+                    ProviderErrorCapture.save(method: "POST", url: captureURL, status: status ?? 200, headers: [:],
+                                              body: messageBytes, frame: "connect-end-stream")
+                }
                 continuation.yield(.endStream(messageBytes))
             } else {
                 continuation.yield(.message(messageBytes))
@@ -355,6 +377,7 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
 
     private func finishSuccessfully() {
         if let status, status >= 400 {
+            ProviderErrorCapture.save(method: "POST", url: captureURL, status: status, headers: [:], body: pending)
             let body = String(data: pending, encoding: .utf8) ?? ""
             finish(throwing: CursorConnectResponse.failureFromHTTP(status: status, body: body))
             return

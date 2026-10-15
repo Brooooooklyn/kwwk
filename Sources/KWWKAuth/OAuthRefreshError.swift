@@ -76,7 +76,9 @@ public struct OAuthRefreshError: Error, LocalizedError, Sendable, Equatable {
             throw CancellationError()
         } catch {
             throw OAuthRefreshError(
-                providerId: provider, kind: .unavailable, status: nil,
+                providerId: provider,
+                kind: .unavailable,
+                status: nil,
                 detail: error.localizedDescription
             )
         }
@@ -100,7 +102,9 @@ public struct OAuthRefreshError: Error, LocalizedError, Sendable, Equatable {
             return try JSONDecoder().decode(OAuth.TokenResponse.self, from: data)
         } catch {
             throw OAuthRefreshError(
-                providerId: provider, kind: .unavailable, status: nil,
+                providerId: provider,
+                kind: .unavailable,
+                status: nil,
                 detail: "unreadable token response: \(String((String(data: data, encoding: .utf8) ?? "").prefix(300)))"
             )
         }

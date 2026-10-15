@@ -1,0 +1,27 @@
+{
+  "capturedAt": "2026-10-14T10:54:42.848Z",
+  "expect": {
+    "category": "rateLimit",
+    "credentialRejection": false,
+    "outcome": "rateLimited"
+  },
+  "parser": "http",
+  "provider": "anthropic",
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages"
+  },
+  "response": {
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account's rate limit. Please try again later.\"},\"request_id\":\"req_011Cg21KiSj4wFwVjxmYvzn3\"}",
+    "bodyTruncated": false,
+    "headers": {
+      "cf-ray": "a4a60c2afa89e35e-NRT",
+      "content-type": "application/json",
+      "request-id": "req_011Cg21KiSj4wFwVjxmYvzn3",
+      "retry-after": "396317",
+      "x-should-retry": "true"
+    },
+    "status": 429
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): the real login, sent right after the refused one"
+}

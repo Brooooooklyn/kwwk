@@ -51,7 +51,10 @@ public enum WorkBuddyModels {
         headers["User-Agent"] = "CLI/\(WorkBuddyOAuth.appVersion) \(WorkBuddyOAuth.userAgent)"
         headers["Accept"] = "application/json"
         let (response, body) = try await client.request(
-            url: URL(string: site.endpoint + "/v3/config")!, method: "GET", headers: headers, body: nil
+            url: URL(string: site.endpoint + "/v3/config")!,
+            method: "GET",
+            headers: headers,
+            body: nil
         )
         let envelope = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         let said = envelope["msg"] as? String ?? ""
@@ -91,7 +94,9 @@ public enum WorkBuddyModels {
                 let name = detail["name"] as? String ?? ""
                 out.append(Listing(
                     model: row(
-                        site: site, id: id, name: name.isEmpty ? id : name,
+                        site: site,
+                        id: id,
+                        name: name.isEmpty ? id : name,
                         // A window the config leaves out is the bundled
                         // row's.
                         contextWindow: (detail["maxInputTokens"] as? Int).flatMap { $0 > 0 ? $0 : nil }
@@ -148,8 +153,13 @@ public enum WorkBuddyModels {
     // MARK: - Rows
 
     static func row(
-        site: WorkBuddySite, id: String, name: String,
-        contextWindow: Int, maxTokens: Int, images: Bool, efforts: [String]
+        site: WorkBuddySite,
+        id: String,
+        name: String,
+        contextWindow: Int,
+        maxTokens: Int,
+        images: Bool,
+        efforts: [String]
     ) -> Model {
         Model(
             id: id,

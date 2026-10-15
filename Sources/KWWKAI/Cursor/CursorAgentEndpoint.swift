@@ -1,5 +1,6 @@
 import Foundation
 import Crypto
+import NIOConcurrencyHelpers
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -54,7 +55,10 @@ struct CursorAgentEndpoint: Equatable, Sendable {
     /// Ask Cursor's API which agent API serves the account behind `apiKey`;
     /// nil when the config cannot be had or names none.
     static func resolve(
-        apiKey: String, apiHost: String, clientVersion: String, client: HTTPClient,
+        apiKey: String,
+        apiHost: String,
+        clientVersion: String,
+        client: HTTPClient,
         cancellation: CancellationHandle? = nil
     ) async -> CursorAgentEndpoint? {
         guard let url = URL(string: "https://\(apiHost)/aiserver.v1.ServerConfigService/GetServerConfig") else {
@@ -80,19 +84,18 @@ struct CursorAgentEndpoint: Equatable, Sendable {
 
 /// The agent API each account was moved to after a region refusal, by the
 /// hash of its token, for the life of the process.
-final class CursorAgentEndpoints: @unchecked Sendable {
-    private let lock = NSLock()
-    private var learned: [String: CursorAgentEndpoint] = [:]
+final class CursorAgentEndpoints: Sendable {
+    private let learned = NIOLockedValueBox([String: CursorAgentEndpoint]())
 
     private static func key(_ apiKey: String) -> String {
         SHA256.hash(data: Data(apiKey.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     func endpoint(for apiKey: String) -> CursorAgentEndpoint? {
-        lock.withLock { learned[Self.key(apiKey)] }
+        learned.withLockedValue { $0[Self.key(apiKey)] }
     }
 
     func remember(_ endpoint: CursorAgentEndpoint, for apiKey: String) {
-        lock.withLock { learned[Self.key(apiKey)] = endpoint }
+        learned.withLockedValue { $0[Self.key(apiKey)] = endpoint }
     }
 }

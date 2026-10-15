@@ -1,0 +1,1004 @@
+import Foundation
+import KWWKAI
+import KWWKAgent
+
+/// Register the V1 set of builtin slash commands on `registry`. Keep these
+/// focused on things a user actually needs mid-session — including `/login`,
+/// which is the only way to add a provider (there is no standalone login
+/// subcommand).
+@MainActor
+func registerBuiltinSlashCommands(_ registry: SlashCommandRegistry) {
+    registry.register(SlashCommand(
+        name: "model",
+        description: "Pick a model for this session (across all logged-in providers)",
+        handler: handleModelCommand
+    ))
+    registry.register(SlashCommand(
+        name: "compact-model",
+        description: "Pick the model used for context summaries; clear to follow /model",
+        aliases: ["compaction-model"],
+        handler: handleCompactionModelCommand
+    ))
+    registry.register(SlashCommand(
+        name: "login",
+        description: "Log in to another provider (kept alongside existing logins)",
+        handler: handleLoginCommand
+    ))
+    registry.register(SlashCommand(
+        name: "logout",
+        description: "Show logged-in providers / remove one",
+        handler: handleLogoutCommand
+    ))
+    registry.register(SlashCommand(
+        name: "compact",
+        description: "Summarize older turns and retain recent context",
+        handler: handleCompactCommand
+    ))
+    registry.register(SlashCommand(
+        name: "idle-compact",
+        description: "Compact automatically while idle: on|off [50% | 150k] [delay]",
+        handler: handleIdleCompactCommand
+    ))
+    registry.register(SlashCommand(
+        name: "shake",
+        description: "Trim heavy tool output or remove images from the session (no LLM)",
+        handler: handleShakeCommand
+    ))
+    registry.register(SlashCommand(
+        name: "queue",
+        description: "Show or clear the steering-message queue",
+        handler: handleQueueCommand
+    ))
+    registry.register(SlashCommand(
+        name: "thinking",
+        description: "Show / set thinking level (off|minimal|low|medium|high|xhigh|max) or display (show|hide)",
+        handler: handleThinkingCommand
+    ))
+    registry.register(SlashCommand(
+        name: "verbose",
+        description: "Toggle verbose provider/internal diagnostics",
+        handler: handleVerboseCommand
+    ))
+    registry.register(SlashCommand(
+        name: "context",
+        description: "Show the context-window usage breakdown",
+        handler: handleContextCommand
+    ))
+    registry.register(SlashCommand(
+        name: "init",
+        description: "Explore the repo and generate an AGENTS.md",
+        handler: handleInitCommand
+    ))
+    registry.register(SlashCommand(
+        name: "tools",
+        description: "List the tools available to the agent",
+        handler: handleToolsCommand
+    ))
+    registry.register(SlashCommand(
+        name: "hotkeys",
+        description: "Show the TUI keyboard shortcuts",
+        aliases: ["keys"],
+        handler: handleHotkeysCommand
+    ))
+    registry.register(SlashCommand(
+        name: "copy",
+        description: "Copy the last assistant reply to the clipboard",
+        handler: handleCopyCommand
+    ))
+    registry.register(SlashCommand(
+        name: "rename",
+        description: "Set a title for the current session",
+        handler: handleRenameCommand
+    ))
+    registry.register(SlashCommand(
+        name: "help",
+        description: "List available slash commands",
+        handler: { ctx, _ in
+            var lines = [Style.dimmed("  available slash commands:")]
+            for cmd in registry.all {
+                var line = "    /\(cmd.name) — \(cmd.description)"
+                if !cmd.aliases.isEmpty {
+                    let aliasList = cmd.aliases.map { "/\($0)" }.joined(separator: ", ")
+                    line += " (alias: \(aliasList))"
+                }
+                lines.append(Style.dimmed(line))
+            }
+            ctx.notifyBlock(lines)
+        }
+    ))
+}
+
+/// `/model` — opens a modal listing every model across **all** providers
+/// logged in this session (grouped by provider), and switches to the picked
+/// one. The pick is routed through the target provider's session template
+/// (`adoptFields`) so its wire api / provider scope / baseURL / headers are
+/// correct, then stored on `agent.state.model` for the next request. The swap
+/// is session-scoped (restart = back to the launch default).
+@MainActor
+private func handleModelCommand(_ ctx: SlashContext, _ args: String) async {
+    let current = ctx.agent.state.model
+
+    // Logged-out session (sentinel model, no slots): the fallback below would
+    // list nothing useful — point at /login instead. The extra
+    // `current.provider.isEmpty` clause keeps the headless/test fallback
+    // below alive: a REAL model with no session slots (isLoggedOut, but not
+    // the sentinel) still gets its own provider's catalog listed.
+    if ctx.sessionProviders.isLoggedOut && current.provider.isEmpty {
+        ctx.notify(Style.dimmed("  /model: no provider configured — /login to sign in"))
+        return
+    }
+
+    let choices = modelChoices(selected: current, providers: ctx.sessionProviders)
+    if choices.models.isEmpty {
+        ctx.notify(Style.error("  /model: no models available for the logged-in providers"))
+        return
+    }
+
+    let multi = choices.providerCount > 1
+    let title = modelSelectorTitle("Select a model", choices)
+    let modal = ModelSelectorModal(
+        title: title,
+        models: choices.models,
+        currentModelId: current.id,
+        groupLabels: multi ? choices.groups : nil,
+        currentIndex: choices.currentIndex,
+        onSelect: { [agent = ctx.agent, notifyBlock = ctx.notifyBlock, modal = ctx.modal] picked in
+            let previous = agent.state.model
+            agent.state.model = picked
+            modal.close()
+            let switchedProvider = picked.provider != previous.provider
+            if picked.id == previous.id && !switchedProvider {
+                notifyBlock([Style.dimmed("  /model: already on \(picked.id)")])
+            } else if switchedProvider {
+                notifyBlock([Style.dimmed("  /model: switched to \(picked.id) · \(ProviderAttribution.getProviderDisplayName(picked.provider))")])
+            } else {
+                notifyBlock([Style.dimmed("  /model: switched \(previous.id) → \(picked.id)")])
+            }
+        },
+        onCancel: { [modal = ctx.modal, ctx] in
+            modal.close()
+            ctx.notifyTransient("/model: cancelled")
+        }
+    )
+    ctx.modal.open(modal)
+}
+
+/// `/compact-model` — configures a model used only for context-summary LLM
+/// requests. The main conversation model still owns context-window planning
+/// and is never changed by this command. With no override the effective model
+/// follows `/model` dynamically.
+@MainActor
+private func handleCompactionModelCommand(_ ctx: SlashContext, _ args: String) async {
+    let action = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch action {
+    case "status":
+        if let configured = ctx.agent.compactionModel {
+            ctx.notify(Style.dimmed(
+                "  /compact-model: \(modelDisplay(configured)) (override)"
+            ))
+        } else {
+            ctx.notify(Style.dimmed(
+                "  /compact-model: \(modelDisplay(ctx.agent.state.model)) (follows /model)"
+            ))
+        }
+        return
+
+    case "clear", "reset", "default", "off", "current":
+        guard ctx.agent.compactionModel != nil else {
+            ctx.notify(Style.dimmed(
+                "  /compact-model: already following /model (\(modelDisplay(ctx.agent.state.model)))"
+            ))
+            return
+        }
+        ctx.agent.compactionModel = nil
+        ctx.notify(Style.dimmed(
+            "  /compact-model: now following /model (\(modelDisplay(ctx.agent.state.model)))"
+        ))
+        return
+
+    case "", "set":
+        break
+
+    default:
+        ctx.notify(Style.error(
+            "  /compact-model: usage: /compact-model [set|status|clear]"
+        ))
+        return
+    }
+
+    let selected = ctx.agent.compactionModel ?? ctx.agent.state.model
+    if ctx.sessionProviders.isLoggedOut && selected.provider.isEmpty {
+        ctx.notify(Style.dimmed(
+            "  /compact-model: no provider configured — /login to sign in"
+        ))
+        return
+    }
+
+    let choices = modelChoices(selected: selected, providers: ctx.sessionProviders)
+    guard !choices.models.isEmpty else {
+        ctx.notify(Style.error(
+            "  /compact-model: no models available for the logged-in providers"
+        ))
+        return
+    }
+
+    let multi = choices.providerCount > 1
+    let title = modelSelectorTitle("Select a compaction model", choices)
+    let modal = ModelSelectorModal(
+        title: title,
+        models: choices.models,
+        currentModelId: selected.id,
+        groupLabels: multi ? choices.groups : nil,
+        currentIndex: choices.currentIndex,
+        onSelect: { [agent = ctx.agent, notifyBlock = ctx.notifyBlock, modal = ctx.modal] picked in
+            let previous = agent.compactionModel
+            agent.compactionModel = picked
+            modal.close()
+            if let previous,
+               previous.provider == picked.provider,
+               previous.id == picked.id {
+                notifyBlock([Style.dimmed(
+                    "  /compact-model: already using \(modelDisplay(picked))"
+                )])
+            } else {
+                notifyBlock([Style.dimmed(
+                    "  /compact-model: summaries now use \(modelDisplay(picked))"
+                )])
+            }
+        },
+        onCancel: { [modal = ctx.modal, ctx] in
+            modal.close()
+            ctx.notifyTransient("/compact-model: cancelled")
+        }
+    )
+    ctx.modal.open(modal)
+}
+
+@MainActor
+private struct ModelChoices {
+    let models: [Model]
+    let groups: [String]
+    let currentIndex: Int?
+    let providerCount: Int
+}
+
+/// Build routed model rows shared by `/model` and `/compact-model`. Every
+/// catalog entry inherits its logged-in provider's API/base URL/headers, so a
+/// cross-provider compaction choice resolves through the correct account.
+@MainActor
+private func modelChoices(
+    selected: Model,
+    providers: SessionProviders
+) -> ModelChoices {
+    let slots = providers.slots
+    let slotList: [ProviderSlot] = slots.isEmpty
+        ? [ProviderSlot(
+            storeId: selected.provider,
+            catalogProvider: catalogProviderKey(forAgentProvider: selected.provider),
+            displayName: selected.provider,
+            template: selected
+        )]
+        : slots
+
+    var models: [Model] = []
+    var groups: [String] = []
+    var currentIndex: Int?
+    for slot in slotList {
+        let catalog = ModelsCatalog.models(for: slot.catalogProvider)
+            .sorted { $0.id < $1.id }
+        let base = catalog.isEmpty ? [slot.template] : catalog
+        for model in base {
+            let routed = adoptFields(
+                from: slot.template,
+                into: model,
+                clampToSessionLimits: !slots.isEmpty && slot.storeId == "anthropic"
+            )
+            if routed.provider == selected.provider && routed.id == selected.id {
+                currentIndex = models.count
+            }
+            models.append(routed)
+            groups.append(slot.displayName)
+        }
+    }
+    return ModelChoices(
+        models: models,
+        groups: groups,
+        currentIndex: currentIndex,
+        providerCount: slotList.count
+    )
+}
+
+/// Selector title. Several providers get a count (the tab bar names them);
+/// a single provider has no tab bar or group headers, so its name goes in the
+/// title — otherwise nothing on screen says whose catalog is listed.
+@MainActor
+private func modelSelectorTitle(_ base: String, _ choices: ModelChoices) -> String {
+    if choices.providerCount > 1 {
+        return "\(base)  (\(choices.providerCount) providers)"
+    }
+    guard let provider = choices.groups.first, !provider.isEmpty else { return base }
+    return "\(base) · \(provider)"
+}
+
+private func modelDisplay(_ model: Model) -> String {
+    let provider = ProviderAttribution.getProviderDisplayName(model.provider)
+    return provider.isEmpty ? model.id : "\(model.id) · \(provider)"
+}
+
+// MARK: - /login  ·  /logout
+
+/// Captures the result of the suspended OAuth sub-flow (the `withSuspendedTUI`
+/// body returns Void, so we thread the outcome through a box).
+@MainActor
+private final class LoginResultBox {
+    var storeId: String?
+    var error: String?
+}
+
+/// `/login` — opens the provider picker as a modal (same look and feel as
+/// `/model`). Picking an API-key entry opens a `FormModal` in place, so the
+/// whole credential flow stays inside the live TUI; picking an OAuth entry
+/// closes the modal and suspends the TUI for the browser handoff (which
+/// needs a cooked terminal for its stderr progress + Esc/Ctrl-C watcher).
+/// Successful logins are additive — existing providers stay registered and
+/// the fresh one becomes available to `/model` without a restart. A
+/// logged-out session activates the new provider as the live model.
+@MainActor
+private func handleLoginCommand(_ ctx: SlashContext, _ args: String) async {
+    guard let authResolvers = ctx.authResolvers else {
+        ctx.notify(Style.error("  /login: not available in this session"))
+        return
+    }
+    let picker = ListSelectorModal(
+        title: "Log in to a provider",
+        items: loginProviders.map { ListSelectorModal.Item(label: $0.display) },
+        onSelect: { [modal = ctx.modal] index in
+            let entry = loginProviders[index]
+            switch entry.flow {
+            case .oauth:
+                modal.close()
+                Task { @MainActor in
+                    await runOAuthLoginSuspended(
+                        providerId: entry.id,
+                        ctx: ctx,
+                        authResolvers: authResolvers
+                    )
+                }
+            case .apiKey(let fields, let extrasKeys):
+                let storeId = entry.id
+                // Replace the picker with the credential form (ModalHost.open
+                // swaps the active modal in place).
+                modal.open(FormModal(
+                    title: loginFormTitle(for: entry),
+                    fields: fields,
+                    onSubmit: { values in
+                        modal.close()
+                        Task { @MainActor in
+                            do {
+                                let store = try OAuthStore(url: OAuthStore.defaultURL())
+                                await completeAPIKeyLogin(
+                                    values: values,
+                                    storeId: storeId,
+                                    extrasKeys: extrasKeys,
+                                    ctx: ctx,
+                                    authResolvers: authResolvers,
+                                    store: store
+                                )
+                            } catch {
+                                ctx.notify(Style.dimmed("  /login: \(error.localizedDescription)"))
+                            }
+                        }
+                    },
+                    onCancel: {
+                        modal.close()
+                        ctx.notify(Style.dimmed("  /login: login cancelled"))
+                    }
+                ))
+            }
+        },
+        onCancel: { [modal = ctx.modal] in
+            modal.close()
+            ctx.notify(Style.dimmed("  /login: login cancelled"))
+        }
+    )
+    ctx.modal.open(picker)
+}
+
+/// OAuth leg of `/login`: suspend the TUI, run the browser flow (which
+/// persists credentials itself), then register the fresh provider live.
+@MainActor
+private func runOAuthLoginSuspended(
+    providerId: String,
+    ctx: SlashContext,
+    authResolvers: SessionAuthResolvers
+) async {
+    let box = LoginResultBox()
+    await ctx.withSuspendedTUI {
+        do {
+            try await runOAuthFlow(providerId: providerId)
+            box.storeId = providerId
+        } catch {
+            box.error = error.localizedDescription
+        }
+    }
+    if let err = box.error {
+        // `.cancelled` (Esc) lands here too — a gentle note, not an error.
+        ctx.notify(Style.dimmed("  /login: \(err)"))
+        return
+    }
+    guard let storeId = box.storeId else { return }
+    await activateFreshLogin(storeId: storeId, ctx: ctx, authResolvers: authResolvers)
+}
+
+/// `/logout` — with no argument lists the logged-in providers; with a provider
+/// id removes that login (from disk + this session's routing). Falls back to
+/// another logged-in provider if the active one is removed, or back to the
+/// logged-out sentinel state when the last provider goes.
+@MainActor
+private func handleLogoutCommand(_ ctx: SlashContext, _ args: String) async {
+    do {
+        await performLogout(ctx, args, store: try OAuthStore(url: OAuthStore.defaultURL()))
+    } catch {
+        ctx.notify(Style.dimmed("  /logout: \(error.localizedDescription)"))
+    }
+}
+
+// MARK: - /verbose
+
+/// `/verbose` toggles verbose provider/internal diagnostics for subsequent
+/// requests. `/verbose on|off|status` sets or reads the mode explicitly.
+@MainActor
+private func handleVerboseCommand(_ ctx: SlashContext, _ args: String) async {
+    let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let previous = ctx.agent.state.verboseEnabled
+
+    let next: Bool?
+    switch trimmed {
+    case "", "toggle":
+        next = !previous
+    case "on", "enable", "enabled", "true", "yes":
+        next = true
+    case "off", "disable", "disabled", "false", "no":
+        next = false
+    case "status":
+        next = nil
+    default:
+        ctx.notify(Style.error("  /verbose: unknown arg '\(args)'. Try /verbose, /verbose on, /verbose off, or /verbose status"))
+        return
+    }
+
+    if let next {
+        ctx.agent.state.verboseEnabled = next
+        if next == previous {
+            ctx.notify(Style.dimmed("  /verbose: already \(next ? "on" : "off")"))
+        } else {
+            ctx.notify(Style.dimmed("  /verbose: \(previous ? "on" : "off") → \(next ? "on" : "off")"))
+        }
+    } else {
+        ctx.notify(Style.dimmed("  /verbose: \(previous ? "on" : "off")"))
+    }
+}
+
+// MARK: - /thinking
+
+/// `/thinking` (no args) — show current level.
+/// `/thinking off|minimal|low|medium|high|xhigh|max` — set it.
+///
+/// Extended thinking is auto-enabled at `.medium` on startup for
+/// reasoning-capable models so users see `[thinking]` blocks without
+/// flipping a switch. This command is the escape hatch: turn it off for
+/// latency, crank to `.high` on thorny problems. No catalog-capability
+/// check — providers that don't understand the level silently ignore it,
+/// so the worst case is a no-op.
+@MainActor
+private func handleThinkingCommand(_ ctx: SlashContext, _ args: String) async {
+    let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if trimmed.isEmpty {
+        let level = ctx.agent.state.thinkingLevel
+        let display = ctx.agent.state.thinkingDisplay
+        let model = ctx.agent.state.model
+        var lines = [Style.dimmed("  /thinking: level=\(level.rawValue)  display=\(display.rawValue)")]
+        if level != .off && !model.reasoning {
+            lines.append(Style.dimmed("    (current model \(model.id) is non-reasoning — level stored but won't be sent until `/model` switch)"))
+        }
+        lines.append(Style.dimmed("    level: off, minimal, low, medium, high, xhigh, max"))
+        lines.append(Style.dimmed("    display: show, hide"))
+        ctx.notifyBlock(lines)
+        return
+    }
+    if let display = parseThinkingDisplay(trimmed) {
+        let previous = ctx.agent.state.thinkingDisplay
+        ctx.agent.state.thinkingDisplay = display
+        if previous == display {
+            ctx.notify(Style.dimmed("  /thinking: display already \(display.rawValue)"))
+        } else {
+            ctx.notify(Style.dimmed("  /thinking: display \(previous.rawValue) → \(display.rawValue)"))
+            ctx.refreshTranscript()
+        }
+        return
+    }
+    guard let level = parseThinkingLevel(trimmed) else {
+        ctx.notify(Style.error("  /thinking: unknown arg '\(args)'. Levels: off|minimal|low|medium|high|xhigh|max. Display: show|hide"))
+        return
+    }
+    let previous = ctx.agent.state.thinkingLevel
+    ctx.agent.state.thinkingLevel = level
+    let model = ctx.agent.state.model
+    var lines: [String] = []
+    if previous == level {
+        lines.append(Style.dimmed("  /thinking: already \(level.rawValue)"))
+    } else {
+        lines.append(Style.dimmed("  /thinking: \(previous.rawValue) → \(level.rawValue)"))
+    }
+    if level != .off && !model.reasoning {
+        lines.append(Style.dimmed("    (current model \(model.id) is non-reasoning — level saved; will apply after `/model` to a reasoning-capable one)"))
+    }
+    ctx.notifyBlock(lines)
+}
+
+func parseThinkingLevel(_ s: String) -> ThinkingLevel? {
+    switch s {
+    case "off": return .off
+    case "minimal": return .minimal
+    case "low": return .low
+    case "medium", "med": return .medium
+    case "high": return .high
+    case "xhigh", "x-high": return .xhigh
+    case "max": return .max
+    default: return nil
+    }
+}
+
+private func parseThinkingDisplay(_ s: String) -> ThinkingDisplay? {
+    switch s {
+    case "show", "expand", "expanded", "full": return .expanded
+    case "hide", "collapse", "collapsed", "brief": return .collapsed
+    default: return nil
+    }
+}
+
+// MARK: - /queue
+
+/// `/queue` (no args) — list any steering messages waiting to be injected
+/// at the next turn boundary. Use `/queue clear` (or `/queue cancel`) to
+/// drop them. Queued messages are created implicitly when the user hits
+/// Enter while the agent is streaming or auto-compacting.
+@MainActor
+private func handleQueueCommand(_ ctx: SlashContext, _ args: String) async {
+    let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    switch trimmed {
+    case "clear", "cancel", "drop":
+        let dropped = ctx.agent.queuedSteeringCount()
+        if dropped == 0 {
+            ctx.notify(Style.dimmed("  /queue: nothing queued"))
+            return
+        }
+        ctx.agent.clearSteeringQueue()
+        ctx.notify(Style.prompt("  /queue: cleared \(dropped) queued \(dropped == 1 ? "message" : "messages")"))
+    case "":
+        let messages = ctx.agent.queuedSteeringMessages()
+        if messages.isEmpty {
+            ctx.notify(Style.dimmed("  /queue: nothing queued"))
+            return
+        }
+        var lines = [Style.dimmed("  /queue: \(messages.count) waiting for the next turn boundary")]
+        for (i, msg) in messages.enumerated() {
+            let body = previewQueuedMessage(msg)
+            lines.append(Style.dimmed("    \(i + 1). \(body)"))
+        }
+        lines.append(Style.dimmed("    (use /queue clear to drop them)"))
+        ctx.notifyBlock(lines)
+    default:
+        ctx.notify(Style.error("  /queue: unknown arg '\(args)'. Try /queue or /queue clear"))
+    }
+}
+
+/// One-line preview of a queued message for the `/queue` listing.
+/// Truncates long bodies and flattens multi-line text so the listing
+/// stays tidy.
+private func previewQueuedMessage(_ msg: Message, max: Int = 80) -> String {
+    let raw: String = {
+        switch msg {
+        case .user(let u):
+            return u.content.compactMap { block -> String? in
+                if case .text(let t) = block { return t.text }
+                return nil
+            }.joined(separator: " ")
+        default:
+            return "(\(msg.role.rawValue) message)"
+        }
+    }()
+    let flat = raw.replacingOccurrences(of: "\n", with: " ")
+    return flat.count <= max ? flat : String(flat.prefix(max)) + "…"
+}
+
+// MARK: - /compact
+
+/// `/compact` — thin wrapper around `performCompact` (see CompactRunner.swift)
+/// that surfaces each outcome as a dimmed transcript notification. The
+/// automatic path uses the same KWWKAgent compactor directly from `Agent`.
+@MainActor
+private func handleCompactCommand(_ ctx: SlashContext, _ args: String) async {
+    // Route the manual compact through the same busy machinery as a normal
+    // run: flip the compacting spinner on and make the Enter handler treat the
+    // round-trip as busy, so a prompt submitted mid-compact queues (steers)
+    // instead of starting a competing turn. The compactor commits with a
+    // revision check, and the "summarizing…" notice prints before the
+    // multi-second round-trip rather than after it.
+    ctx.setCompacting(true)
+    ctx.notify(Style.dimmed("  /compact: summarizing the conversation…"))
+
+    let compactAgent = ctx.agent
+    _ = await performCompact(
+        agent: compactAgent,
+        backgroundManager: ctx.backgroundManager,
+        sessionId: ctx.sessionId,
+        settle: { outcome in
+            switch outcome {
+            case .refusedAgentBusy:
+                ctx.notify(Style.error("  /compact: agent is busy; stop it first (Esc)"))
+            case .refusedTooFewMessages(let count):
+                ctx.notify(Style.dimmed("  /compact: only \(count) message(s); nothing to compact"))
+            case .compacted(let n, let hasLedger):
+                // Persist the replacement and commit its visual boundary while
+                // maintenance ownership is still held. A queued user/runtime
+                // turn must never append ahead of this projection marker.
+                await ctx.recordCompaction(n)
+                ctx.commitScrollback { width in
+                    renderCompactBoundary(
+                        messagesCompacted: n,
+                        hasRunningTasksLedger: hasLedger,
+                        width: width
+                    )
+                }
+            case .failed(let msg):
+                ctx.notify(Style.error("  /compact: \(msg)"))
+            }
+            // Clear the busy UI before maintenance releases idle waiters. A
+            // background delivery wake may acquire immediately afterwards.
+            ctx.setCompacting(false)
+        }
+    )
+
+    // User prompts queued by Enter do not install their own idle waiter. Hand
+    // them to the normal arbiter only after persistence + UI settlement above.
+    compactAgent.resumeQueuedWork()
+}
+
+// MARK: - /idle-compact
+
+/// `/idle-compact [on|off|status] [threshold] [delay]` — toggles and tunes the
+/// agent's idle compaction for this session. The threshold is a window ratio
+/// (`50%`) or an absolute token count (`150k`). Bare `50%` / `10m` arguments
+/// retune without changing whether it is on.
+@MainActor
+private func handleIdleCompactCommand(_ ctx: SlashContext, _ args: String) async {
+    let current = IdleCompactionSettings(ctx.agent.idleCompact)
+    var settings = current
+    for word in args.split(whereSeparator: \.isWhitespace).map(String.init) {
+        switch word.lowercased() {
+        case "on", "enable": settings.enabled = true
+        case "off", "disable": settings.enabled = false
+        case "status": break
+        default:
+            // `%`, `k`, or a value below 100 is a threshold; `s`/`m`/`h` or a
+            // bare value of 100+ is a delay. `50` alone therefore means 50%.
+            if let threshold = parseIdleThreshold(word) {
+                settings.threshold = threshold
+            } else if let delay = parseIdleDelay(word) {
+                settings.setDelay(seconds: delay)
+            } else {
+                ctx.notify(Style.error(
+                    "  /idle-compact: usage: /idle-compact [on|off|status] [threshold e.g. 50% or 150k] [delay e.g. 5m]"
+                ))
+                return
+            }
+        }
+    }
+    if settings != current {
+        ctx.agent.idleCompact = settings.agentOptions(canCompact: ctx.idleCompactVeto)
+    }
+    ctx.notify(Style.dimmed("  /idle-compact: \(settings.summary)"))
+}
+
+// MARK: - /context
+
+/// `/context` — a full breakdown of context-window usage. The one-line
+/// header hint (`42% ctx`) only nudges; this command shows the window size,
+/// tokens used with a visual bar, and the auto-compact threshold so the user
+/// can decide whether to `/compact` before continuing.
+@MainActor
+private func handleContextCommand(_ ctx: SlashContext, _ args: String) async {
+    let usage = AgentContextCompactor.currentUsage(
+        messages: ctx.agent.state.messages,
+        model: ctx.agent.state.model
+    )
+    guard usage.window > 0 else {
+        ctx.notify(Style.dimmed("  /context: usage unavailable (no context window for \(ctx.agent.state.model.id))"))
+        return
+    }
+    let pct = Int((usage.ratio * 100).rounded(.down))
+    var lines = [
+        Style.dimmed("  /context: \(usage.window) token window"),
+        Style.dimmed("    " + renderContextBar(fraction: usage.ratio)),
+        Style.dimmed("    \(usage.tokens) tokens used · \(pct)%"),
+    ]
+    if let threshold = ctx.agent.autoCompact?.threshold, threshold > 0 {
+        let thresholdPct = Int((threshold * 100).rounded(.down))
+        let headroom = max(0, Int(Double(usage.window) * threshold) - usage.tokens)
+        lines.append(Style.dimmed("    auto-compact at \(thresholdPct)% · ~\(headroom) tokens of headroom"))
+    }
+    ctx.notifyBlock(lines)
+}
+
+// MARK: - /shake
+
+/// `/shake` mechanically trims context without an LLM call. Bare `/shake`
+/// (or `/shake elide`) collapses oversized tool results; `/shake images`
+/// permanently removes image blocks. Both modes rewrite the persisted JSONL,
+/// replace the live agent context with the same pure transformation, and close
+/// provider-side session chains so the next request replays the new history.
+@MainActor
+private func handleShakeCommand(_ ctx: SlashContext, _ args: String) async {
+    let mode: ShakeMode
+    switch args.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "", "elide":
+        mode = .elide
+    case "images":
+        mode = .images
+    default:
+        ctx.notify(Style.dimmed("  usage: /shake [elide|images]"))
+        return
+    }
+
+    let shakeAgent = ctx.agent
+    ctx.setShaking(true)
+    defer { ctx.setShaking(false) }
+    do {
+        try await shakeAgent.withMaintenance { @MainActor in
+            let originalMessages = shakeAgent.state.messages
+            let rewrittenMessages: [Message]
+            let liveChangedCount: Int
+
+            switch mode {
+            case .elide:
+                let rewrite = AgentContextCompactor.shakeToolOutputs(originalMessages)
+                rewrittenMessages = rewrite.messages
+                liveChangedCount = rewrite.elidedCount
+            case .images:
+                let rewrite = AgentContextCompactor.removingImages(from: originalMessages)
+                rewrittenMessages = rewrite.messages
+                liveChangedCount = rewrite.removedCount
+            }
+
+            guard let persistedChangedCount = await ctx.persistShake(mode) else {
+                ctx.notify(Style.error("  /shake: failed to rewrite the session"))
+                return
+            }
+            let changedCount = liveChangedCount > 0
+                ? liveChangedCount
+                : persistedChangedCount
+            guard changedCount > 0 else {
+                let message = mode == .images
+                    ? "  /shake images: no images found"
+                    : "  /shake: nothing to trim"
+                ctx.notify(Style.dimmed(message))
+                return
+            }
+
+            shakeAgent.state.messages = rewrittenMessages
+            // `/shake` keeps the Agent reusable; only invalidate the
+            // provider-side chain so the rewritten history is replayed.
+            await KWWKAI.closeProviderSession(sessionId: ctx.sessionId)
+            ctx.refreshTranscript()
+
+            switch mode {
+            case .images:
+                ctx.notify(Style.dimmed(
+                    "  /shake images: dropped \(changedCount) image\(changedCount == 1 ? "" : "s") from this session"
+                ))
+            case .elide:
+                let before = AgentContextCompactor.currentUsage(
+                    messages: originalMessages,
+                    model: shakeAgent.state.model
+                )
+                let after = AgentContextCompactor.currentUsage(
+                    messages: rewrittenMessages,
+                    model: shakeAgent.state.model
+                )
+                let reclaimed = max(
+                    0,
+                    toolResultTextChars(originalMessages)
+                        - toolResultTextChars(rewrittenMessages)
+                )
+                var lines = [
+                    Style.dimmed("  /shake: elided \(changedCount) heavy tool \(changedCount == 1 ? "result" : "results") (no LLM)"),
+                    Style.dimmed("    reclaimed ~\(reclaimed) chars of tool output"),
+                ]
+                if before.window > 0 {
+                    lines.append(Style.dimmed(
+                        "    context: \(before.tokens) → \(after.tokens) tokens of \(before.window)"
+                    ))
+                }
+                ctx.notifyBlock(lines)
+            }
+        }
+    } catch AgentError.alreadyRunning {
+        ctx.notify(Style.error("  /shake: agent is busy; stop it first (Esc)"))
+    } catch {
+        ctx.notify(Style.error("  /shake: \(error)"))
+    }
+    shakeAgent.resumeQueuedWork()
+}
+
+/// Total character count of every `.text` block across all tool-result
+/// messages — the bulk `/shake` reclaims. Used to report a concrete savings.
+private func toolResultTextChars(_ messages: [Message]) -> Int {
+    messages.reduce(0) { total, message in
+        guard case .toolResult(let result) = message else { return total }
+        return total + result.content.reduce(0) { sub, block in
+            if case .text(let text) = block { return sub + text.text.count }
+            return sub
+        }
+    }
+}
+
+// MARK: - /init
+
+/// Canned prompt body for `/init`. Ported from omp's `prompts/agents/init.md`,
+/// trimmed to kwwk's toolset: the explorer fan-out goes through the `agent`
+/// tool's `explore` subagents instead of omp's `task`/`explore` naming.
+private let initPromptBody = """
+Generate an AGENTS.md for this repository. Launch several `explore` subagents \
+in parallel (via the `agent` tool) to scan different areas — core source, \
+tests, build/config, and scripts/docs — then synthesize their findings into a \
+single file written to the project root as AGENTS.md.
+
+Structure the document with Markdown headings:
+- Project Overview: what the project is for.
+- Architecture & Data Flow: high-level structure, key modules, how data moves.
+- Key Directories: the main source directories and their purpose.
+- Development Commands: build, test, lint, and run commands.
+- Code Conventions & Common Patterns: formatting, naming, error handling, \
+async patterns, state management.
+- Important Files: entry points, config files, key modules.
+- Testing & QA: test frameworks, how to run them, coverage expectations.
+
+Requirements:
+- Title the document "Repository Guidelines".
+- Be concise and practical; focus on what an AI assistant needs to help with \
+this codebase.
+- Include concrete commands and file paths where helpful.
+- Call out architecture and code patterns explicitly.
+- Omit information that is obvious from the code structure.
+
+After your analysis, write the result to AGENTS.md at the project root.
+"""
+
+/// `/init` — kick off a repo-exploration turn that writes an AGENTS.md. kwwk
+/// already injects AGENTS.md / CLAUDE.md into the system prompt, so generating
+/// the file improves every later session. Submits the canned prompt on the
+/// same fire-and-forget path custom slash commands use.
+@MainActor
+private func handleInitCommand(_ ctx: SlashContext, _ args: String) async {
+    let agent = ctx.agent
+    ctx.notify(Style.dimmed("  /init: exploring the repo to generate AGENTS.md…"))
+    Task.detached {
+        try? await agent.prompt(initPromptBody)
+    }
+}
+
+// MARK: - /tools
+
+/// `/tools` — list the tools the agent can call this session. Read-only;
+/// pairs with `/hotkeys` for in-session discoverability.
+@MainActor
+private func handleToolsCommand(_ ctx: SlashContext, _ args: String) async {
+    let tools = ctx.agent.state.tools.sorted { $0.name < $1.name }
+    guard !tools.isEmpty else {
+        ctx.notify(Style.dimmed("  /tools: no tools registered for this session"))
+        return
+    }
+    var lines = [Style.dimmed("  /tools: \(tools.count) available")]
+    for tool in tools {
+        let summary = toolSummaryLine(tool.description)
+        if summary.isEmpty {
+            lines.append(Style.dimmed("    \(tool.name)"))
+        } else {
+            lines.append(Style.dimmed("    \(tool.name) — \(summary)"))
+        }
+    }
+    ctx.notifyBlock(lines)
+}
+
+/// First non-empty line of a tool description, clipped so the listing stays
+/// one row per tool.
+private func toolSummaryLine(_ description: String, max: Int = 72) -> String {
+    let first = description
+        .split(separator: "\n", omittingEmptySubsequences: true)
+        .first
+        .map(String.init)?
+        .trimmingCharacters(in: .whitespaces) ?? ""
+    return first.count <= max ? first : String(first.prefix(max)) + "…"
+}
+
+// MARK: - /hotkeys
+
+/// `/hotkeys` — a static reference for the TUI's keyboard bindings. The
+/// redesign added keys (slash popup, Alt+↑ dequeue) with no in-session way to
+/// learn them; this surfaces them. Read-only.
+@MainActor
+private func handleHotkeysCommand(_ ctx: SlashContext, _ args: String) async {
+    let rows: [(String, String)] = [
+        ("Enter", "submit prompt / run highlighted slash command"),
+        ("Tab", "complete the slash command under the cursor"),
+        ("Tab / ← / →", "switch the provider tab in /model (2+ providers signed in)"),
+        ("typing", "filter the /model list by model id (Esc clears the filter)"),
+        ("↑ / ↓", "move by line · recall history when empty · move in popups"),
+        ("Alt/Option+↑", "pop a queued prompt back into the input to edit"),
+        ("Ctrl+J", "insert a newline (also Alt+Enter, or Shift+Enter if sent)"),
+        ("Esc", "close a popup/modal · clear the input · then stop the agent"),
+        ("Ctrl+L", "repaint the screen"),
+        ("Ctrl+C", "stop the agent, else clear the input · press again to exit"),
+        ("Ctrl+D", "exit when the input is empty"),
+    ]
+    var lines = [Style.dimmed("  /hotkeys:")]
+    let pad = rows.map { $0.0.count }.max() ?? 0
+    for (key, desc) in rows {
+        let padded = key.padding(toLength: pad, withPad: " ", startingAt: 0)
+        lines.append(Style.dimmed("    \(padded)  \(desc)"))
+    }
+    ctx.notifyBlock(lines)
+}
+
+// MARK: - /copy
+
+/// `/copy` — put the last assistant reply on the clipboard (plain text, ANSI
+/// stripped). Defers omp's interactive selector; the no-arg default covers the
+/// common case.
+@MainActor
+private func handleCopyCommand(_ ctx: SlashContext, _ args: String) async {
+    guard let text = lastAssistantText(ctx.agent.state.messages), !text.isEmpty else {
+        ctx.notify(Style.dimmed("  /copy: no assistant message to copy yet"))
+        return
+    }
+    let outcome = ClipboardWriter.copy(text)
+    ctx.notify(Style.dimmed("  /copy: copied last reply (\(text.count) chars)\(clipboardVia(outcome))"))
+}
+
+/// Trailing " · via OSC 52" note when the write didn't go through the native
+/// pasteboard, so a user on a remote box knows the escape was emitted.
+private func clipboardVia(_ outcome: ClipboardWriter.Outcome) -> String {
+    outcome == .osc52 ? " · via OSC 52" : ""
+}
+
+/// Plain text of the most recent assistant message (its text blocks joined).
+/// Internal (not private) so tests can pin exactly what `/copy` selects.
+func lastAssistantText(_ messages: [Message]) -> String? {
+    for message in messages.reversed() {
+        if case .assistant(let a) = message {
+            let text = a.content.compactMap { block -> String? in
+                if case .text(let t) = block { return t.text }
+                return nil
+            }.joined(separator: "\n")
+            return text
+        }
+    }
+    return nil
+}
+
+// MARK: - /rename
+
+/// `/rename <title>` — set a human-friendly title for the current session.
+/// The title is persisted as an append-only `meta` entry and surfaces in the
+/// `/resume` picker. `/rename` with no argument reports the requirement.
+@MainActor
+private func handleRenameCommand(_ ctx: SlashContext, _ args: String) async {
+    let title = args.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else {
+        ctx.notify(Style.error("  /rename: usage: /rename <title>"))
+        return
+    }
+    await ctx.setSessionTitle(title)
+    ctx.notify(Style.dimmed("  /rename: session titled “\(title)”"))
+}
