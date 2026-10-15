@@ -189,19 +189,8 @@ let loginProviders: [LoginEntry] = [
     ),
     LoginEntry(
         id: "zai-coding-cn",
-        display: "Z.AI GLM Coding Plan — China (open.bigmodel.cn)",
-        flow: .apiKey(
-            fields: [
-                APIKeyFormField(
-                    key: "apiKey",
-                    label: "API key",
-                    hint: "from bigmodel.cn API-keys console",
-                    placeholder: "…",
-                    required: true
-                ),
-            ],
-            extrasKeys: []
-        )
+        display: "BigModel (智谱) GLM Coding Plan (bigmodel.cn sign-in)",
+        flow: .oauth
     ),
     LoginEntry(
         id: "openai-compatible",
@@ -270,8 +259,11 @@ func terminalLoginCallbacks() -> OAuthLogin.Callbacks {
         onProgress: { msg in
             FileHandle.standardError.write(Data("\(msg)\n".utf8))
         },
-        onUserCode: { code, _ in
-            if Clipboard.copy(code) {
+        onDeviceCode: { deviceCode in
+            // A page that arrives with the code needs only a confirm; one
+            // that does not (GitHub) needs it pasted.
+            guard !deviceCode.pageHoldsCode else { return }
+            if Clipboard.copy(deviceCode.code) {
                 FileHandle.standardError.write(Data("code copied to the clipboard\n".utf8))
             }
         }

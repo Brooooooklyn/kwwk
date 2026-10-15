@@ -185,6 +185,20 @@ extension AnthropicProvider {
                 messages.append(contentsOf: pendingToolChanges)
                 pendingToolChanges = []
             }
+            // The results of parallel tool calls, and a user message that
+            // follows them, go back as one user turn. Each is its own
+            // transcript message, and two adjacent user messages are what
+            // Claude merges but DeepSeek's Anthropic endpoint refuses with
+            // 400 (YEL-514; omp collects consecutive results for z.ai,
+            // magpie joins same-role turns). Results come first, as the
+            // Messages API requires right after a tool_use turn.
+            if encoded["role"] as? String == "user",
+               let last = messages.last, last["role"] as? String == "user",
+               let previous = last["content"] as? [[String: Any]],
+               let next = encoded["content"] as? [[String: Any]] {
+                messages[messages.count - 1]["content"] = previous + next
+                continue
+            }
             messages.append(encoded)
         }
         messages.append(contentsOf: pendingToolChanges)

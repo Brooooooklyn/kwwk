@@ -1,0 +1,26 @@
+{
+  "capturedAt": "2026-10-14T10:54:42.248Z",
+  "expect": {
+    "category": "authentication",
+    "credentialRejection": true,
+    "outcome": "signInRequired"
+  },
+  "parser": "http",
+  "provider": "anthropic",
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages"
+  },
+  "response": {
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"},\"request_id\":\"req_011Cg21Kh3sss95C2XkPqZqz\"}",
+    "bodyTruncated": false,
+    "headers": {
+      "cf-ray": "a4a60c297d7ae35e-NRT",
+      "content-type": "application/json",
+      "request-id": "req_011Cg21Kh3sss95C2XkPqZqz",
+      "x-should-retry": "false"
+    },
+    "status": 401
+  },
+  "source": "live capture 2026-10-14 (kwwk PR #189 review): a stored login whose access token had one character changed, expiry untouched"
+}

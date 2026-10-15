@@ -131,7 +131,9 @@ let package = Package(
         .testTarget(
             name: "KWWKAITests",
             dependencies: ["KWWKAI", "KWWKAuth", "KWWKGenerateModelsCore"],
-            path: "Tests/KWWKAITests"
+            path: "Tests/KWWKAITests",
+            // Read from the source tree by path (see ProviderErrorFixtureTests).
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "KWWKAgentTests",

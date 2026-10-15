@@ -147,6 +147,31 @@ public protocol OAuthCredentialSource: Sendable {
     /// Current credentials for `providerId`, or nil when the source holds none
     /// (the caller reports that as `OAuthError.missing`).
     func credentials(for providerId: String) async throws -> OAuthCredentials?
+
+    /// The provider refused `rejectedAccess` — an access token this source
+    /// served for `providerId` — at request time, before its recorded expiry
+    /// (revoked upstream, signed out elsewhere). Return the credentials a
+    /// request should carry now, after whatever renewal the authority can do:
+    /// a different `access` means "try once more with this"; the same one, or
+    /// nil, means the source has nothing newer. Throw when only the user can
+    /// fix it (the login is dead and needs signing in again) — the caller
+    /// surfaces that error instead of the provider's refusal.
+    ///
+    /// Sources that cannot renew on demand keep the default, which answers
+    /// nil: the refusal then surfaces as it is.
+    func credentialsAfterRejection(
+        of rejectedAccess: String,
+        for providerId: String
+    ) async throws -> OAuthCredentials?
+}
+
+extension OAuthCredentialSource {
+    public func credentialsAfterRejection(
+        of rejectedAccess: String,
+        for providerId: String
+    ) async throws -> OAuthCredentials? {
+        nil
+    }
 }
 
 // MARK: - Credential store
@@ -204,6 +229,16 @@ public actor OAuthStore {
         reloadFromDisk()
         self.credentials[providerId] = credentials
         try persist()
+    }
+
+    /// Re-read one entry from disk, adopting what another process wrote
+    /// since this store loaded. Used before a forced refresh, where acting on
+    /// a stale in-memory copy would spend a refresh token already rotated
+    /// elsewhere. No-op for an in-memory store or an unreadable file.
+    public func reloadEntry(_ providerId: String) throws {
+        guard isPersistent, FileManager.default.fileExists(atPath: url.path) else { return }
+        let disk = try JSONDecoder().decode([String: OAuthCredentials].self, from: Data(contentsOf: url))
+        if let entry = disk[providerId] { credentials[providerId] = entry }
     }
 
     public func remove(_ providerId: String) throws {

@@ -277,6 +277,7 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
     /// Whether a Connect end-of-stream frame (flags 0b10) was seen — after it,
     /// connection teardown is a clean end rather than truncation.
     private var sawConnectEndStream = false
+    private var captureURL: URL { URL(string: "https://\(host)\(path)") ?? URL(fileURLWithPath: "/") }
 
     init(
         host: String,
@@ -363,6 +364,10 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
 
             if flags & 0b0000_0010 != 0 {
                 sawConnectEndStream = true
+                if CursorConnectResponse.errorFromEndStream(messageBytes) != nil {
+                    ProviderErrorCapture.save(method: "POST", url: captureURL, status: status ?? 200, headers: [:],
+                                              body: messageBytes, frame: "connect-end-stream")
+                }
                 continuation.yield(.endStream(messageBytes))
             } else {
                 continuation.yield(.message(messageBytes))
@@ -372,6 +377,7 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
 
     private func finishSuccessfully() {
         if let status, status >= 400 {
+            ProviderErrorCapture.save(method: "POST", url: captureURL, status: status, headers: [:], body: pending)
             let body = String(data: pending, encoding: .utf8) ?? ""
             finish(throwing: CursorConnectResponse.failureFromHTTP(status: status, body: body))
             return

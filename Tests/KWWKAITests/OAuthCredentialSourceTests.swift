@@ -200,4 +200,34 @@ struct OAuthCredentialSourceTests {
 
         await APIRegistry.shared.unregisterScope("anthropic")
     }
+
+    @Test("a source without a renewal hook answers a rejection with nothing newer")
+    func defaultRejectionHookRenewsNothing() async throws {
+        let source = StubSource(["x": fresh("tok")])
+        let manager = OAuthManager(source: source, providers: [RefreshCountingProvider(id: "x")])
+
+        let authorization = try await manager.authorization(for: "x")
+        #expect(authorization.apiKey == "tok")
+        #expect(authorization.access == "tok")
+        #expect(try await authorization.onRejected.report() == false)
+    }
+
+    @Test("a renewal hook's errors arrive as credential-source errors")
+    func rejectionHookErrorsAreWrapped() async throws {
+        struct Dead: LocalizedError { var errorDescription: String? { "sign in again" } }
+        final class DeadSource: OAuthCredentialSource, @unchecked Sendable {
+            func providerIds() async -> [String] { ["x"] }
+            func credentials(for providerId: String) async throws -> OAuthCredentials? {
+                OAuthCredentials(access: "tok", refresh: "", expires: .max)
+            }
+            func credentialsAfterRejection(of rejectedAccess: String, for providerId: String) async throws -> OAuthCredentials? {
+                throw Dead()
+            }
+        }
+        let manager = OAuthManager(source: DeadSource(), providers: [RefreshCountingProvider(id: "x")])
+        let thrown = await #expect(throws: OAuthCredentialSourceError.self) {
+            _ = try await manager.reportRejected("tok", for: "x")
+        }
+        #expect(thrown?.errorDescription == "sign in again")
+    }
 }

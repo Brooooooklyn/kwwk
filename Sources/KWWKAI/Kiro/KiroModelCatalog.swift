@@ -149,15 +149,16 @@ func kiroAuthResolver(
 ) -> @Sendable (Model, String?) async throws -> ResolvedProviderAuth? {
     { _, _ in
         do {
-            let token = try await manager.apiKey(for: "kiro")
+            let authorization = try await manager.authorization(for: "kiro")
             guard let credentials = try await manager.credentials(for: "kiro") else { return nil }
             var metadata: [String: JSONValue] = [:]
             if let profile = KiroOAuth.profileArn(credentials) { metadata["profileArn"] = .string(profile) }
             return ResolvedProviderAuth(
-                token: token,
+                token: authorization.apiKey,
                 scheme: .bearer,
                 baseURL: KiroModels.runtimeURL(region: KiroOAuth.apiRegion(credentials)),
-                metadata: metadata
+                metadata: metadata,
+                onRejected: authorization.onRejected
             )
         } catch OAuthError.missing, OAuthError.unknownProvider {
             // Not logged in ⇒ anonymous; any other failure propagates.

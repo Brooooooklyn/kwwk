@@ -34,12 +34,13 @@ private func qoderResolver(
 ) -> @Sendable (Model, String?) async throws -> ResolvedProviderAuth? {
     { _, _ in
         do {
-            let token = try await manager.apiKey(for: site.id)
+            let authorization = try await manager.authorization(for: site.id)
             let extras = try await manager.credentials(for: site.id)?.extras ?? [:]
             return ResolvedProviderAuth(
-                token: token,
+                token: authorization.apiKey,
                 scheme: .bearer,
-                metadata: extras.filter { ["uid", "machineId", "name", "email"].contains($0.key) }
+                metadata: extras.filter { ["uid", "machineId", "name", "email"].contains($0.key) },
+                onRejected: authorization.onRejected
             )
         } catch OAuthError.missing, OAuthError.unknownProvider {
             // Not logged in ⇒ nil, and the provider says to sign in. Any
