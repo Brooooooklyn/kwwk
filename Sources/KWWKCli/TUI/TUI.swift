@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Retained-mode TUI runtime, inline render strategy (matches Claude Code's
 /// behavior): anchor at the current cursor position, grow downward. Children
@@ -12,35 +13,71 @@ import Foundation
 /// `<Static>` component.
 final class TUI: @unchecked Sendable {
     private let terminal: Terminal
-    private let lock = NSLock()
-    /// Live-zone children. Everything in here is redrawn in place on every
-    /// render cycle. Static/committed content is written via `commit(_:)`
-    /// and never tracked as a component — it scrolls into native scrollback
-    /// and is owned by the terminal from that point on.
-    private var children: [Component] = []
-    private var lastFrameHeight: Int = 0
-    private var lastRenderedLines: [String] = []
-    /// Lines queued up to be written as append-only output above the live
-    /// zone on the next render. Drained (→ []) every time we flush.
-    private var pendingCommits: [String] = []
-    /// Full retained transcript (every committed line, in order) so a resize
-    /// can re-wrap the whole history to the new width instead of leaving the
-    /// terminal to reflow already-drawn cells. Committed text is stored as
-    /// *logical* lines (paragraphs, not pre-wrapped), so reprinting with
-    /// autowrap on re-wraps it cleanly. Capped to bound memory.
-    private var committedLines: [String] = []
+    /// Shared render-state. Every read and write goes through `state`'s lock.
+    private struct State {
+        /// Live-zone children. Everything in here is redrawn in place on every
+        /// render cycle. Static/committed content is written via `commit(_:)`
+        /// and never tracked as a component — it scrolls into native scrollback
+        /// and is owned by the terminal from that point on.
+        var children: [Component] = []
+        var lastFrameHeight: Int = 0
+        var lastRenderedLines: [String] = []
+        /// Lines queued up to be written as append-only output above the live
+        /// zone on the next render. Drained (→ []) every time we flush.
+        var pendingCommits: [String] = []
+        /// Full retained transcript (every committed line, in order) so a resize
+        /// can re-wrap the whole history to the new width instead of leaving the
+        /// terminal to reflow already-drawn cells. Committed text is stored as
+        /// *logical* lines (paragraphs, not pre-wrapped), so reprinting with
+        /// autowrap on re-wraps it cleanly. Capped to bound memory.
+        var committedLines: [String] = []
+        var isStarted: Bool = false
+        var clearOnShrink: Bool = true
+        var fullRedraws: Int = 0
+        /// Coalesces a burst of SIGWINCH events into a single authoritative
+        /// repaint. A window drag fires many resize events per second; replaying
+        /// the whole retained transcript (up to `maxCommittedLines`) on each step
+        /// is wasteful, so we debounce and repaint once the drag settles, using the
+        /// final terminal size. Cancelled + rescheduled on every resize event.
+        var pendingResizeWork: DispatchWorkItem?
+        var lastResizeRepaintAt = Date.distantPast
+        var headerEmitted = false
+        /// Inline mode parks the hardware cursor on the focused component's row,
+        /// which may not be the last live row (e.g. a prompt box with a bottom
+        /// border below the input). We remember how many rows up that was so the
+        /// next frame can drop back to the live-zone bottom before rewinding —
+        /// otherwise the rewind math is off and old rows leak as duplicates.
+        var lastCursorUpBy: Int = 0
+        /// Set by `clearFrame()` so `stop()` skips its trailing newline — the
+        /// erased live zone left the cursor exactly where the next output should
+        /// start. Reset whenever a render draws a fresh frame.
+        var frameCleared = false
+        /// Estimated blank rows between the live zone's bottom edge and the
+        /// bottom of the screen. Each render consumes them as committed + live
+        /// output grows (once at 0 the zone is pinned to the screen bottom and
+        /// further growth scrolls history up); a shrink while pinned means the
+        /// inline redraw would strand the frame high on the screen — see
+        /// `render()`. Initialized to 0 (assume pinned): the pessimistic guess
+        /// only costs a redundant repaint, which redraws the same layout.
+        var rowsBelowLiveZone = 0
+    }
+
+    /// What `render()` reads (and drains) from `state` in one critical section.
+    private struct RenderSnapshot {
+        let children: [Component]
+        let width: Int
+        let termHeight: Int
+        let oldHeight: Int
+        let prevCursorUpBy: Int
+        let clearOnShrinkEnabled: Bool
+        let oldRendered: [String]
+        let committed: [String]
+        let emitHeaderNow: Bool
+    }
+
+    private let state = NIOLockedValueBox(State())
     private static let maxCommittedLines = 20_000
-    private var isStarted: Bool = false
-    private var clearOnShrink: Bool = true
     private var resizeUnsubscribe: (() -> Void)?
-    private var _fullRedraws: Int = 0
-    /// Coalesces a burst of SIGWINCH events into a single authoritative
-    /// repaint. A window drag fires many resize events per second; replaying
-    /// the whole retained transcript (up to `maxCommittedLines`) on each step
-    /// is wasteful, so we debounce and repaint once the drag settles, using the
-    /// final terminal size. Cancelled + rescheduled on every resize event.
-    private var pendingResizeWork: DispatchWorkItem?
-    private var lastResizeRepaintAt = Date.distantPast
     private static let resizeDebounceMs: Int = 60
     /// Optional decorative header (the welcome card) rendered fresh at the
     /// current width. Emitted once into scrollback on the first frame, and
@@ -48,25 +85,6 @@ final class TUI: @unchecked Sendable {
     /// box re-fits the new width instead of reflowing into broken borders.
     /// Not stored in `committedLines`.
     var headerProvider: (@Sendable (Int) -> [String])?
-    private var headerEmitted = false
-    /// Inline mode parks the hardware cursor on the focused component's row,
-    /// which may not be the last live row (e.g. a prompt box with a bottom
-    /// border below the input). We remember how many rows up that was so the
-    /// next frame can drop back to the live-zone bottom before rewinding —
-    /// otherwise the rewind math is off and old rows leak as duplicates.
-    private var lastCursorUpBy: Int = 0
-    /// Set by `clearFrame()` so `stop()` skips its trailing newline — the
-    /// erased live zone left the cursor exactly where the next output should
-    /// start. Reset whenever a render draws a fresh frame.
-    private var frameCleared = false
-    /// Estimated blank rows between the live zone's bottom edge and the
-    /// bottom of the screen. Each render consumes them as committed + live
-    /// output grows (once at 0 the zone is pinned to the screen bottom and
-    /// further growth scrolls history up); a shrink while pinned means the
-    /// inline redraw would strand the frame high on the screen — see
-    /// `render()`. Initialized to 0 (assume pinned): the pessimistic guess
-    /// only costs a redundant repaint, which redraws the same layout.
-    private var rowsBelowLiveZone = 0
 
     private static let disableAutowrap = "\u{1B}[?7l"
     private static let enableAutowrap = "\u{1B}[?7h"
@@ -78,15 +96,15 @@ final class TUI: @unchecked Sendable {
     // MARK: - Tree manipulation
 
     func addChild(_ component: Component) {
-        lock.withLock { children.append(component) }
+        state.withLockedValue { $0.children.append(component) }
     }
 
     // MARK: - Lifecycle
 
     func start() {
-        let alreadyStarted: Bool = lock.withLock {
-            if isStarted { return true }
-            isStarted = true
+        let alreadyStarted: Bool = state.withLockedValue { state in
+            if state.isStarted { return true }
+            state.isStarted = true
             return false
         }
         if alreadyStarted { return }
@@ -98,21 +116,21 @@ final class TUI: @unchecked Sendable {
     }
 
     func stop() {
-        let wasStarted: Bool = lock.withLock {
-            let prev = isStarted
-            isStarted = false
+        let wasStarted: Bool = state.withLockedValue { state in
+            let prev = state.isStarted
+            state.isStarted = false
             return prev
         }
         resizeUnsubscribe?()
         resizeUnsubscribe = nil
         // Drop any debounced resize repaint so it can't fire into a
         // torn-down / suspended terminal.
-        lock.withLock {
-            pendingResizeWork?.cancel()
-            pendingResizeWork = nil
+        state.withLockedValue { state in
+            state.pendingResizeWork?.cancel()
+            state.pendingResizeWork = nil
         }
         if wasStarted {
-            let (cursorUpBy, cleared) = lock.withLock { (lastCursorUpBy, frameCleared) }
+            let (cursorUpBy, cleared) = state.withLockedValue { ($0.lastCursorUpBy, $0.frameCleared) }
             var epilogue = TUI.enableAutowrap
             // The hardware cursor may be parked above the live-zone bottom
             // (inside a prompt box). Drop to the bottom before moving to a
@@ -138,12 +156,12 @@ final class TUI: @unchecked Sendable {
     /// redrawn as part of the retained live frame.
     func commit(_ lines: [String]) {
         guard !lines.isEmpty else { return }
-        lock.withLock {
-            pendingCommits.append(contentsOf: lines)
+        state.withLockedValue { state in
+            state.pendingCommits.append(contentsOf: lines)
             // Retain for resize re-wrapping.
-            committedLines.append(contentsOf: lines)
-            if committedLines.count > TUI.maxCommittedLines {
-                committedLines.removeFirst(committedLines.count - TUI.maxCommittedLines)
+            state.committedLines.append(contentsOf: lines)
+            if state.committedLines.count > TUI.maxCommittedLines {
+                state.committedLines.removeFirst(state.committedLines.count - TUI.maxCommittedLines)
             }
         }
     }
@@ -157,22 +175,22 @@ final class TUI: @unchecked Sendable {
     /// and the pre-replacement history stays in the pane's own scrollback —
     /// the same constraint omp accepts (it skips clearScrollback there too).
     func replaceCommitted(_ lines: [String]) {
-        lock.withLock {
-            pendingCommits.removeAll()
-            committedLines = lines
-            if committedLines.count > TUI.maxCommittedLines {
-                committedLines.removeFirst(committedLines.count - TUI.maxCommittedLines)
+        state.withLockedValue { state in
+            state.pendingCommits.removeAll()
+            state.committedLines = lines
+            if state.committedLines.count > TUI.maxCommittedLines {
+                state.committedLines.removeFirst(state.committedLines.count - TUI.maxCommittedLines)
             }
         }
         repaintForResize()
     }
 
     func setClearOnShrink(_ value: Bool) {
-        lock.withLock { clearOnShrink = value }
+        state.withLockedValue { $0.clearOnShrink = value }
     }
 
     var fullRedraws: Int {
-        lock.withLock { _fullRedraws }
+        state.withLockedValue { $0.fullRedraws }
     }
 
     /// Test hook: synchronously run the authoritative resize repaint
@@ -206,13 +224,13 @@ final class TUI: @unchecked Sendable {
     /// the first post-resume render would clear `lastFrameHeight` rows relative
     /// to the new cursor and erase the sub-flow's output.
     func resetFrameGeometryForResume() {
-        lock.withLock {
-            lastFrameHeight = 0
-            lastCursorUpBy = 0
-            lastRenderedLines = []
+        state.withLockedValue { state in
+            state.lastFrameHeight = 0
+            state.lastCursorUpBy = 0
+            state.lastRenderedLines = []
             // Unknown geometry after the sub-flow's output — assume pinned
             // (the conservative guess only risks a redundant repaint).
-            rowsBelowLiveZone = 0
+            state.rowsBelowLiveZone = 0
         }
     }
 
@@ -223,28 +241,28 @@ final class TUI: @unchecked Sendable {
     /// above the sub-flow's output. `stop()` sees `frameCleared` and skips
     /// its trailing newline.
     func clearFrame() {
-        let out: String? = lock.withLock {
-            guard isStarted, lastFrameHeight > 0 else { return nil }
+        let out: String? = state.withLockedValue { state in
+            guard state.isStarted, state.lastFrameHeight > 0 else { return nil }
             var s = TUI.disableAutowrap
-            if lastCursorUpBy > 0 { s += "\u{1B}[\(lastCursorUpBy)B" }
+            if state.lastCursorUpBy > 0 { s += "\u{1B}[\(state.lastCursorUpBy)B" }
             s += "\r"
-            if lastFrameHeight > 1 { s += "\u{1B}[\(lastFrameHeight - 1)A" }
+            if state.lastFrameHeight > 1 { s += "\u{1B}[\(state.lastFrameHeight - 1)A" }
             // The live zone is the bottommost content, so clearing from the
             // cursor to end-of-screen wipes exactly the frame's rows.
             s += "\u{1B}[0J"
             s += TUI.enableAutowrap
-            lastFrameHeight = 0
-            lastCursorUpBy = 0
-            lastRenderedLines = []
-            rowsBelowLiveZone = 0
-            frameCleared = true
+            state.lastFrameHeight = 0
+            state.lastCursorUpBy = 0
+            state.lastRenderedLines = []
+            state.rowsBelowLiveZone = 0
+            state.frameCleared = true
             return s
         }
         if let out { terminal.write(out) }
     }
 
     private func handleResize() {
-        let snapshotChildren: [Component] = lock.withLock { children }
+        let snapshotChildren: [Component] = state.withLockedValue { $0.children }
         for child in snapshotChildren { child.invalidate() }
         // Leading edge + trailing coalesce: an isolated SIGWINCH repaints
         // immediately (snappy single resizes), while a drag's burst collapses
@@ -252,11 +270,11 @@ final class TUI: @unchecked Sendable {
         // the whole transcript per step. The escape-flush timer already
         // establishes that the main queue is serviced, so a main-queue
         // `asyncAfter` fires reliably for the trailing edge.
-        let immediate: Bool = lock.withLock {
-            guard pendingResizeWork == nil,
-                  Date().timeIntervalSince(lastResizeRepaintAt) >= Double(TUI.resizeDebounceMs) / 1000
+        let immediate: Bool = state.withLockedValue { state in
+            guard state.pendingResizeWork == nil,
+                  Date().timeIntervalSince(state.lastResizeRepaintAt) >= Double(TUI.resizeDebounceMs) / 1000
             else { return false }
-            lastResizeRepaintAt = Date()
+            state.lastResizeRepaintAt = Date()
             return true
         }
         if immediate {
@@ -264,9 +282,9 @@ final class TUI: @unchecked Sendable {
             return
         }
         let work = DispatchWorkItem { [weak self] in self?.performResizeRepaint() }
-        lock.withLock {
-            pendingResizeWork?.cancel()
-            pendingResizeWork = work
+        state.withLockedValue { state in
+            state.pendingResizeWork?.cancel()
+            state.pendingResizeWork = work
         }
         DispatchQueue.main.asyncAfter(
             deadline: .now() + .milliseconds(TUI.resizeDebounceMs),
@@ -275,10 +293,10 @@ final class TUI: @unchecked Sendable {
     }
 
     private func performResizeRepaint() {
-        let cancelled = lock.withLock { () -> Bool in
-            if pendingResizeWork == nil { return true }
-            pendingResizeWork = nil
-            lastResizeRepaintAt = Date()
+        let cancelled = state.withLockedValue { state -> Bool in
+            if state.pendingResizeWork == nil { return true }
+            state.pendingResizeWork = nil
+            state.lastResizeRepaintAt = Date()
             return false
         }
         if cancelled { return }
@@ -313,26 +331,21 @@ final class TUI: @unchecked Sendable {
     /// current width — the omp "erase and replay the whole transcript on
     /// resize" behavior. Direct terminals only (callers gate on multiplexer).
     private func fullRepaint() {
-        let snapshotChildren: [Component]
-        let width: Int
-        let termHeight: Int
-        let history: [String]
-        let header: [String]
-        lock.lock()
-        snapshotChildren = children
-        width = terminal.width
-        termHeight = terminal.height
-        // `commit(_:)` already retained pending lines in `committedLines`.
-        // A resize can arrive before the next normal render drains
-        // `pendingCommits`; clear that queue so the authoritative repaint owns
-        // the write without replaying the same logical lines twice.
-        pendingCommits.removeAll()
-        history = committedLines
-        // Capture the decorative header under lock (mirrors multiplexerRepaint).
-        // `headerEmitted`/`headerProvider` are shared render-state, and this
-        // repaint can run off the main thread via the resize/escape-flush path.
-        header = (headerEmitted ? headerProvider?(width) : nil) ?? []
-        lock.unlock()
+        let (snapshotChildren, width, termHeight, history, header) = state.withLockedValue {
+            state -> ([Component], Int, Int, [String], [String]) in
+            let width = terminal.width
+            let termHeight = terminal.height
+            // `commit(_:)` already retained pending lines in `committedLines`.
+            // A resize can arrive before the next normal render drains
+            // `pendingCommits`; clear that queue so the authoritative repaint owns
+            // the write without replaying the same logical lines twice.
+            state.pendingCommits.removeAll()
+            // Capture the decorative header under lock (mirrors multiplexerRepaint).
+            // `headerEmitted`/`headerProvider` are shared render-state, and this
+            // repaint can run off the main thread via the resize/escape-flush path.
+            let header = (state.headerEmitted ? headerProvider?(width) : nil) ?? []
+            return (state.children, width, termHeight, state.committedLines, header)
+        }
 
         let liveWidth = max(0, width - 1)
         var rendered: [String] = []
@@ -376,13 +389,13 @@ final class TUI: @unchecked Sendable {
             historyPhysical += line.isEmpty ? 1 : ANSI.wrap(line, width: max(1, width)).count
         }
 
-        lock.withLock {
-            lastRenderedLines = rendered
-            lastFrameHeight = rendered.count
-            lastCursorUpBy = upBy
-            frameCleared = false
-            rowsBelowLiveZone = max(0, termHeight - historyPhysical - rendered.count)
-            _fullRedraws += 1
+        state.withLockedValue { state in
+            state.lastRenderedLines = rendered
+            state.lastFrameHeight = rendered.count
+            state.lastCursorUpBy = upBy
+            state.frameCleared = false
+            state.rowsBelowLiveZone = max(0, termHeight - historyPhysical - rendered.count)
+            state.fullRedraws += 1
         }
         terminal.write(out)
     }
@@ -399,22 +412,17 @@ final class TUI: @unchecked Sendable {
     /// window. Older history stays in the pane's scrollback, reflowed by the
     /// multiplexer (the same constraint omp accepts — we never ED3 here).
     private func multiplexerRepaint() {
-        let snapshotChildren: [Component]
-        let width: Int
-        let termHeight: Int
-        let history: [String]
-        let header: [String]
-        lock.lock()
-        snapshotChildren = children
-        width = terminal.width
-        termHeight = terminal.height
-        // A resize can arrive before the next normal render drains
-        // `pendingCommits`; this repaint owns the write, so clear the queue to
-        // avoid replaying the same logical lines twice.
-        pendingCommits.removeAll()
-        history = committedLines
-        header = (headerEmitted ? headerProvider?(width) : nil) ?? []
-        lock.unlock()
+        let (snapshotChildren, width, termHeight, history, header) = state.withLockedValue {
+            state -> ([Component], Int, Int, [String], [String]) in
+            let width = terminal.width
+            let termHeight = terminal.height
+            // A resize can arrive before the next normal render drains
+            // `pendingCommits`; this repaint owns the write, so clear the queue to
+            // avoid replaying the same logical lines twice.
+            state.pendingCommits.removeAll()
+            let header = (state.headerEmitted ? headerProvider?(width) : nil) ?? []
+            return (state.children, width, termHeight, state.committedLines, header)
+        }
 
         let liveWidth = max(0, width - 1)
         var rendered: [String] = []
@@ -448,49 +456,52 @@ final class TUI: @unchecked Sendable {
         out += live
         out += "\u{1B}[?2026l"             // end synchronized output
 
-        lock.withLock {
-            lastRenderedLines = rendered
-            lastFrameHeight = rendered.count
-            lastCursorUpBy = upBy
-            frameCleared = false
+        state.withLockedValue { state in
+            state.lastRenderedLines = rendered
+            state.lastFrameHeight = rendered.count
+            state.lastCursorUpBy = upBy
+            state.frameCleared = false
             // The snapped window bottom-fills with history; whatever the tail
             // didn't cover stays blank below the live zone.
-            rowsBelowLiveZone = max(0, available - onScreen.count)
-            _fullRedraws += 1
+            state.rowsBelowLiveZone = max(0, available - onScreen.count)
+            state.fullRedraws += 1
         }
         terminal.write(out)
     }
 
     private func render() {
-        let snapshotChildren: [Component]
-        let width: Int
-        let termHeight: Int
-        let oldHeight: Int
-        let prevCursorUpBy: Int
-        let clearOnShrinkEnabled: Bool
-        let oldRendered: [String]
-        var committed: [String]
-
         // Suppress all frame output while stopped/suspended (e.g. during a
         // `/login` sub-flow that hands the terminal to another runner). A
         // background spinner tick or agent event could otherwise fire a
         // render straight into the sub-flow's screen. Pending commits stay
         // buffered and flush on the first render after `start()` resumes.
-        guard lock.withLock({ isStarted }) else { return }
+        guard state.withLockedValue({ $0.isStarted }) else { return }
 
-        lock.lock()
-        snapshotChildren = children
-        width = terminal.width
-        termHeight = terminal.height
-        oldHeight = lastFrameHeight
-        prevCursorUpBy = lastCursorUpBy
-        clearOnShrinkEnabled = clearOnShrink
-        oldRendered = lastRenderedLines
-        committed = pendingCommits
-        pendingCommits.removeAll()
-        let emitHeaderNow = !headerEmitted && headerProvider != nil
-        if emitHeaderNow { headerEmitted = true }
-        lock.unlock()
+        let snapshot = state.withLockedValue { state -> RenderSnapshot in
+            let taken = RenderSnapshot(
+                children: state.children,
+                width: terminal.width,
+                termHeight: terminal.height,
+                oldHeight: state.lastFrameHeight,
+                prevCursorUpBy: state.lastCursorUpBy,
+                clearOnShrinkEnabled: state.clearOnShrink,
+                oldRendered: state.lastRenderedLines,
+                committed: state.pendingCommits,
+                emitHeaderNow: !state.headerEmitted && headerProvider != nil
+            )
+            state.pendingCommits.removeAll()
+            if taken.emitHeaderNow { state.headerEmitted = true }
+            return taken
+        }
+        let snapshotChildren = snapshot.children
+        let width = snapshot.width
+        let termHeight = snapshot.termHeight
+        let oldHeight = snapshot.oldHeight
+        let prevCursorUpBy = snapshot.prevCursorUpBy
+        let clearOnShrinkEnabled = snapshot.clearOnShrinkEnabled
+        let oldRendered = snapshot.oldRendered
+        var committed = snapshot.committed
+        let emitHeaderNow = snapshot.emitHeaderNow
 
         // First frame: emit the decorative header (welcome card) into
         // scrollback above everything else.
@@ -535,11 +546,11 @@ final class TUI: @unchecked Sendable {
                 oldRendered: oldRendered,
                 prevCursorUpBy: prevCursorUpBy
             )
-            lock.withLock {
-                lastRenderedLines = rendered
-                lastFrameHeight = rendered.count
-                lastCursorUpBy = newCursorUpBy
-                frameCleared = false
+            state.withLockedValue { state in
+                state.lastRenderedLines = rendered
+                state.lastFrameHeight = rendered.count
+                state.lastCursorUpBy = newCursorUpBy
+                state.frameCleared = false
             }
             terminal.write(frame)
             return
@@ -552,7 +563,7 @@ final class TUI: @unchecked Sendable {
         // where the terminal starts scrolling instead. Committed lines are
         // written raw at full terminal width (autowrap on), so measure their
         // physical rows with the same wrap the terminal will apply.
-        let prevSlack = lock.withLock { rowsBelowLiveZone }
+        let prevSlack = state.withLockedValue { $0.rowsBelowLiveZone }
         var committedPhysical = 0
         for line in committed {
             committedPhysical += line.isEmpty ? 1 : ANSI.wrap(line, width: max(1, width)).count
@@ -584,13 +595,13 @@ final class TUI: @unchecked Sendable {
             prevCursorUpBy: prevCursorUpBy
         )
 
-        lock.withLock {
-            lastRenderedLines = rendered
-            lastFrameHeight = rendered.count
-            lastCursorUpBy = newCursorUpBy
-            frameCleared = false
-            rowsBelowLiveZone = newSlack
-            if shrinking { _fullRedraws += 1 }
+        state.withLockedValue { state in
+            state.lastRenderedLines = rendered
+            state.lastFrameHeight = rendered.count
+            state.lastCursorUpBy = newCursorUpBy
+            state.frameCleared = false
+            state.rowsBelowLiveZone = newSlack
+            if shrinking { state.fullRedraws += 1 }
         }
 
         // Wrap the live-zone update in synchronized output (DEC 2026) so the

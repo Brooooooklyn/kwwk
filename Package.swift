@@ -48,6 +48,9 @@ let package = Package(
         // over the system zlib.h clashes with both this module and the Apple
         // SDK's `zlib` module in any package graph that loads either.
         .package(url: "https://github.com/the-swift-collective/zlib.git", from: "1.3.1"),
+        // `Deque` for the FIFO queues on the streaming and input paths, where
+        // `Array.removeFirst()` would shift every element on each pop.
+        .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
     ],
     targets: [
         .target(
@@ -56,6 +59,8 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/KWWKAuth"
         ),
@@ -69,6 +74,8 @@ let package = Package(
                 .product(name: "ZLibC", package: "zlib", condition: .when(platforms: [.linux])),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
                 .product(name: "NIOHTTP2", package: "swift-nio-http2"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "stb_image", package: "Cstb"),
@@ -82,7 +89,10 @@ let package = Package(
         ),
         .target(
             name: "KWWKAgent",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+            ],
             path: "Sources/KWWKAgent"
         ),
         .target(
@@ -91,12 +101,19 @@ let package = Package(
                 "KWWKAI",
                 "KWWKAgent",
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
             ],
             path: "Sources/KWWKMCP"
         ),
         .target(
             name: "KWWKCli",
-            dependencies: ["KWWKAI", "KWWKAgent", "KWWKMCP"],
+            dependencies: [
+                "KWWKAI",
+                "KWWKAgent",
+                "KWWKMCP",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "DequeModule", package: "swift-collections"),
+            ],
             path: "Sources/KWWKCli"
         ),
         .target(

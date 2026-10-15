@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -28,15 +29,20 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     public let env: [String: String]
     public let cwd: String?
 
-    private let lock = NSLock()
-    private var stderrBuffer = Data()
-    private var continuation: AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
-    private var closing = false
-    private var started = false
+    private struct State {
+        var stderrBuffer = Data()
+        var continuation: AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
+        var closing = false
+        var started = false
+        #if os(macOS) || os(Linux)
+        var process: Process?
+        var stdinHandle: FileHandle?
+        #endif
+    }
+
+    private let state = NIOLockedValueBox(State())
     #if os(macOS) || os(Linux)
-    private var process: Process?
-    private var stdinHandle: FileHandle?
-    private let writeLock = NSLock()
+    private let writeLock = NIOLock()
     #endif
 
     /// - Parameters:
@@ -50,7 +56,7 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     }
 
     public var diagnostics: String? {
-        let tail = lock.withLock { stderrBuffer }
+        let tail = state.withLockedValue { $0.stderrBuffer }
         let text = String(decoding: tail, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
@@ -58,9 +64,9 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     #if os(macOS) || os(Linux)
 
     public func start() async throws -> AsyncThrowingStream<JSONRPCMessage, Error> {
-        try lock.withLock {
-            guard !started else { throw MCPError.protocolError("transport already started") }
-            started = true
+        try state.withLockedValue { state in
+            guard !state.started else { throw MCPError.protocolError("transport already started") }
+            state.started = true
         }
         Self.ignoreSIGPIPEOnce
 
@@ -89,10 +95,10 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
         process.standardError = stderr
 
         let (stream, continuation) = AsyncThrowingStream<JSONRPCMessage, Error>.makeStream()
-        lock.withLock {
-            self.continuation = continuation
-            self.process = process
-            self.stdinHandle = stdin.fileHandleForWriting
+        state.withLockedValue { state in
+            state.continuation = continuation
+            state.process = process
+            state.stdinHandle = stdin.fileHandleForWriting
         }
         process.terminationHandler = { [weak self] _ in
             // stdout EOF normally finishes the stream first. A grandchild that
@@ -106,10 +112,10 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
         do {
             try process.run()
         } catch {
-            lock.withLock {
-                self.continuation = nil
-                self.process = nil
-                self.stdinHandle = nil
+            state.withLockedValue { state in
+                state.continuation = nil
+                state.process = nil
+                state.stdinHandle = nil
             }
             continuation.finish()
             throw MCPError.spawnFailed("\(command): \(error.localizedDescription)")
@@ -147,7 +153,7 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     public func send(_ message: JSONRPCMessage) async throws {
         var data = try message.encoded()
         data.append(UInt8(ascii: "\n"))
-        guard let handle = lock.withLock({ closing ? nil : stdinHandle }) else {
+        guard let handle = state.withLockedValue({ $0.closing ? nil : $0.stdinHandle }) else {
             throw MCPError.connectionClosed(details: diagnostics)
         }
         do {
@@ -162,12 +168,12 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
             Process?,
             FileHandle?,
             AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
-        ) = lock.withLock {
-            if closing { return (nil, nil, nil) }
-            closing = true
-            let result = (self.process, stdinHandle, self.continuation)
-            stdinHandle = nil
-            self.continuation = nil
+        ) = state.withLockedValue { state in
+            if state.closing { return (nil, nil, nil) }
+            state.closing = true
+            let result = (state.process, state.stdinHandle, state.continuation)
+            state.stdinHandle = nil
+            state.continuation = nil
             return result
         }
         continuation?.finish()
@@ -201,23 +207,26 @@ public final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
             appendStderr(line + Data("\n".utf8))
             return
         }
-        guard let continuation = lock.withLock({ self.continuation }) else { return }
+        guard let continuation = state.withLockedValue({ $0.continuation }) else { return }
         for message in messages { continuation.yield(message) }
     }
 
     private func appendStderr(_ data: Data) {
-        lock.withLock {
-            stderrBuffer.append(data)
-            if stderrBuffer.count > Self.stderrTailLimit {
-                stderrBuffer = Data(stderrBuffer.suffix(Self.stderrTailLimit))
+        state.withLockedValue { state in
+            state.stderrBuffer.append(data)
+            if state.stderrBuffer.count > Self.stderrTailLimit {
+                state.stderrBuffer = Data(state.stderrBuffer.suffix(Self.stderrTailLimit))
             }
         }
     }
 
     private func finishAfterExit() {
-        let (continuation, process) = lock.withLock { () -> (AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?, Process?) in
-            let result = (self.continuation, self.process)
-            self.continuation = nil
+        let (continuation, process) = state.withLockedValue { state -> (
+            AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?,
+            Process?
+        ) in
+            let result = (state.continuation, state.process)
+            state.continuation = nil
             return result
         }
         guard let continuation else { return }

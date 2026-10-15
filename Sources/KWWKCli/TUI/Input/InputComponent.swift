@@ -1,3 +1,4 @@
+import DequeModule
 import Foundation
 
 /// Category of the most recent edit. Drives three behaviors: kill-ring
@@ -102,7 +103,7 @@ final class InputComponent: Component, Focusable, @unchecked Sendable {
 
     // Single-level (coalesced) undo. Bounded snapshot stack pushed before
     // each destructive op; consecutive typed chars / deletes share one entry.
-    private var undoStack: [EditorSnapshot] = []
+    private var undoStack: Deque<EditorSnapshot> = []
     private let maxUndoStack = 50
 
     init(initial: String = "") {

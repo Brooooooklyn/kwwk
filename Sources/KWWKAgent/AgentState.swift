@@ -1,31 +1,34 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Mutable public state exposed by `Agent`. Consumers read fields directly
 /// and use the read/write setters to drive the agent. Array setters copy the
 /// assigned array to prevent external aliasing.
 ///
 /// This is a reference type so that the `Agent` actor and the consumer share
-/// one view of state; all mutations funnel through locks.
-public final class AgentState: @unchecked Sendable {
-    private let lock = NSLock()
+/// one view of state; all mutations funnel through one locked box.
+public final class AgentState: Sendable {
+    private struct State {
+        var systemPrompt: String
+        var model: Model
+        var thinkingLevel: ThinkingLevel
+        var thinkingDisplay: ThinkingDisplay
+        var verboseEnabled: Bool
+        var tools: [AgentTool]
+        var toolCatalog: ToolCatalog?
+        var messages: [Message]
+        /// Advances whenever model-facing context changes. Compaction uses it as a
+        /// compare-and-swap guard so a summary built from one prompt snapshot can
+        /// never replace a newer one.
+        var contextRevision: UInt64 = 0
+        var isStreaming: Bool = false
+        var streamingMessage: Message?
+        var pendingToolCalls: Set<String> = []
+        var errorMessage: String?
+    }
 
-    private var _systemPrompt: String
-    private var _model: Model
-    private var _thinkingLevel: ThinkingLevel
-    private var _thinkingDisplay: ThinkingDisplay
-    private var _verboseEnabled: Bool
-    private var _tools: [AgentTool]
-    private var _toolCatalog: ToolCatalog?
-    private var _messages: [Message]
-    /// Advances whenever model-facing context changes. Compaction uses it as a
-    /// compare-and-swap guard so a summary built from one prompt snapshot can
-    /// never replace a newer one.
-    private var _contextRevision: UInt64 = 0
-    private var _isStreaming: Bool = false
-    private var _streamingMessage: Message?
-    private var _pendingToolCalls: Set<String> = []
-    private var _errorMessage: String?
+    private let state: NIOLockedValueBox<State>
 
     public init(
         systemPrompt: String = "",
@@ -36,60 +39,62 @@ public final class AgentState: @unchecked Sendable {
         tools: [AgentTool] = [],
         messages: [Message] = []
     ) {
-        self._systemPrompt = systemPrompt
-        self._model = model
-        self._thinkingLevel = thinkingLevel
-        self._thinkingDisplay = thinkingDisplay
-        self._verboseEnabled = verboseEnabled
-        self._tools = tools
-        self._messages = messages
+        self.state = NIOLockedValueBox(State(
+            systemPrompt: systemPrompt,
+            model: model,
+            thinkingLevel: thinkingLevel,
+            thinkingDisplay: thinkingDisplay,
+            verboseEnabled: verboseEnabled,
+            tools: tools,
+            messages: messages
+        ))
     }
 
     // MARK: - Public properties
 
     public var systemPrompt: String {
-        get { lock.withLock { _systemPrompt } }
+        get { state.withLockedValue { $0.systemPrompt } }
         set {
-            lock.withLock {
-                _systemPrompt = newValue
-                _contextRevision &+= 1
+            state.withLockedValue {
+                $0.systemPrompt = newValue
+                $0.contextRevision &+= 1
             }
         }
     }
 
     public var model: Model {
-        get { lock.withLock { _model } }
+        get { state.withLockedValue { $0.model } }
         set {
-            lock.withLock {
-                _model = newValue
-                _contextRevision &+= 1
+            state.withLockedValue {
+                $0.model = newValue
+                $0.contextRevision &+= 1
             }
         }
     }
 
     public var thinkingLevel: ThinkingLevel {
-        get { lock.withLock { _thinkingLevel } }
-        set { lock.withLock { _thinkingLevel = newValue } }
+        get { state.withLockedValue { $0.thinkingLevel } }
+        set { state.withLockedValue { $0.thinkingLevel = newValue } }
     }
 
     public var thinkingDisplay: ThinkingDisplay {
-        get { lock.withLock { _thinkingDisplay } }
-        set { lock.withLock { _thinkingDisplay = newValue } }
+        get { state.withLockedValue { $0.thinkingDisplay } }
+        set { state.withLockedValue { $0.thinkingDisplay = newValue } }
     }
 
     public var verboseEnabled: Bool {
-        get { lock.withLock { _verboseEnabled } }
-        set { lock.withLock { _verboseEnabled = newValue } }
+        get { state.withLockedValue { $0.verboseEnabled } }
+        set { state.withLockedValue { $0.verboseEnabled = newValue } }
     }
 
     /// Array setter copies to prevent external aliasing. Reads return a
     /// snapshot copy as well.
     public var tools: [AgentTool] {
-        get { lock.withLock { _tools } }
+        get { state.withLockedValue { $0.tools } }
         set {
-            lock.withLock {
-                _tools = Array(newValue)
-                _contextRevision &+= 1
+            state.withLockedValue {
+                $0.tools = Array(newValue)
+                $0.contextRevision &+= 1
             }
         }
     }
@@ -100,21 +105,21 @@ public final class AgentState: @unchecked Sendable {
     /// invalidates a compaction in flight. Subagents that may mutate inherit
     /// a child of it.
     public var toolCatalog: ToolCatalog? {
-        get { lock.withLock { _toolCatalog } }
-        set { lock.withLock { _toolCatalog = newValue } }
+        get { state.withLockedValue { $0.toolCatalog } }
+        set { state.withLockedValue { $0.toolCatalog = newValue } }
     }
 
     /// The tools the next provider request declares: `tools`, then the
     /// catalog's `tool_search` (unless `tools` has one) and loaded tools.
     public var effectiveTools: [AgentTool] {
-        let (tools, catalog) = lock.withLock { (_tools, _toolCatalog) }
+        let (tools, catalog) = state.withLockedValue { ($0.tools, $0.toolCatalog) }
         return Self.merge(tools, catalog)
     }
 
     /// The system prompt the next provider request sends: `systemPrompt`
     /// plus the catalog's instructions.
     public var effectiveSystemPrompt: String {
-        let (prompt, catalog) = lock.withLock { (_systemPrompt, _toolCatalog) }
+        let (prompt, catalog) = state.withLockedValue { ($0.systemPrompt, $0.toolCatalog) }
         return Self.compose(prompt, catalog)
     }
 
@@ -138,47 +143,47 @@ public final class AgentState: @unchecked Sendable {
     }
 
     public var messages: [Message] {
-        get { lock.withLock { _messages } }
+        get { state.withLockedValue { $0.messages } }
         set {
-            lock.withLock {
-                _messages = Array(newValue)
-                _contextRevision &+= 1
+            state.withLockedValue {
+                $0.messages = Array(newValue)
+                $0.contextRevision &+= 1
             }
         }
     }
 
     public var isStreaming: Bool {
-        lock.withLock { _isStreaming }
+        state.withLockedValue { $0.isStreaming }
     }
 
     public var streamingMessage: Message? {
-        lock.withLock { _streamingMessage }
+        state.withLockedValue { $0.streamingMessage }
     }
 
     public var pendingToolCalls: Set<String> {
-        lock.withLock { _pendingToolCalls }
+        state.withLockedValue { $0.pendingToolCalls }
     }
 
     public var errorMessage: String? {
-        lock.withLock { _errorMessage }
+        state.withLockedValue { $0.errorMessage }
     }
 
     // MARK: - Internal mutators (used by Agent)
 
     func appendMessage(_ message: Message) {
-        lock.withLock {
-            _messages.append(message)
-            _contextRevision &+= 1
+        state.withLockedValue {
+            $0.messages.append(message)
+            $0.contextRevision &+= 1
         }
     }
 
     func snapshotModelContext() -> (revision: UInt64, context: AgentContext, model: Model) {
-        let catalog = lock.withLock { _toolCatalog }
+        let catalog = state.withLockedValue { $0.toolCatalog }
         // Read the catalog outside the state lock: it takes its own locks.
         let extra = catalog.map { (tools: $0.tools, search: $0.searchTool, instructions: $0.instructions) }
-        return lock.withLock {
-            var tools = _tools
-            var systemPrompt = _systemPrompt
+        return state.withLockedValue { state in
+            var tools = state.tools
+            var systemPrompt = state.systemPrompt
             if let extra {
                 var names = Set(tools.map(\.name))
                 if !names.contains(toolSearchToolName) {
@@ -191,47 +196,47 @@ public final class AgentState: @unchecked Sendable {
                 }
             }
             return (
-                _contextRevision,
-                AgentContext(systemPrompt: systemPrompt, messages: _messages, tools: tools),
-                _model
+                state.contextRevision,
+                AgentContext(systemPrompt: systemPrompt, messages: state.messages, tools: tools),
+                state.model
             )
         }
     }
 
     func hasContextRevision(_ expectedRevision: UInt64) -> Bool {
-        lock.withLock { _contextRevision == expectedRevision }
+        state.withLockedValue { $0.contextRevision == expectedRevision }
     }
 
     func replaceMessages(_ messages: [Message], ifRevision expectedRevision: UInt64) -> Bool {
-        lock.withLock {
-            guard _contextRevision == expectedRevision else { return false }
-            _messages = Array(messages)
-            _contextRevision &+= 1
+        state.withLockedValue { state in
+            guard state.contextRevision == expectedRevision else { return false }
+            state.messages = Array(messages)
+            state.contextRevision &+= 1
             return true
         }
     }
 
     func setStreaming(_ value: Bool) {
-        lock.withLock { _isStreaming = value }
+        state.withLockedValue { $0.isStreaming = value }
     }
 
     func setStreamingMessage(_ message: Message?) {
-        lock.withLock { _streamingMessage = message }
+        state.withLockedValue { $0.streamingMessage = message }
     }
 
     func insertPendingToolCall(_ id: String) {
-        lock.withLock { _ = _pendingToolCalls.insert(id) }
+        state.withLockedValue { _ = $0.pendingToolCalls.insert(id) }
     }
 
     func removePendingToolCall(_ id: String) {
-        lock.withLock { _ = _pendingToolCalls.remove(id) }
+        state.withLockedValue { _ = $0.pendingToolCalls.remove(id) }
     }
 
     func clearPendingToolCalls() {
-        lock.withLock { _pendingToolCalls.removeAll() }
+        state.withLockedValue { $0.pendingToolCalls.removeAll() }
     }
 
     func setErrorMessage(_ message: String?) {
-        lock.withLock { _errorMessage = message }
+        state.withLockedValue { $0.errorMessage = message }
     }
 }

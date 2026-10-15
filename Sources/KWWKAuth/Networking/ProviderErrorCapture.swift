@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import NIOConcurrencyHelpers
 
 /// Keeps the literal bytes of provider error responses on disk, so a refusal
 /// seen once can be read again later and turned into a test fixture without
@@ -47,19 +48,18 @@ public enum ProviderErrorCapture {
         "grpc-status", "grpc-message", "connect-protocol-version",
     ]
 
-    private final class State: @unchecked Sendable {
-        let lock = NSLock()
+    private struct State {
         var directory: URL?
         var retain = 200
         var configured = false
     }
-    private static let state = State()
+    private static let state = NIOLockedValueBox(State())
 
     /// Write records under `directory`, keeping the newest `retain` files.
     /// `KWWK_PROVIDER_ERROR_DIR` still wins, so a user can redirect or turn
     /// off what an app enables.
     public static func enable(directory: URL, retain: Int = 200) {
-        state.lock.withLock {
+        state.withLockedValue { state in
             state.configured = true
             state.directory = environmentDirectory() ?? (environmentDisabled() ? nil : directory)
             state.retain = max(1, retain)
@@ -67,7 +67,7 @@ public enum ProviderErrorCapture {
     }
 
     public static func disable() {
-        state.lock.withLock {
+        state.withLockedValue { state in
             state.configured = true
             state.directory = nil
         }
@@ -75,7 +75,7 @@ public enum ProviderErrorCapture {
 
     /// Where records go now, or nil when capture is off.
     public static var directory: URL? {
-        state.lock.withLock {
+        state.withLockedValue { state in
             if !state.configured {
                 state.configured = true
                 state.directory = environmentDirectory()
@@ -128,7 +128,7 @@ public enum ProviderErrorCapture {
     public static func save(method: String, url: URL, status: Int, headers: [String: String], body: Data,
                             truncated: Bool = false, frame: String? = nil) {
         guard status >= 400 || frame != nil, let directory else { return }
-        let retain = state.lock.withLock { state.retain }
+        let retain = state.withLockedValue { $0.retain }
         let entry = record(method: method, url: url, status: status, headers: headers, body: body,
                            truncated: truncated, frame: frame)
         write(entry, to: directory, retain: retain)

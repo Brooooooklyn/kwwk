@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 public typealias AgentEventSink = @Sendable (AgentEvent) async -> Void
 
@@ -1920,16 +1921,15 @@ public enum AgentLoop {
 /// Collects tool results the Cursor provider produced inline during a stream,
 /// drained by the loop right after the assistant message is appended so the
 /// transcript reads (assistant with resolved toolCall blocks) → results.
-final class CursorToolResultBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var results: [ToolResultMessage] = []
+final class CursorToolResultBox: Sendable {
+    private let results = NIOLockedValueBox<[ToolResultMessage]>([])
 
     func append(_ result: ToolResultMessage) {
-        lock.withLock { results.append(result) }
+        results.withLockedValue { $0.append(result) }
     }
 
     func drain() -> [ToolResultMessage] {
-        lock.withLock {
+        results.withLockedValue { results in
             let out = results
             results.removeAll()
             return out
@@ -1942,22 +1942,25 @@ final class CursorToolResultBox: @unchecked Sendable {
 /// signal, and waits until all calls have either been discarded or appended to
 /// that same attempt's result box.
 private final class CursorInlineExecutionAttempt: @unchecked Sendable {
-    private let lock = NSLock()
+    private struct State {
+        var acceptingInvocations = true
+        var retainResults = true
+        var activeInvocations = 0
+        var invokedTools = false
+        var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = NIOLockedValueBox(State())
     private let cancellation = CancellationHandle()
     private var parentRegistration: CancellationRegistration?
-    private var acceptingInvocations = true
-    private var retainResults = true
-    private var activeInvocations = 0
-    private var invokedTools = false
-    var hasInvokedTools: Bool { lock.withLock { invokedTools } }
+    var hasInvokedTools: Bool { state.withLockedValue { $0.invokedTools } }
     func preventInvocationsForReplay() -> Bool {
-        lock.withLock {
-            guard !invokedTools else { return false }
-            acceptingInvocations = false
+        state.withLockedValue { state in
+            guard !state.invokedTools else { return false }
+            state.acceptingInvocations = false
             return true
         }
     }
-    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(parentCancellation: CancellationHandle?) {
         let child = cancellation
@@ -1972,10 +1975,10 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
     }
 
     func beginInvocation() -> CancellationHandle? {
-        lock.withLock {
-            guard acceptingInvocations else { return nil }
-            activeInvocations += 1
-            invokedTools = true
+        state.withLockedValue { state in
+            guard state.acceptingInvocations else { return nil }
+            state.activeInvocations += 1
+            state.invokedTools = true
             return cancellation
         }
     }
@@ -1985,13 +1988,13 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
     /// and then have a late invocation append behind it.
     func finishInvocation(_ retain: () -> Void) -> Bool {
         var waiters: [CheckedContinuation<Void, Never>] = []
-        let retained = lock.withLock { () -> Bool in
-            let shouldRetain = retainResults
+        let retained: Bool = state.withLockedValue { state in
+            let shouldRetain = state.retainResults
             if shouldRetain { retain() }
-            activeInvocations = max(0, activeInvocations - 1)
-            if activeInvocations == 0 {
-                waiters = idleWaiters
-                idleWaiters.removeAll()
+            state.activeInvocations = max(0, state.activeInvocations - 1)
+            if state.activeInvocations == 0 {
+                waiters = state.idleWaiters
+                state.idleWaiters.removeAll()
             }
             return shouldRetain
         }
@@ -2000,9 +2003,9 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
     }
 
     func invalidateAndWait(reason: String) async {
-        lock.withLock {
-            acceptingInvocations = false
-            retainResults = false
+        state.withLockedValue { state in
+            state.acceptingInvocations = false
+            state.retainResults = false
         }
         cancellation.cancel(reason: reason)
         await waitUntilIdle()
@@ -2011,7 +2014,7 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
     }
 
     func sealAndWait() async {
-        lock.withLock { acceptingInvocations = false }
+        state.withLockedValue { $0.acceptingInvocations = false }
         await waitUntilIdle()
         parentRegistration?.cancel()
         parentRegistration = nil
@@ -2019,9 +2022,9 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
 
     private func waitUntilIdle() async {
         await withCheckedContinuation { continuation in
-            let resumeNow = lock.withLock { () -> Bool in
-                if activeInvocations == 0 { return true }
-                idleWaiters.append(continuation)
+            let resumeNow: Bool = state.withLockedValue { state in
+                if state.activeInvocations == 0 { return true }
+                state.idleWaiters.append(continuation)
                 return false
             }
             if resumeNow { continuation.resume() }
@@ -2032,22 +2035,25 @@ private final class CursorInlineExecutionAttempt: @unchecked Sendable {
 /// Per-assistant-turn coordination for blocking polls and side-channel result
 /// delivery. Cursor may execute tools concurrently while its assistant message
 /// is still streaming, so this state is shared by both inline and normal paths.
-private final class TurnToolExecutionState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var sawBlockingPoll = false
-    private var activeCursorPoll: (callId: String, cancellation: CancellationHandle)?
-    private var cursorCallIds: Set<String> = []
-    private var duplicateCursorCallIds: Set<String> = []
-    private var leases: [String: AgentToolRetentionLease] = [:]
+private final class TurnToolExecutionState: Sendable {
+    private struct State {
+        var sawBlockingPoll = false
+        var activeCursorPoll: (callId: String, cancellation: CancellationHandle)?
+        var cursorCallIds: Set<String> = []
+        var duplicateCursorCallIds: Set<String> = []
+        var leases: [String: AgentToolRetentionLease] = [:]
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     deinit {
         rollbackAllLeases()
     }
 
     func reserveCursorCallId(_ callId: String) -> Bool {
-        lock.withLock {
-            guard cursorCallIds.insert(callId).inserted else {
-                duplicateCursorCallIds.insert(callId)
+        state.withLockedValue { state in
+            guard state.cursorCallIds.insert(callId).inserted else {
+                state.duplicateCursorCallIds.insert(callId)
                 return false
             }
             return true
@@ -2055,30 +2061,30 @@ private final class TurnToolExecutionState: @unchecked Sendable {
     }
 
     func cursorCallIds(in candidates: Set<String>) -> Set<String> {
-        lock.withLock { candidates.intersection(cursorCallIds) }
+        state.withLockedValue { candidates.intersection($0.cursorCallIds) }
     }
 
     func cancelActiveCursorPoll(matching callId: String) {
-        let cancellation = lock.withLock { () -> CancellationHandle? in
-            guard activeCursorPoll?.callId == callId else { return nil }
-            return activeCursorPoll?.cancellation
+        let cancellation: CancellationHandle? = state.withLockedValue { state in
+            guard state.activeCursorPoll?.callId == callId else { return nil }
+            return state.activeCursorPoll?.cancellation
         }
         cancellation?.cancel(reason: multipleTaskPollsCancellationReason)
     }
 
     func reserveCursorPoll(callId: String, cancellation: CancellationHandle) -> Bool {
         var pollToCancel: CancellationHandle?
-        let accepted = lock.withLock {
-            guard !duplicateCursorCallIds.contains(callId) else {
-                pollToCancel = activeCursorPoll?.cancellation
+        let accepted: Bool = state.withLockedValue { state in
+            guard !state.duplicateCursorCallIds.contains(callId) else {
+                pollToCancel = state.activeCursorPoll?.cancellation
                 return false
             }
-            guard !sawBlockingPoll else {
-                pollToCancel = activeCursorPoll?.cancellation
+            guard !state.sawBlockingPoll else {
+                pollToCancel = state.activeCursorPoll?.cancellation
                 return false
             }
-            sawBlockingPoll = true
-            activeCursorPoll = (callId, cancellation)
+            state.sawBlockingPoll = true
+            state.activeCursorPoll = (callId, cancellation)
             return true
         }
         // A later Cursor inline poll must not merely fail itself while the
@@ -2089,54 +2095,54 @@ private final class TurnToolExecutionState: @unchecked Sendable {
     }
 
     func finishCursorPoll(callId: String, cancellation: CancellationHandle) {
-        lock.withLock {
-            guard activeCursorPoll?.callId == callId,
-                  activeCursorPoll?.cancellation === cancellation else { return }
-            activeCursorPoll = nil
+        state.withLockedValue { state in
+            guard state.activeCursorPoll?.callId == callId,
+                  state.activeCursorPoll?.cancellation === cancellation else { return }
+            state.activeCursorPoll = nil
         }
     }
 
     func rejectedNormalPollCallIds(_ callIds: [String]) -> Set<String> {
         let ids = Set(callIds)
         guard !ids.isEmpty else { return [] }
-        return lock.withLock {
-            if sawBlockingPoll || ids.count > 1 {
-                sawBlockingPoll = true
+        return state.withLockedValue { state in
+            if state.sawBlockingPoll || ids.count > 1 {
+                state.sawBlockingPoll = true
                 return ids
             }
-            sawBlockingPoll = true
+            state.sawBlockingPoll = true
             return []
         }
     }
 
     func resetPollGateForRetry() {
-        lock.withLock {
-            sawBlockingPoll = false
-            activeCursorPoll = nil
+        state.withLockedValue { state in
+            state.sawBlockingPoll = false
+            state.activeCursorPoll = nil
         }
     }
 
     func trackLease(_ lease: AgentToolRetentionLease, for toolCallId: String) {
-        let replaced = lock.withLock { leases.updateValue(lease, forKey: toolCallId) }
+        let replaced = state.withLockedValue { $0.leases.updateValue(lease, forKey: toolCallId) }
         replaced?.rollback()
     }
 
     func commitLease(for toolCallId: String) {
-        let lease = lock.withLock { leases.removeValue(forKey: toolCallId) }
+        let lease = state.withLockedValue { $0.leases.removeValue(forKey: toolCallId) }
         lease?.commit()
     }
 
     func rollbackLeases(for toolCallIds: [String]) {
-        let rolledBack = lock.withLock { () -> [AgentToolRetentionLease] in
-            toolCallIds.compactMap { leases.removeValue(forKey: $0) }
+        let rolledBack: [AgentToolRetentionLease] = state.withLockedValue { state in
+            toolCallIds.compactMap { state.leases.removeValue(forKey: $0) }
         }
         for lease in rolledBack { lease.rollback() }
     }
 
     func rollbackAllLeases() {
-        let rolledBack = lock.withLock { () -> [AgentToolRetentionLease] in
-            let all = Array(leases.values)
-            leases.removeAll()
+        let rolledBack: [AgentToolRetentionLease] = state.withLockedValue { state in
+            let all = Array(state.leases.values)
+            state.leases.removeAll()
             return all
         }
         for lease in rolledBack { lease.rollback() }
@@ -2146,10 +2152,9 @@ private final class TurnToolExecutionState: @unchecked Sendable {
 /// Tracks in-flight tool_execution_update emits so parallel tool execution can
 /// wait for them before emitting tool_execution_end (matching pi-agent-core's
 /// `Promise.all(updateEvents)` semantics).
-private final class EmitBox: @unchecked Sendable {
+private final class EmitBox: Sendable {
     private let emit: AgentEventSink
-    private let lock = NSLock()
-    private var pending: [Task<Void, Never>] = []
+    private let pending = NIOLockedValueBox<[Task<Void, Never>]>([])
 
     init(emit: @escaping AgentEventSink) {
         self.emit = emit
@@ -2158,11 +2163,11 @@ private final class EmitBox: @unchecked Sendable {
     func launchUpdate(_ event: AgentEvent) {
         let emit = self.emit
         let task = Task { await emit(event) }
-        lock.withLock { pending.append(task) }
+        pending.withLockedValue { $0.append(task) }
     }
 
     func waitForPending() async {
-        let tasks = lock.withLock { () -> [Task<Void, Never>] in
+        let tasks: [Task<Void, Never>] = pending.withLockedValue { pending in
             let out = pending
             pending.removeAll()
             return out

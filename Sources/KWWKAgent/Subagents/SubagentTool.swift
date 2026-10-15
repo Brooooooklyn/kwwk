@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 private let subagentYieldToolName = "subagent_yield"
 private let subagentYieldReminderLimit = 3
@@ -143,8 +144,11 @@ internal struct SubagentParentSnapshot: Sendable {
 }
 
 internal final class SubagentParentBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private weak var agent: Agent?
+    private struct State {
+        weak var agent: Agent?
+    }
+
+    private let state = NIOLockedValueBox(State())
     private let childCwd: String
     private let fallbackModel: Model
     private let fallbackTools: CodingTools
@@ -199,12 +203,12 @@ internal final class SubagentParentBox: @unchecked Sendable {
     }
 
     func attach(_ agent: Agent) {
-        lock.withLock { self.agent = agent }
+        state.withLockedValue { $0.agent = agent }
     }
 
     func snapshot() -> SubagentParentSnapshot {
-        lock.withLock {
-            guard let agent else {
+        state.withLockedValue { state in
+            guard let agent = state.agent else {
                 return SubagentParentSnapshot(
                     model: fallbackModel,
                     tools: fallbackTools,
@@ -1421,15 +1425,18 @@ private struct SubagentYield: Sendable {
 /// The child's terminal result. One submission per task; when the run goes on
 /// to read a follow-up that arrived after the submission, it opens a new
 /// generation and the child may submit again.
-private final class SubagentYieldCapture: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: SubagentYield?
-    private var valueGeneration = 0
-    private var generation = 0
+private final class SubagentYieldCapture: Sendable {
+    private struct State {
+        var value: SubagentYield?
+        var valueGeneration = 0
+        var generation = 0
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     func record(status: SubagentYieldStatus, result: String) throws -> SubagentYield {
-        try lock.withLock {
-            guard value == nil || valueGeneration < generation else {
+        try state.withLockedValue { state in
+            guard state.value == nil || state.valueGeneration < state.generation else {
                 throw CodingToolError.invalidArgument(
                     "\(subagentYieldToolName): completion was already submitted"
                 )
@@ -1439,21 +1446,21 @@ private final class SubagentYieldCapture: @unchecked Sendable {
                 status: status,
                 result: result
             )
-            value = submission
-            valueGeneration = generation
+            state.value = submission
+            state.valueGeneration = state.generation
             return submission
         }
     }
 
     /// A follow-up arrived: the next submission answers it.
     func reopen() {
-        lock.withLock { generation += 1 }
+        state.withLockedValue { $0.generation += 1 }
     }
 
     /// The submission that answers the latest follow-up. One made before a
     /// follow-up the child then went on to read is not the task's result.
     func snapshot() -> SubagentYield? {
-        lock.withLock { valueGeneration == generation ? value : nil }
+        state.withLockedValue { $0.valueGeneration == $0.generation ? $0.value : nil }
     }
 }
 
@@ -2321,19 +2328,22 @@ internal struct SubagentInvocationRunner: Sendable {
     }
 }
 
-private final class SubagentRunCompletion: @unchecked Sendable {
+private final class SubagentRunCompletion: Sendable {
     typealias Outcome = Result<SubagentResult, any Error>
 
-    private let lock = NSLock()
-    private var outcome: Outcome?
-    private var waiter: CheckedContinuation<Outcome, Never>?
-    private var waiters: [SubagentSettleSignal] = []
+    private struct State {
+        var outcome: Outcome?
+        var waiter: CheckedContinuation<Outcome, Never>?
+        var waiters: [SubagentSettleSignal] = []
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     func wait() async -> Outcome {
         await withCheckedContinuation { continuation in
-            let ready = lock.withLock { () -> Outcome? in
-                if let outcome { return outcome }
-                waiter = continuation
+            let ready = state.withLockedValue { state -> Outcome? in
+                if let outcome = state.outcome { return outcome }
+                state.waiter = continuation
                 return nil
             }
             if let ready { continuation.resume(returning: ready) }
@@ -2343,15 +2353,15 @@ private final class SubagentRunCompletion: @unchecked Sendable {
     /// Wait at most `seconds` for the outcome; `nil` when the deadline passes
     /// first. The outcome stays available for a later unbounded `wait()`.
     func wait(upToSeconds seconds: Int) async -> Outcome? {
-        if let ready = lock.withLock({ outcome }) { return ready }
+        if let ready = state.withLockedValue({ $0.outcome }) { return ready }
         let signal = SubagentSettleSignal()
         let deadline = Task {
             try? await Task.sleep(nanoseconds: UInt64(max(0, seconds)) * 1_000_000_000)
             signal.fire()
         }
-        let observer = lock.withLock { () -> Outcome? in
-            if let outcome { return outcome }
-            waiters.append(signal)
+        let observer = state.withLockedValue { state -> Outcome? in
+            if let outcome = state.outcome { return outcome }
+            state.waiters.append(signal)
             return nil
         }
         if let observer {
@@ -2360,21 +2370,22 @@ private final class SubagentRunCompletion: @unchecked Sendable {
         }
         await signal.wait()
         deadline.cancel()
-        return lock.withLock {
-            waiters.removeAll { $0 === signal }
-            return outcome
+        return state.withLockedValue { state in
+            state.waiters.removeAll { $0 === signal }
+            return state.outcome
         }
     }
 
     @discardableResult
     func resolve(_ result: Outcome) -> Bool {
-        let resolution = lock.withLock { () -> (Bool, CheckedContinuation<Outcome, Never>?, [SubagentSettleSignal]) in
-            guard outcome == nil else { return (false, nil, []) }
-            outcome = result
-            let pending = waiter
-            waiter = nil
-            let signals = waiters
-            waiters.removeAll()
+        let resolution = state.withLockedValue {
+            state -> (Bool, CheckedContinuation<Outcome, Never>?, [SubagentSettleSignal]) in
+            guard state.outcome == nil else { return (false, nil, []) }
+            state.outcome = result
+            let pending = state.waiter
+            state.waiter = nil
+            let signals = state.waiters
+            state.waiters.removeAll()
             return (true, pending, signals)
         }
         resolution.1?.resume(returning: result)
@@ -2385,16 +2396,19 @@ private final class SubagentRunCompletion: @unchecked Sendable {
 
 /// One-shot latch: `wait()` returns once `fire()` has been called, whichever
 /// order the two happen in. Backs the timed wait on `SubagentRunCompletion`.
-private final class SubagentSettleSignal: @unchecked Sendable {
-    private let lock = NSLock()
-    private var fired = false
-    private var continuation: CheckedContinuation<Void, Never>?
+private final class SubagentSettleSignal: Sendable {
+    private struct State {
+        var fired = false
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     func fire() {
-        let pending = lock.withLock { () -> CheckedContinuation<Void, Never>? in
-            fired = true
-            let pending = continuation
-            continuation = nil
+        let pending = state.withLockedValue { state -> CheckedContinuation<Void, Never>? in
+            state.fired = true
+            let pending = state.continuation
+            state.continuation = nil
             return pending
         }
         pending?.resume()
@@ -2402,9 +2416,9 @@ private final class SubagentSettleSignal: @unchecked Sendable {
 
     func wait() async {
         await withCheckedContinuation { continuation in
-            let ready = lock.withLock { () -> Bool in
-                if fired { return true }
-                self.continuation = continuation
+            let ready = state.withLockedValue { state -> Bool in
+                if state.fired { return true }
+                state.continuation = continuation
                 return false
             }
             if ready { continuation.resume() }
@@ -3319,15 +3333,18 @@ private func extractSubagentResult(
 /// heartbeat/stall state: it only records progress updates the child already
 /// produced. The first update is immediate and subsequent updates are
 /// throttled so token-level streams cannot grow the file without bound.
-private final class BackgroundSubagentProgressWriter: @unchecked Sendable {
+private final class BackgroundSubagentProgressWriter: Sendable {
     private static let minimumWriteInterval: TimeInterval = 0.5
 
-    private let lock = NSLock()
+    private struct State {
+        var finished = false
+        var lastLine: String?
+        var pendingLine: String?
+        var lastWriteAt: Date?
+    }
+
+    private let state = NIOLockedValueBox(State())
     private let outputFile: URL
-    private var finished = false
-    private var lastLine: String?
-    private var pendingLine: String?
-    private var lastWriteAt: Date?
 
     init(outputFile: URL) {
         self.outputFile = outputFile
@@ -3340,49 +3357,49 @@ private final class BackgroundSubagentProgressWriter: @unchecked Sendable {
             $0 == "tool_start" || $0 == "tool_end"
         } ?? false
         let isStreamingText = progressActivityKind(update) == "assistant_text"
-        lock.withLock {
-            guard !finished, line != lastLine else { return }
+        state.withLockedValue { state in
+            guard !state.finished, line != state.lastLine else { return }
             if isMilestone,
-               let pendingLine,
-               pendingLine != lastLine,
+               let pendingLine = state.pendingLine,
+               pendingLine != state.lastLine,
                (try? appendSubagentOutput(
                    "[progress] \(pendingLine)\n",
                    to: outputFile
                )) != nil {
-                lastLine = pendingLine
-                lastWriteAt = now
+                state.lastLine = pendingLine
+                state.lastWriteAt = now
             }
-            guard isMilestone || (lastWriteAt.map { now.timeIntervalSince($0) }
+            guard isMilestone || (state.lastWriteAt.map { now.timeIntervalSince($0) }
                 .map { $0 >= Self.minimumWriteInterval } ?? true) else {
-                pendingLine = line
+                state.pendingLine = line
                 return
             }
-            if isStreamingText, lastWriteAt != nil {
+            if isStreamingText, state.lastWriteAt != nil {
                 // Keep only the latest streaming text projection in memory.
                 // The terminal section carries the authoritative final result,
                 // so appending every growing prefix only bloats the task log.
-                pendingLine = line
+                state.pendingLine = line
                 return
             }
             guard (try? appendSubagentOutput("[progress] \(line)\n", to: outputFile)) != nil else {
                 return
             }
-            lastLine = line
-            pendingLine = nil
-            lastWriteAt = now
+            state.lastLine = line
+            state.pendingLine = nil
+            state.lastWriteAt = now
         }
     }
 
     func finish(section: String, text: String) throws -> Int {
-        try lock.withLock { () throws -> Int in
-            if finished { return subagentOutputFileSize(outputFile) }
-            pendingLine = nil
+        try state.withLockedValue { state -> Int in
+            if state.finished { return subagentOutputFileSize(outputFile) }
+            state.pendingLine = nil
             let separator = subagentOutputFileSize(outputFile) > 0 ? "\n" : ""
             let outputBytes = try appendSubagentOutput(
                 "\(separator)[\(section)]\n\(text)\n",
                 to: outputFile
             )
-            finished = true
+            state.finished = true
             return outputBytes
         }
     }

@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Waiting on an unstructured task with a timeout and cancellation, without
 /// waiting for the task itself to finish when either fires.
@@ -43,41 +44,45 @@ enum MCPWait {
         }
     }
 
-    final class OneShot<T: Sendable>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<T, Error>?
-        private var early: Result<T, Error>?
-        private var done = false
-        private var cleanup: (@Sendable () -> Void)?
+    final class OneShot<T: Sendable>: Sendable {
+        private struct State: Sendable {
+            var continuation: CheckedContinuation<T, Error>?
+            var early: Result<T, Error>?
+            var done = false
+            var cleanup: (@Sendable () -> Void)?
+        }
+
+        private let state = NIOLockedValueBox(State())
 
         func set(_ continuation: CheckedContinuation<T, Error>) {
-            let pending: Result<T, Error>? = lock.withLock {
-                if let early { return early }
-                self.continuation = continuation
+            let pending: Result<T, Error>? = state.withLockedValue { state in
+                if let early = state.early { return early }
+                state.continuation = continuation
                 return nil
             }
             if let pending { continuation.resume(with: pending) }
         }
 
         func onResume(_ action: @escaping @Sendable () -> Void) {
-            let runNow: Bool = lock.withLock {
-                if done { return true }
-                cleanup = action
+            let runNow: Bool = state.withLockedValue { state in
+                if state.done { return true }
+                state.cleanup = action
                 return false
             }
             if runNow { action() }
         }
 
         func resume(_ result: Result<T, Error>) {
-            let (continuation, cleanup): (CheckedContinuation<T, Error>?, (@Sendable () -> Void)?) = lock.withLock {
-                if done { return (nil, nil) }
-                done = true
-                let pair = (self.continuation, self.cleanup)
-                if self.continuation == nil { early = result }
-                self.continuation = nil
-                self.cleanup = nil
-                return pair
-            }
+            let (continuation, cleanup): (CheckedContinuation<T, Error>?, (@Sendable () -> Void)?) =
+                state.withLockedValue { state in
+                    if state.done { return (nil, nil) }
+                    state.done = true
+                    let pair = (state.continuation, state.cleanup)
+                    if state.continuation == nil { state.early = result }
+                    state.continuation = nil
+                    state.cleanup = nil
+                    return pair
+                }
             continuation?.resume(with: result)
             cleanup?()
         }

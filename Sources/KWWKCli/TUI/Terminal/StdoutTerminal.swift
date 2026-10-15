@@ -1,5 +1,6 @@
 #if os(macOS) || os(Linux) || os(iOS)
 import Foundation
+import NIOConcurrencyHelpers
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Musl)
@@ -16,8 +17,7 @@ import Glibc
 /// save/restore dance, and the Kitty keyboard protocol opt-in live in a
 /// higher-level runner that composes this with the stdin parser.
 final class StdoutTerminal: Terminal, @unchecked Sendable {
-    private let lock = NSLock()
-    private var resizeHandlers: [UUID: @Sendable (Int, Int) -> Void] = [:]
+    private let resizeHandlers = NIOLockedValueBox<[UUID: @Sendable (Int, Int) -> Void]>([:])
     private var signalSource: DispatchSourceSignal?
 
     init() {
@@ -47,11 +47,11 @@ final class StdoutTerminal: Terminal, @unchecked Sendable {
 
     func onResize(_ handler: @escaping @Sendable (Int, Int) -> Void) -> () -> Void {
         let id = UUID()
-        lock.withLock { resizeHandlers[id] = handler }
+        resizeHandlers.withLockedValue { $0[id] = handler }
         return { [weak self] in
             guard let self else { return }
-            lock.withLock {
-                _ = resizeHandlers.removeValue(forKey: id)
+            resizeHandlers.withLockedValue {
+                _ = $0.removeValue(forKey: id)
             }
         }
     }
@@ -64,7 +64,7 @@ final class StdoutTerminal: Terminal, @unchecked Sendable {
             guard let self else { return }
             let w = self.width
             let h = self.height
-            let handlers = self.lock.withLock { Array(self.resizeHandlers.values) }
+            let handlers = self.resizeHandlers.withLockedValue { Array($0.values) }
             for handler in handlers { handler(w, h) }
         }
         source.resume()

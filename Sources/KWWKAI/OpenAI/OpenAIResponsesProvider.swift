@@ -1,5 +1,6 @@
 import Foundation
 import Crypto
+import NIOConcurrencyHelpers
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -1612,16 +1613,15 @@ private struct WebSocketSSESequence: AsyncSequence, Sendable {
     }
 }
 
-private final class WebSocketStreamProgress: @unchecked Sendable {
-    private let lock = NSLock()
-    private var receivedEvent = false
+private final class WebSocketStreamProgress: Sendable {
+    private let receivedEvent = NIOLockedValueBox(false)
 
     var hasReceivedEvent: Bool {
-        lock.withLock { receivedEvent }
+        receivedEvent.withLockedValue { $0 }
     }
 
     func markReceivedEvent() {
-        lock.withLock { receivedEvent = true }
+        receivedEvent.withLockedValue { $0 = true }
     }
 }
 
@@ -1685,15 +1685,14 @@ private enum OpenAIResponsesWebSocketRunLease: Sendable {
     case disabled
 }
 
-private final class OpenAIResponsesSessionStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var sessions: [String: OpenAIResponsesSessionState] = [:]
+private final class OpenAIResponsesSessionStore: Sendable {
+    private let sessions = NIOLockedValueBox([String: OpenAIResponsesSessionState]())
 
     func session(for sessionId: String?) -> OpenAIResponsesSessionState {
         guard let sessionId, !sessionId.isEmpty else {
             return OpenAIResponsesSessionState()
         }
-        return lock.withLock {
+        return sessions.withLockedValue { sessions in
             if let existing = sessions[sessionId] { return existing }
             let created = OpenAIResponsesSessionState()
             sessions[sessionId] = created
@@ -1703,28 +1702,30 @@ private final class OpenAIResponsesSessionStore: @unchecked Sendable {
 
     func closeSession(sessionId: String) {
         guard !sessionId.isEmpty else { return }
-        let session = lock.withLock { sessions.removeValue(forKey: sessionId) }
+        let session = sessions.withLockedValue { $0.removeValue(forKey: sessionId) }
         session?.close()
     }
 }
 
-private final class OpenAIResponsesSessionState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var connection: (any WebSocketConnection)?
-    private var lastRequest: OpenAIResponsesRequest?
-    private var lastResponse: OpenAIResponsesLastResponse?
-    private var webSocketFailureCount = 0
-    private var disabled = false
-    private var webSocketInFlight = false
-    private var closed = false
-    private var refused: Set<String> = []
+private final class OpenAIResponsesSessionState: Sendable {
+    private struct State {
+        var connection: (any WebSocketConnection)?
+        var lastRequest: OpenAIResponsesRequest?
+        var lastResponse: OpenAIResponsesLastResponse?
+        var webSocketFailureCount = 0
+        var disabled = false
+        var webSocketInFlight = false
+        var closed = false
+        var refused: Set<String> = []
+    }
+    private let state = NIOLockedValueBox(State())
 
     /// Sealed items this conversation was refused over; later requests leave
     /// them out up front instead of being refused and asked again each turn.
-    var refusedSeals: Set<String> { lock.withLock { refused } }
+    var refusedSeals: Set<String> { state.withLockedValue { $0.refused } }
 
     func refuse(seals: Set<String>) {
-        lock.withLock { refused.formUnion(seals) }
+        state.withLockedValue { $0.refused.formUnion(seals) }
     }
 
     deinit {
@@ -1732,34 +1733,34 @@ private final class OpenAIResponsesSessionState: @unchecked Sendable {
     }
 
     var webSocketDisabled: Bool {
-        lock.withLock { disabled || closed }
+        state.withLockedValue { $0.disabled || $0.closed }
     }
 
     func beginWebSocketRun() -> OpenAIResponsesWebSocketRunLease {
-        lock.withLock {
-            if disabled || closed { return .disabled }
-            if webSocketInFlight { return .busy }
-            webSocketInFlight = true
+        state.withLockedValue { state in
+            if state.disabled || state.closed { return .disabled }
+            if state.webSocketInFlight { return .busy }
+            state.webSocketInFlight = true
             return .acquired
         }
     }
 
     func endWebSocketRun() {
-        lock.withLock { webSocketInFlight = false }
+        state.withLockedValue { $0.webSocketInFlight = false }
     }
 
     func takeConnection() -> (any WebSocketConnection)? {
-        lock.withLock {
-            let existing = connection
-            connection = nil
+        state.withLockedValue { state in
+            let existing = state.connection
+            state.connection = nil
             return existing
         }
     }
 
     func storeConnection(_ next: any WebSocketConnection) {
-        let shouldClose = lock.withLock { () -> Bool in
-            guard !closed else { return true }
-            connection = next
+        let shouldClose = state.withLockedValue { state -> Bool in
+            guard !state.closed else { return true }
+            state.connection = next
             return false
         }
         if shouldClose {
@@ -1769,20 +1770,20 @@ private final class OpenAIResponsesSessionState: @unchecked Sendable {
 
     @discardableResult
     func recordWebSocketFailure(maxFailures: Int) -> OpenAIResponsesWebSocketFailureStatus {
-        let result = lock.withLock { () -> (old: (any WebSocketConnection)?, status: OpenAIResponsesWebSocketFailureStatus) in
-            webSocketFailureCount += 1
-            if webSocketFailureCount >= max(1, maxFailures) {
-                disabled = true
+        let result = state.withLockedValue { state -> (old: (any WebSocketConnection)?, status: OpenAIResponsesWebSocketFailureStatus) in
+            state.webSocketFailureCount += 1
+            if state.webSocketFailureCount >= max(1, maxFailures) {
+                state.disabled = true
             }
-            let old = connection
-            connection = nil
-            lastRequest = nil
-            lastResponse = nil
+            let old = state.connection
+            state.connection = nil
+            state.lastRequest = nil
+            state.lastResponse = nil
             return (
                 old,
                 OpenAIResponsesWebSocketFailureStatus(
-                    count: webSocketFailureCount,
-                    disabled: disabled
+                    count: state.webSocketFailureCount,
+                    disabled: state.disabled
                 )
             )
         }
@@ -1791,37 +1792,37 @@ private final class OpenAIResponsesSessionState: @unchecked Sendable {
     }
 
     func resetWebSocketState(disable: Bool = false, resetFailureCount: Bool = false) {
-        let old = lock.withLock { () -> (any WebSocketConnection)? in
-            if disable { disabled = true }
-            if resetFailureCount { webSocketFailureCount = 0 }
-            let old = connection
-            connection = nil
-            lastRequest = nil
-            lastResponse = nil
+        let old = state.withLockedValue { state -> (any WebSocketConnection)? in
+            if disable { state.disabled = true }
+            if resetFailureCount { state.webSocketFailureCount = 0 }
+            let old = state.connection
+            state.connection = nil
+            state.lastRequest = nil
+            state.lastResponse = nil
             return old
         }
         old?.close()
     }
 
     func close() {
-        let old = lock.withLock { () -> (any WebSocketConnection)? in
-            closed = true
-            disabled = true
-            webSocketInFlight = false
-            let old = connection
-            connection = nil
-            lastRequest = nil
-            lastResponse = nil
+        let old = state.withLockedValue { state -> (any WebSocketConnection)? in
+            state.closed = true
+            state.disabled = true
+            state.webSocketInFlight = false
+            let old = state.connection
+            state.connection = nil
+            state.lastRequest = nil
+            state.lastResponse = nil
             return old
         }
         old?.close()
     }
 
     func prepareWebSocketPayload(from request: OpenAIResponsesRequest) throws -> OpenAIResponsesWebSocketPayload {
-        let payload = lock.withLock { () -> (previousResponseId: String?, input: [JSONValue]?) in
-            defer { lastRequest = request }
-            guard let previous = lastRequest,
-                  let response = lastResponse,
+        let payload = state.withLockedValue { state -> (previousResponseId: String?, input: [JSONValue]?) in
+            defer { state.lastRequest = request }
+            guard let previous = state.lastRequest,
+                  let response = state.lastResponse,
                   !response.responseId.isEmpty,
                   previous.withoutInput() == request.withoutInput()
             else {
@@ -1850,9 +1851,9 @@ private final class OpenAIResponsesSessionState: @unchecked Sendable {
     }
 
     func recordCompletedResponse(responseId: String, itemsAdded: [JSONValue]) {
-        lock.withLock {
-            webSocketFailureCount = 0
-            lastResponse = OpenAIResponsesLastResponse(
+        state.withLockedValue { state in
+            state.webSocketFailureCount = 0
+            state.lastResponse = OpenAIResponsesLastResponse(
                 responseId: responseId,
                 itemsAdded: itemsAdded
             )

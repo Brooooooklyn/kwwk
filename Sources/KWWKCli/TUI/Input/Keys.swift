@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Parsed keyboard event. Matches a subset of pi-tui's `keys.ts` — sufficient
 /// for the canonical bindings tests exercise.
@@ -238,19 +239,18 @@ struct KeyBinding: Sendable, Hashable {
 /// Registry mapping a binding to a handler. Handlers run in registration
 /// order; the first handler whose binding matches wins. Returns true if any
 /// handler fired — callers use this to short-circuit input propagation.
-final class KeybindingRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var entries: [(binding: KeyBinding, handler: @Sendable (KeyEvent) -> Void)] = []
+final class KeybindingRegistry: Sendable {
+    private let entries = NIOLockedValueBox<[(binding: KeyBinding, handler: @Sendable (KeyEvent) -> Void)]>([])
 
     init() {}
 
     func bind(_ binding: KeyBinding, _ handler: @escaping @Sendable (KeyEvent) -> Void) {
-        lock.withLock { entries.append((binding, handler)) }
+        entries.withLockedValue { $0.append((binding, handler)) }
     }
 
     @discardableResult
     func dispatch(_ event: KeyEvent) -> Bool {
-        let snapshot = lock.withLock { entries }
+        let snapshot = entries.withLockedValue { $0 }
         for entry in snapshot where entry.binding.matches(event) {
             entry.handler(event)
             return true

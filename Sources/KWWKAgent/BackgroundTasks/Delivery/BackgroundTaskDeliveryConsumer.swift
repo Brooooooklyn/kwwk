@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// One Agent's model-facing background-result mailbox.
 ///
@@ -9,16 +10,19 @@ import KWWKAI
 /// `task_poll`/`task_cancel` result. A tool call temporarily watches task ids;
 /// terminal notices are held until its result is committed, then restored if
 /// that result is rewound (notably Cursor inline-exec retry/abort).
-public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
+public final class BackgroundTaskDeliveryConsumer: Sendable {
     let id = UUID()
     public let sessionId: String?
 
-    private let lock = NSLock()
-    private var pending: [BackgroundTaskNotification] = []
-    private var deferredTerminal: [String: BackgroundTaskNotification] = [:]
-    private var watchCounts: [String: Int] = [:]
-    private var deliveredTerminalTaskIds: Set<String> = []
-    private var wakeHandler: (@Sendable () -> Void)?
+    private struct State {
+        var pending: [BackgroundTaskNotification] = []
+        var deferredTerminal: [String: BackgroundTaskNotification] = [:]
+        var watchCounts: [String: Int] = [:]
+        var deliveredTerminalTaskIds: Set<String> = []
+        var wakeHandler: (@Sendable () -> Void)?
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     public init(sessionId: String? = nil) {
         self.sessionId = sessionId
@@ -29,21 +33,21 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     }
 
     func setWakeHandler(_ handler: (@Sendable () -> Void)?) {
-        let shouldWake = lock.withLock { () -> Bool in
-            wakeHandler = handler
-            return handler != nil && !pending.isEmpty
+        let shouldWake: Bool = state.withLockedValue { state in
+            state.wakeHandler = handler
+            return handler != nil && !state.pending.isEmpty
         }
         if shouldWake { handler?() }
     }
 
     func enqueue(_ notification: BackgroundTaskNotification) {
-        let handler: (@Sendable () -> Void)? = lock.withLock {
-            if isTerminal(notification), (watchCounts[notification.taskId] ?? 0) > 0 {
-                deferredTerminal[notification.taskId] = notification
+        let handler: (@Sendable () -> Void)? = state.withLockedValue { state in
+            if isTerminal(notification), (state.watchCounts[notification.taskId] ?? 0) > 0 {
+                state.deferredTerminal[notification.taskId] = notification
                 return nil
             }
-            pending.append(notification)
-            return wakeHandler
+            state.pending.append(notification)
+            return state.wakeHandler
         }
         handler?()
     }
@@ -53,20 +57,20 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     /// state, closing completion-vs-poll races at the Agent boundary.
     func beginWatching(taskIds: [String]) -> Set<String> {
         let ids = Set(taskIds)
-        return lock.withLock {
-            for id in ids { watchCounts[id, default: 0] += 1 }
+        return state.withLockedValue { state in
+            for id in ids { state.watchCounts[id, default: 0] += 1 }
 
             var retained: [BackgroundTaskNotification] = []
-            retained.reserveCapacity(pending.count)
-            for notification in pending {
+            retained.reserveCapacity(state.pending.count)
+            for notification in state.pending {
                 if ids.contains(notification.taskId), isTerminal(notification) {
-                    deferredTerminal[notification.taskId] = notification
+                    state.deferredTerminal[notification.taskId] = notification
                 } else {
                     retained.append(notification)
                 }
             }
-            pending = retained
-            return ids.intersection(deliveredTerminalTaskIds)
+            state.pending = retained
+            return ids.intersection(state.deliveredTerminalTaskIds)
         }
     }
 
@@ -80,23 +84,23 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
         var heldTerminalIds: Set<String> = []
         var handler: (@Sendable () -> Void)?
 
-        lock.withLock {
-            heldTerminalIds = terminalTaskIds.subtracting(deliveredTerminalTaskIds)
+        state.withLockedValue { state in
+            heldTerminalIds = terminalTaskIds.subtracting(state.deliveredTerminalTaskIds)
             for id in ids {
-                let remaining = max(0, (watchCounts[id] ?? 0) - 1)
+                let remaining = max(0, (state.watchCounts[id] ?? 0) - 1)
                 if remaining == 0 {
-                    watchCounts.removeValue(forKey: id)
+                    state.watchCounts.removeValue(forKey: id)
                 } else {
-                    watchCounts[id] = remaining
+                    state.watchCounts[id] = remaining
                 }
 
                 // If the final manager snapshot missed a completion that raced
                 // immediately after it, this task is not represented by the
                 // tool result. Put its deferred notification back.
                 if !heldTerminalIds.contains(id), remaining == 0,
-                   let notification = deferredTerminal.removeValue(forKey: id) {
-                    pending.append(notification)
-                    handler = wakeHandler
+                   let notification = state.deferredTerminal.removeValue(forKey: id) {
+                    state.pending.append(notification)
+                    handler = state.wakeHandler
                 }
             }
         }
@@ -111,11 +115,11 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     }
 
     func drainMessages() -> [Message] {
-        let notifications = lock.withLock { () -> [BackgroundTaskNotification] in
-            let drained = pending
-            pending.removeAll()
+        let notifications: [BackgroundTaskNotification] = state.withLockedValue { state in
+            let drained = state.pending
+            state.pending.removeAll()
             for notification in drained where isTerminal(notification) {
-                deliveredTerminalTaskIds.insert(notification.taskId)
+                state.deliveredTerminalTaskIds.insert(notification.taskId)
             }
             return drained
         }
@@ -128,21 +132,21 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     }
 
     func hasPendingMessages() -> Bool {
-        lock.withLock { !pending.isEmpty }
+        state.withLockedValue { !$0.pending.isEmpty }
     }
 
     /// True while deleting the manager artifact could invalidate an automatic
     /// aside or explicit poll lease which has not settled yet.
     func isHolding(taskId: String) -> Bool {
-        lock.withLock {
-            pending.contains { $0.taskId == taskId }
-                || deferredTerminal[taskId] != nil
-                || (watchCounts[taskId] ?? 0) > 0
+        state.withLockedValue { state in
+            state.pending.contains { $0.taskId == taskId }
+                || state.deferredTerminal[taskId] != nil
+                || (state.watchCounts[taskId] ?? 0) > 0
         }
     }
 
     func clearPendingMessages() {
-        lock.withLock { pending.removeAll() }
+        state.withLockedValue { $0.pending.removeAll() }
     }
 
     /// Detaching an Agent must not leave terminal notices permanently held by
@@ -150,39 +154,39 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     /// of the same consumer can deliver it, while public listeners were never
     /// affected in the first place.
     func releaseAllWatches() {
-        let handler: (@Sendable () -> Void)? = lock.withLock {
-            watchCounts.removeAll()
-            guard !deferredTerminal.isEmpty else { return nil }
-            pending.append(contentsOf: deferredTerminal.values)
-            deferredTerminal.removeAll()
-            return wakeHandler
+        let handler: (@Sendable () -> Void)? = state.withLockedValue { state in
+            state.watchCounts.removeAll()
+            guard !state.deferredTerminal.isEmpty else { return nil }
+            state.pending.append(contentsOf: state.deferredTerminal.values)
+            state.deferredTerminal.removeAll()
+            return state.wakeHandler
         }
         handler?()
     }
 
     private func commit(taskIds: Set<String>) {
-        lock.withLock {
+        state.withLockedValue { state in
             // A terminal poll result supersedes every older notice for the
             // represented task, including a stall warning that may have been
             // queued just before completion.
-            pending.removeAll { taskIds.contains($0.taskId) }
+            state.pending.removeAll { taskIds.contains($0.taskId) }
             for id in taskIds {
-                deferredTerminal.removeValue(forKey: id)
-                deliveredTerminalTaskIds.insert(id)
+                state.deferredTerminal.removeValue(forKey: id)
+                state.deliveredTerminalTaskIds.insert(id)
             }
         }
     }
 
     private func rollback(taskIds: Set<String>) {
-        let handler: (@Sendable () -> Void)? = lock.withLock {
+        let handler: (@Sendable () -> Void)? = state.withLockedValue { state in
             var restored = false
-            for id in taskIds where (watchCounts[id] ?? 0) == 0 {
-                if let notification = deferredTerminal.removeValue(forKey: id) {
-                    pending.append(notification)
+            for id in taskIds where (state.watchCounts[id] ?? 0) == 0 {
+                if let notification = state.deferredTerminal.removeValue(forKey: id) {
+                    state.pending.append(notification)
                     restored = true
                 }
             }
-            return restored ? wakeHandler : nil
+            return restored ? state.wakeHandler : nil
         }
         handler?()
     }
@@ -191,12 +195,12 @@ public final class BackgroundTaskDeliveryConsumer: @unchecked Sendable {
     /// Cleanup is an explicit destructive boundary, so an outstanding lease
     /// for one of these ids must not resurrect its obsolete notification.
     func discard(taskIds: Set<String>) {
-        lock.withLock {
-            pending.removeAll { taskIds.contains($0.taskId) }
+        state.withLockedValue { state in
+            state.pending.removeAll { taskIds.contains($0.taskId) }
             for id in taskIds {
-                deferredTerminal.removeValue(forKey: id)
-                watchCounts.removeValue(forKey: id)
-                deliveredTerminalTaskIds.remove(id)
+                state.deferredTerminal.removeValue(forKey: id)
+                state.watchCounts.removeValue(forKey: id)
+                state.deliveredTerminalTaskIds.remove(id)
             }
         }
     }

@@ -1,5 +1,6 @@
 #if os(macOS) || os(Linux) || os(iOS)
 import Foundation
+import NIOConcurrencyHelpers
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Musl)
@@ -21,26 +22,29 @@ final class TUIRunner: @unchecked Sendable {
     let terminal: StdoutTerminal
     let tui: TUI
     let keybindings: KeybindingRegistry
-    private let lock = NSLock()
-    private var stdin: RawStdin?
+    private struct State {
+        var stdin: RawStdin?
+        var focused: Component?
+        var sigintSource: DispatchSourceSignal?
+        var sigtermSource: DispatchSourceSignal?
+        var exitContinuation: CheckedContinuation<Void, Never>?
+        var pendingExitCode: Int32?
+        /// Pending flush for a buffered standalone ESC. `StdinBuffer` holds a
+        /// lone 0x1B byte waiting for a potential CSI continuation (arrow keys,
+        /// function keys, etc.). If no continuation arrives we must flush it
+        /// manually — otherwise an isolated Escape press is swallowed forever
+        /// and keybindings like "cancel" never fire. See the escape-dispatch
+        /// scheduling in `ingest`.
+        var pendingEscapeFlush: DispatchWorkItem?
+    }
+
+    private let state = NIOLockedValueBox(State())
     private var stdinBuffer = StdinBuffer()
-    private var focused: Component?
-    private var sigintSource: DispatchSourceSignal?
-    private var sigtermSource: DispatchSourceSignal?
-    private var exitContinuation: CheckedContinuation<Void, Never>?
-    private var pendingExitCode: Int32?
     private let escapeFlushScheduler: EscapeFlushScheduler
     /// Called on the main queue for every raw stdin chunk, before routing.
     /// Lets idle timers observe "the user touched the keyboard" without
     /// caring which binding or component ends up consuming the input.
     var onInputActivity: (() -> Void)?
-    /// Pending flush for a buffered standalone ESC. `StdinBuffer` holds a
-    /// lone 0x1B byte waiting for a potential CSI continuation (arrow keys,
-    /// function keys, etc.). If no continuation arrives we must flush it
-    /// manually — otherwise an isolated Escape press is swallowed forever
-    /// and keybindings like "cancel" never fire. See the escape-dispatch
-    /// scheduling in `ingest`.
-    private var pendingEscapeFlush: DispatchWorkItem?
     /// Delay before a buffered ESC is treated as a standalone press. 50ms
     /// is well under a user's key-repeat threshold and safely above the
     /// ~1ms it takes a terminal to deliver the full CSI sequence for arrow
@@ -71,7 +75,7 @@ final class TUIRunner: @unchecked Sendable {
     }
 
     func focus(_ component: Component) {
-        lock.withLock { focused = component }
+        state.withLockedValue { $0.focused = component }
         if let f = component as? Focusable {
             f.focused = true
         }
@@ -109,17 +113,17 @@ final class TUIRunner: @unchecked Sendable {
     /// call `Foundation.exit` itself — doing so skipped the caller's shutdown on
     /// every signal-driven teardown, leaking background processes and sockets.
     var exitCode: Int32 {
-        lock.withLock { pendingExitCode } ?? 0
+        state.withLockedValue { $0.pendingExitCode } ?? 0
     }
 
     /// Request a clean shutdown. Safe from signal handlers and keybinding
     /// closures; the actual terminal restore happens when `run()` resumes
     /// from its suspension point.
     func exit(code: Int32 = 0) {
-        let cont: CheckedContinuation<Void, Never>? = lock.withLock {
-            pendingExitCode = code
-            let c = exitContinuation
-            exitContinuation = nil
+        let cont: CheckedContinuation<Void, Never>? = state.withLockedValue { state in
+            state.pendingExitCode = code
+            let c = state.exitContinuation
+            state.exitContinuation = nil
             return c
         }
         cont?.resume()
@@ -142,14 +146,14 @@ final class TUIRunner: @unchecked Sendable {
         // freeze it into scrollback as a duplicate input box.
         tui.clearFrame()
         tui.stop()
-        lock.withLock {
-            sigintSource?.cancel()
-            sigtermSource?.cancel()
-            sigintSource = nil
-            sigtermSource = nil
-            pendingEscapeFlush?.cancel()
-            pendingEscapeFlush = nil
-            stdin = nil     // triggers RawStdin deinit → restores termios
+        state.withLockedValue { state in
+            state.sigintSource?.cancel()
+            state.sigtermSource?.cancel()
+            state.sigintSource = nil
+            state.sigtermSource = nil
+            state.pendingEscapeFlush?.cancel()
+            state.pendingEscapeFlush = nil
+            state.stdin = nil     // triggers RawStdin deinit → restores termios
         }
     }
 
@@ -179,9 +183,9 @@ final class TUIRunner: @unchecked Sendable {
         let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         sigterm.setEventHandler { [weak self] in self?.exit(code: 143) }
         sigterm.resume()
-        lock.withLock {
-            sigintSource = sigint
-            sigtermSource = sigterm
+        state.withLockedValue { state in
+            state.sigintSource = sigint
+            state.sigtermSource = sigterm
         }
     }
 
@@ -189,14 +193,14 @@ final class TUIRunner: @unchecked Sendable {
         let stdin = try RawStdin { [weak self] data in
             self?.ingest(data)
         }
-        lock.withLock { self.stdin = stdin }
+        state.withLockedValue { $0.stdin = stdin }
     }
 
     private func waitForExit() async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            let shouldResume: Bool = lock.withLock {
-                if pendingExitCode != nil { return true }
-                exitContinuation = cont
+            let shouldResume: Bool = state.withLockedValue { state in
+                if state.pendingExitCode != nil { return true }
+                state.exitContinuation = cont
                 return false
             }
             if shouldResume { cont.resume() }
@@ -213,12 +217,12 @@ final class TUIRunner: @unchecked Sendable {
         // regains its default Enter handling.
         terminal.write("\u{1B}[<u")
         tui.stop()
-        lock.withLock {
-            sigintSource?.cancel()
-            sigtermSource?.cancel()
-            sigintSource = nil
-            sigtermSource = nil
-            stdin = nil     // triggers RawStdin deinit → restores termios
+        state.withLockedValue { state in
+            state.sigintSource?.cancel()
+            state.sigtermSource?.cancel()
+            state.sigintSource = nil
+            state.sigtermSource = nil
+            state.stdin = nil     // triggers RawStdin deinit → restores termios
         }
     }
 
@@ -232,9 +236,9 @@ final class TUIRunner: @unchecked Sendable {
         // Cancel any pending ESC flush — new data arrived, so the ESC is
         // either part of a CSI sequence (handled by `takeOne`) or irrelevant
         // (user kept typing). Either way, don't flush it as a standalone.
-        lock.withLock {
-            pendingEscapeFlush?.cancel()
-            pendingEscapeFlush = nil
+        state.withLockedValue { state in
+            state.pendingEscapeFlush?.cancel()
+            state.pendingEscapeFlush = nil
         }
         handleSequences(stdinBuffer.feed(data))
         scheduleEscapeFlushIfNeeded()
@@ -246,7 +250,7 @@ final class TUIRunner: @unchecked Sendable {
                 tui.requestRender()
                 continue
             }
-            let target: Component? = lock.withLock { focused }
+            let target: Component? = state.withLockedValue { $0.focused }
             target?.handleInput(seq)
             tui.requestRender()
         }
@@ -264,7 +268,7 @@ final class TUIRunner: @unchecked Sendable {
                 self.handleSequences(flushed)
             }
         }
-        lock.withLock { pendingEscapeFlush = work }
+        state.withLockedValue { $0.pendingEscapeFlush = work }
         escapeFlushScheduler(Self.escapeFlushDelayMs, work)
     }
 }

@@ -1,3 +1,4 @@
+import DequeModule
 import Foundation
 import KWWKAI
 import KWWKAgent
@@ -274,7 +275,7 @@ private let askParameters: JSONValue = .object([
 /// the earlier one's questions to finish.
 private actor AskGate {
     private var busy = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: Deque<CheckedContinuation<Void, Never>> = []
 
     func acquire() async {
         if busy {

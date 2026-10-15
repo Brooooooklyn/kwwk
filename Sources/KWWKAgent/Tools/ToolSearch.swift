@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 // MARK: - Ranking
 
@@ -170,16 +171,19 @@ public struct ToolSourceStatus: Sendable, Hashable {
 ///
 /// A loaded tool that stops being registered (its source went away) is
 /// unloaded; registering it again makes it searchable, not loaded.
-public final class ToolCatalog: @unchecked Sendable {
+public final class ToolCatalog: Sendable {
     /// What a catalog shares with its children.
-    private final class Registry: @unchecked Sendable {
-        let lock = NSLock()
-        var tools: [AgentTool] = []
-        var instructions: String?
-        /// Bumped by every `setTools`.
-        var epoch: UInt64 = 0
-        /// The epoch at which a name was last removed from `tools`.
-        var removedAt: [String: UInt64] = [:]
+    private final class Registry: Sendable {
+        struct State {
+            var tools: [AgentTool] = []
+            var instructions: String?
+            /// Bumped by every `setTools`.
+            var epoch: UInt64 = 0
+            /// The epoch at which a name was last removed from `tools`.
+            var removedAt: [String: UInt64] = [:]
+        }
+
+        let state: NIOLockedValueBox<State>
         let owns: @Sendable (String) -> Bool
         let prepare: @Sendable (CancellationHandle?) async -> Void
         let unavailable: @Sendable () async -> [ToolSourceStatus]
@@ -190,7 +194,7 @@ public final class ToolCatalog: @unchecked Sendable {
             prepare: @escaping @Sendable (CancellationHandle?) async -> Void,
             unavailable: @escaping @Sendable () async -> [ToolSourceStatus]
         ) {
-            self.instructions = instructions
+            self.state = NIOLockedValueBox(State(instructions: instructions))
             self.owns = owns
             self.prepare = prepare
             self.unavailable = unavailable
@@ -203,14 +207,28 @@ public final class ToolCatalog: @unchecked Sendable {
         var epoch: UInt64
     }
 
+    private struct State {
+        /// Loaded tools, in load order.
+        var loaded: [Loaded] = []
+        /// Definitions of loaded tools that are not registered (yet), restored
+        /// from a transcript: a server that is still connecting must not make a
+        /// resumed session lose its tools.
+        var restored: [String: Tool] = [:]
+
+        /// Drop loaded entries whose tool was unregistered after they loaded.
+        mutating func pruneRemoved(removedAt: [String: UInt64]) {
+            var pruned: [String] = []
+            loaded.removeAll { entry in
+                guard let removed = removedAt[entry.name], removed > entry.epoch else { return false }
+                pruned.append(entry.name)
+                return true
+            }
+            for name in pruned { restored.removeValue(forKey: name) }
+        }
+    }
+
     private let registry: Registry
-    private let lock = NSLock()
-    /// Loaded tools, in load order.
-    private var loaded: [Loaded] = []
-    /// Definitions of loaded tools that are not registered (yet), restored
-    /// from a transcript: a server that is still connecting must not make a
-    /// resumed session lose its tools.
-    private var restored: [String: Tool] = [:]
+    private let state = NIOLockedValueBox(State())
 
     /// - Parameters:
     ///   - instructions: System-prompt text describing where the deferred
@@ -247,14 +265,14 @@ public final class ToolCatalog: @unchecked Sendable {
 
     /// System-prompt text about the deferred tools (shared with children).
     public var instructions: String? {
-        registry.lock.withLock { registry.instructions }
+        registry.state.withLockedValue { $0.instructions }
     }
 
     /// Replace the instructions. Takes effect on the next request of every
     /// bound agent, which changes the system prompt: call it when that cost
     /// is acceptable.
     public func setInstructions(_ instructions: String?) {
-        registry.lock.withLock { registry.instructions = instructions }
+        registry.state.withLockedValue { $0.instructions = instructions }
     }
 
     /// Feed `agent` this catalog's `tool_search`, loaded tools and instructions.
@@ -270,45 +288,45 @@ public final class ToolCatalog: @unchecked Sendable {
     /// Replace the registered tools (for this catalog and its children).
     /// Loaded tools that are no longer registered are unloaded.
     public func setTools(_ tools: [AgentTool]) {
-        registry.lock.withLock {
-            registry.epoch &+= 1
+        registry.state.withLockedValue { state in
+            state.epoch &+= 1
             let names = Set(tools.map(\.name))
-            for old in registry.tools where !names.contains(old.name) {
-                registry.removedAt[old.name] = registry.epoch
+            for old in state.tools where !names.contains(old.name) {
+                state.removedAt[old.name] = state.epoch
             }
-            registry.tools = tools
+            state.tools = tools
         }
     }
 
     /// Every registered tool, loaded or not.
     public var registeredTools: [AgentTool] {
-        registry.lock.withLock { registry.tools }
+        registry.state.withLockedValue { $0.tools }
     }
 
     private var registryState: (tools: [AgentTool], epoch: UInt64, removedAt: [String: UInt64]) {
-        registry.lock.withLock { (registry.tools, registry.epoch, registry.removedAt) }
+        registry.state.withLockedValue { ($0.tools, $0.epoch, $0.removedAt) }
     }
 
     /// Make the loaded tools exactly the catalog tools `messages` declares,
     /// as when a session starts, resumes or is replaced.
     public func restore(from messages: [Message]) {
-        let state = registryState
-        let registered = Set(state.tools.map(\.name))
+        let shared = registryState
+        let registered = Set(shared.tools.map(\.name))
         let tools = TranscriptTools.currentTools(in: messages).filter {
             registered.contains($0.name) || registry.owns($0.name)
         }
-        lock.withLock {
-            loaded = tools.map { Loaded(name: $0.name, epoch: state.epoch) }
-            restored = Dictionary(tools.map { ($0.name, $0) }, uniquingKeysWith: { _, last in last })
+        state.withLockedValue { state in
+            state.loaded = tools.map { Loaded(name: $0.name, epoch: shared.epoch) }
+            state.restored = Dictionary(tools.map { ($0.name, $0) }, uniquingKeysWith: { _, last in last })
         }
     }
 
     /// Unload `names`. They stay registered and searchable.
     public func unload(_ names: Set<String>) {
         guard !names.isEmpty else { return }
-        lock.withLock {
-            loaded.removeAll { names.contains($0.name) }
-            for name in names { restored.removeValue(forKey: name) }
+        state.withLockedValue { state in
+            state.loaded.removeAll { names.contains($0.name) }
+            for name in names { state.restored.removeValue(forKey: name) }
         }
     }
 
@@ -330,7 +348,7 @@ public final class ToolCatalog: @unchecked Sendable {
                 }
             }
         }
-        return lock.withLock { Set(loaded.map(\.name)).subtracting(used) }
+        return state.withLockedValue { Set($0.loaded.map(\.name)).subtracting(used) }
     }
 
     /// Unload `unusedLoadedTools(in:)`. Returns the names unloaded.
@@ -344,21 +362,13 @@ public final class ToolCatalog: @unchecked Sendable {
     /// The loaded tools, in load order. A loaded tool that is not registered
     /// (yet) keeps its restored definition and waits for it when called.
     public var tools: [AgentTool] {
-        let state = registryState
-        let byName = Dictionary(state.tools.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
-        return lock.withLock {
-            pruneRemoved(removedAt: state.removedAt)
-            return loaded.compactMap { entry in byName[entry.name] ?? restored[entry.name].map(restoredTool) }
-        }
-    }
-
-    /// Drop loaded entries whose tool was unregistered after they loaded.
-    /// Caller holds `lock`.
-    private func pruneRemoved(removedAt: [String: UInt64]) {
-        loaded.removeAll { entry in
-            guard let removed = removedAt[entry.name], removed > entry.epoch else { return false }
-            restored.removeValue(forKey: entry.name)
-            return true
+        let shared = registryState
+        let byName = Dictionary(shared.tools.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        return state.withLockedValue { state in
+            state.pruneRemoved(removedAt: shared.removedAt)
+            return state.loaded.compactMap { entry in
+                byName[entry.name] ?? state.restored[entry.name].map(restoredTool)
+            }
         }
     }
 
@@ -366,16 +376,16 @@ public final class ToolCatalog: @unchecked Sendable {
     public func search(query: String, limit: Int, cancellation: CancellationHandle? = nil) async -> [AgentTool] {
         await registry.prepare(cancellation)
         if cancellation?.isCancelled == true { return [] }
-        let state = registryState
-        return lock.withLock {
-            pruneRemoved(removedAt: state.removedAt)
-            let loadedNames = Set(loaded.map(\.name))
-            let candidates = state.tools.filter { !loadedNames.contains($0.name) }
+        let shared = registryState
+        return state.withLockedValue { state in
+            state.pruneRemoved(removedAt: shared.removedAt)
+            let loadedNames = Set(state.loaded.map(\.name))
+            let candidates = shared.tools.filter { !loadedNames.contains($0.name) }
             let byName = Dictionary(candidates.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
             let matches = ToolSearchRanker()
                 .rank(query: query, documents: candidates.map(ToolSearchDocument.init(tool:)), limit: limit)
                 .compactMap { byName[$0.name] }
-            loaded.append(contentsOf: matches.map { Loaded(name: $0.name, epoch: state.epoch) })
+            state.loaded.append(contentsOf: matches.map { Loaded(name: $0.name, epoch: shared.epoch) })
             return matches
         }
     }
@@ -394,7 +404,7 @@ public final class ToolCatalog: @unchecked Sendable {
             parameters: definition.parameters
         ) { toolCallId, args, cancellation, onUpdate in
             await registry.prepare(cancellation)
-            guard let tool = registry.lock.withLock({ registry.tools.first { $0.name == definition.name } }) else {
+            guard let tool = registry.state.withLockedValue({ state in state.tools.first { $0.name == definition.name } }) else {
                 throw CodingToolError.runtime("\(definition.name) is not available: its server did not provide it")
             }
             return try await tool.execute(toolCallId, args, cancellation, onUpdate)

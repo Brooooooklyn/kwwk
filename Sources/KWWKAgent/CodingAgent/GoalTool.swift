@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Marker embedded in every hidden goal-continuation message. Declared here in
 /// the agent layer (not KWWKCli) so the session recorder can recognize and skip
@@ -71,27 +72,34 @@ public struct GoalSnapshot: Sendable, Equatable {
 ///
 /// Lock-based (not an actor) so `snapshot()` reads are synchronous and callable
 /// from the synchronous `@MainActor` status-line refresh. Mirrors `AgentState`.
-public final class GoalStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _objective = ""
-    private var _status: GoalStatus = .dropped
-    private var _autoContinueCount = 0
-    private var _tokensUsed = 0
+public final class GoalStore: Sendable {
+    private struct State {
+        var objective = ""
+        var status: GoalStatus = .dropped
+        var autoContinueCount = 0
+        var tokensUsed = 0
+    }
+
+    private let state = NIOLockedValueBox(State())
 
     public init() {}
 
     public func start(_ objective: String) {
-        lock.withLock { _objective = objective; _status = .active; _autoContinueCount = 0; _tokensUsed = 0 }
+        state.withLockedValue {
+            $0.objective = objective; $0.status = .active; $0.autoContinueCount = 0; $0.tokensUsed = 0
+        }
     }
     /// User cleared the goal (`/goal off`). Fully resets.
     public func stop() {
-        lock.withLock { _status = .dropped; _objective = ""; _autoContinueCount = 0; _tokensUsed = 0 }
+        state.withLockedValue {
+            $0.status = .dropped; $0.objective = ""; $0.autoContinueCount = 0; $0.tokensUsed = 0
+        }
     }
     /// Attribute a finished turn's token spend to the goal. Survives a pause
     /// (the count is the goal's lifetime spend, not per-stretch) and resets
     /// with the goal itself in `start`/`stop`.
     public func addTokens(_ n: Int) {
-        lock.withLock { _tokensUsed += n }
+        state.withLockedValue { $0.tokensUsed += n }
     }
     /// Model called `goal({op:"complete"})`. Compare-and-set from `.active` only,
     /// so a stale/in-flight turn (or any non-goal turn — the tool is always
@@ -99,45 +107,47 @@ public final class GoalStore: @unchecked Sendable {
     /// or never set a goal. Returns whether it actually transitioned.
     @discardableResult
     public func complete() -> Bool {
-        lock.withLock {
-            guard _status == .active else { return false }
-            _status = .complete; _autoContinueCount = 0
+        state.withLockedValue { state in
+            guard state.status == .active else { return false }
+            state.status = .complete; state.autoContinueCount = 0
             return true
         }
     }
     /// Guardrail cap tripped — loop halted, goal resumable.
     public func pauseForCap() {
-        lock.withLock { _status = .paused }
+        state.withLockedValue { $0.status = .paused }
     }
     /// `/goal resume` — un-pause and clear the counter so the loop restarts.
     public func resume() {
-        lock.withLock { if _status == .paused { _status = .active }; _autoContinueCount = 0 }
+        state.withLockedValue {
+            if $0.status == .paused { $0.status = .active }; $0.autoContinueCount = 0
+        }
     }
     /// Reset on every real user message so the cap only counts *consecutive*
     /// autonomous continuations.
     public func resetAutoContinue() {
-        lock.withLock { _autoContinueCount = 0 }
+        state.withLockedValue { $0.autoContinueCount = 0 }
     }
     /// Called once per hidden continuation injection.
     public func recordAutoContinue() {
-        lock.withLock { _autoContinueCount += 1 }
+        state.withLockedValue { $0.autoContinueCount += 1 }
     }
     /// Roll back a count when the continuation lost a race and never actually
     /// started a turn (so the cap only reflects turns that really ran).
     public func undoAutoContinue() {
-        lock.withLock { if _autoContinueCount > 0 { _autoContinueCount -= 1 } }
+        state.withLockedValue { if $0.autoContinueCount > 0 { $0.autoContinueCount -= 1 } }
     }
     public func snapshot() -> GoalSnapshot {
-        lock.withLock {
+        state.withLockedValue {
             GoalSnapshot(
-                objective: _objective,
-                status: _status,
-                autoContinueCount: _autoContinueCount,
-                tokensUsed: _tokensUsed
+                objective: $0.objective,
+                status: $0.status,
+                autoContinueCount: $0.autoContinueCount,
+                tokensUsed: $0.tokensUsed
             )
         }
     }
-    public var isActive: Bool { lock.withLock { _status == .active } }
+    public var isActive: Bool { state.withLockedValue { $0.status == .active } }
 }
 
 /// The model-facing `goal` tool. Exposes `get` (inspect) and `complete`

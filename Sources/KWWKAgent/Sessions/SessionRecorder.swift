@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// Bridges a live `Agent` to a `SessionStore`: subscribes to the agent's
 /// event stream and appends newly-produced transcript messages to the
@@ -15,7 +16,7 @@ import KWWKAI
 /// and resets the live-message baseline to the compacted context. Explicit
 /// `/shake` rewrites share the same serialized persistence queue, so a rewrite
 /// can never overtake a pending message or compaction write.
-public final class SessionRecorder: @unchecked Sendable {
+public final class SessionRecorder: Sendable {
     private struct PendingCompaction: Sendable {
         let replacementMessages: [Message]
         let messagesCompacted: Int
@@ -50,29 +51,28 @@ public final class SessionRecorder: @unchecked Sendable {
         }
     }
 
-    private final class RewriteResult: @unchecked Sendable {
+    private final class RewriteResult: Sendable {
         private enum State {
             case pending
             case succeeded(Int)
             case failed
         }
 
-        private let lock = NSLock()
-        private var state = State.pending
+        private let state = NIOLockedValueBox(State.pending)
 
         var value: Int? {
-            lock.withLock {
+            state.withLockedValue { state in
                 guard case .succeeded(let value) = state else { return nil }
                 return value
             }
         }
 
         func resolve(_ value: Int) {
-            lock.withLock { state = .succeeded(value) }
+            state.withLockedValue { $0 = .succeeded(value) }
         }
 
         func fail() {
-            lock.withLock { state = .failed }
+            state.withLockedValue { $0 = .failed }
         }
     }
 
@@ -95,29 +95,47 @@ public final class SessionRecorder: @unchecked Sendable {
     private let model: String?
     private let provider: String?
 
-    private let lock = NSLock()
-    /// Number of transcript messages already flushed to disk.
-    private var persistedCount: Int
-    /// Usage snapshot from the latest compactStart, consumed by compactEnd.
-    private var pendingCompactionUsage: AgentContextUsage?
-    /// Failed append/compaction/meta operations remain queued so a later
-    /// recorder event can retry them before any newer write reaches disk.
-    /// Explicit rewrites queued behind a failure are cancelled as one-shot
-    /// transactions because their callers keep the live transcript unchanged.
-    private var pendingOperations: [PersistenceOperation] = []
-    /// Protects the first queued operation from snapshot coalescing while its
-    /// async store call is in flight.
-    private var isPersistingFirstOperation = false
-    private var _lastPersistenceError: String?
-    /// Tail of the serialized persistence chain. Each operation waits for the
-    /// previous one so appends, compactions, metadata, and rewrites stay ordered.
-    private var persistenceChain: Task<Void, Never>?
+    private struct State {
+        /// Number of transcript messages already flushed to disk.
+        var persistedCount: Int
+        /// Usage snapshot from the latest compactStart, consumed by compactEnd.
+        var pendingCompactionUsage: AgentContextUsage?
+        /// Failed append/compaction/meta operations remain queued so a later
+        /// recorder event can retry them before any newer write reaches disk.
+        /// Explicit rewrites queued behind a failure are cancelled as one-shot
+        /// transactions because their callers keep the live transcript unchanged.
+        var pendingOperations: [PersistenceOperation] = []
+        /// Protects the first queued operation from snapshot coalescing while its
+        /// async store call is in flight.
+        var isPersistingFirstOperation = false
+        var lastPersistenceError: String?
+        /// Tail of the serialized persistence chain. Each operation waits for the
+        /// previous one so appends, compactions, metadata, and rewrites stay ordered.
+        var persistenceChain: Task<Void, Never>?
+
+        mutating func enqueueCoalescingMessageSnapshots(_ operation: PersistenceOperation) {
+            guard case .messages = operation,
+                  let lastIndex = pendingOperations.indices.last,
+                  case .messages = pendingOperations[lastIndex],
+                  !isPersistingFirstOperation || lastIndex > pendingOperations.startIndex else {
+                pendingOperations.append(operation)
+                return
+            }
+            // A newer full snapshot subsumes the older one because persistence
+            // resumes from `persistedCount`. Keep at most one waiting snapshot
+            // behind an in-flight write, avoiding O(events × transcript size)
+            // memory growth during a prolonged I/O failure.
+            pendingOperations[lastIndex] = operation
+        }
+    }
+
+    private let state: NIOLockedValueBox<State>
 
     /// Most recent persistence failure. Failed append-style operations remain
     /// queued; explicit rewrites are cancelled so they cannot run after their
     /// callers kept the live transcript unchanged.
     public var lastPersistenceError: String? {
-        lock.withLock { _lastPersistenceError }
+        state.withLockedValue { $0.lastPersistenceError }
     }
 
     /// - Parameters:
@@ -136,7 +154,7 @@ public final class SessionRecorder: @unchecked Sendable {
         self.cwd = cwd
         self.model = model
         self.provider = provider
-        self.persistedCount = persistedCount
+        self.state = NIOLockedValueBox(State(persistedCount: persistedCount))
     }
 
     /// Ensure the session file exists with a header, creating it only when it
@@ -213,15 +231,15 @@ public final class SessionRecorder: @unchecked Sendable {
     }
 
     private func noteCompactionStart(_ usage: AgentContextUsage) {
-        lock.withLock {
-            pendingCompactionUsage = usage
+        state.withLockedValue {
+            $0.pendingCompactionUsage = usage
         }
     }
 
     private func takePendingCompactionUsage() -> AgentContextUsage? {
-        lock.withLock {
-            defer { pendingCompactionUsage = nil }
-            return pendingCompactionUsage
+        state.withLockedValue { state in
+            defer { state.pendingCompactionUsage = nil }
+            return state.pendingCompactionUsage
         }
     }
 
@@ -253,65 +271,50 @@ public final class SessionRecorder: @unchecked Sendable {
     }
 
     private func enqueue(_ operation: PersistenceOperation) async {
-        let work: Task<Void, Never> = lock.withLock {
-            enqueueCoalescingMessageSnapshots(operation)
-            let previous = persistenceChain
+        let work: Task<Void, Never> = state.withLockedValue { state in
+            state.enqueueCoalescingMessageSnapshots(operation)
+            let previous = state.persistenceChain
             let next = Task<Void, Never> { [weak self] in
                 await previous?.value
                 await self?.drainPendingOperations()
             }
-            persistenceChain = next
+            state.persistenceChain = next
             return next
         }
         await work.value
     }
 
     private func drainPendingOperations() async {
-        while let operation = lock.withLock({ () -> PersistenceOperation? in
-            guard let first = pendingOperations.first else { return nil }
-            isPersistingFirstOperation = true
+        while let operation = state.withLockedValue({ state -> PersistenceOperation? in
+            guard let first = state.pendingOperations.first else { return nil }
+            state.isPersistingFirstOperation = true
             return first
         }) {
             do {
                 try await persist(operation)
-                lock.withLock {
-                    pendingOperations.removeFirst()
-                    isPersistingFirstOperation = false
-                    _lastPersistenceError = nil
+                state.withLockedValue { state in
+                    state.pendingOperations.removeFirst()
+                    state.isPersistingFirstOperation = false
+                    state.lastPersistenceError = nil
                 }
             } catch {
-                let cancelledRewrites = lock.withLock { () -> [RewriteResult] in
+                let cancelledRewrites = state.withLockedValue { state -> [RewriteResult] in
                     var results: [RewriteResult] = []
-                    pendingOperations.removeAll { pendingOperation in
+                    state.pendingOperations.removeAll { pendingOperation in
                         guard case .rewrite(let pending) = pendingOperation else {
                             return false
                         }
                         results.append(pending.result)
                         return true
                     }
-                    isPersistingFirstOperation = false
-                    _lastPersistenceError = String(describing: error)
+                    state.isPersistingFirstOperation = false
+                    state.lastPersistenceError = String(describing: error)
                     return results
                 }
                 cancelledRewrites.forEach { $0.fail() }
                 return
             }
         }
-    }
-
-    private func enqueueCoalescingMessageSnapshots(_ operation: PersistenceOperation) {
-        guard case .messages = operation,
-              let lastIndex = pendingOperations.indices.last,
-              case .messages = pendingOperations[lastIndex],
-              !isPersistingFirstOperation || lastIndex > pendingOperations.startIndex else {
-            pendingOperations.append(operation)
-            return
-        }
-        // A newer full snapshot subsumes the older one because persistence
-        // resumes from `persistedCount`. Keep at most one waiting snapshot
-        // behind an in-flight write, avoiding O(events × transcript size)
-        // memory growth during a prolonged I/O failure.
-        pendingOperations[lastIndex] = operation
     }
 
     private func persist(_ operation: PersistenceOperation) async throws {
@@ -340,8 +343,8 @@ public final class SessionRecorder: @unchecked Sendable {
                 model: model,
                 provider: provider
             )
-            lock.withLock {
-                persistedCount = compaction.replacementMessages.count
+            state.withLockedValue {
+                $0.persistedCount = compaction.replacementMessages.count
             }
 
         case .rewrite(let pending):
@@ -358,7 +361,7 @@ public final class SessionRecorder: @unchecked Sendable {
 
     private func persist(messages: [Message]) async throws {
         while true {
-            let nextIndex = lock.withLock { persistedCount }
+            let nextIndex = state.withLockedValue { $0.persistedCount }
             guard nextIndex < messages.count else { return }
 
             try await store.append(
@@ -368,11 +371,11 @@ public final class SessionRecorder: @unchecked Sendable {
                 model: model,
                 provider: provider
             )
-            lock.withLock {
+            state.withLockedValue {
                 // Operations are drained serially, so a successful single-line
                 // append advances the durable baseline exactly once. A later
                 // retry resumes after any lines that already reached disk.
-                persistedCount = nextIndex + 1
+                $0.persistedCount = nextIndex + 1
             }
         }
     }

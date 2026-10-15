@@ -1,5 +1,6 @@
 import Foundation
 import KWWKAI
+import NIOConcurrencyHelpers
 
 /// A bidirectional channel carrying JSON-RPC messages to and from one MCP
 /// server.
@@ -36,17 +37,16 @@ extension MCPTransport {
 /// inherit it), so `MCPManager` can tell a server refusing the credentials
 /// from an authorization error the auth provider raised itself, and knows
 /// which token was refused.
-final class MCPRefusalCapture: @unchecked Sendable {
+final class MCPRefusalCapture: Sendable {
     @TaskLocal static var current: MCPRefusalCapture?
 
-    private let lock = NSLock()
-    private var refused: MCPRefusedCredential?
+    private let refused = NIOLockedValueBox<MCPRefusedCredential?>(nil)
 
     /// The last refusal, if the server refused anything.
-    var refusal: MCPRefusedCredential? { lock.withLock { refused } }
+    var refusal: MCPRefusedCredential? { refused.withLockedValue { $0 } }
 
     func record(token: String?) {
-        lock.withLock { refused = MCPRefusedCredential(token: token) }
+        refused.withLockedValue { $0 = MCPRefusedCredential(token: token) }
     }
 }
 

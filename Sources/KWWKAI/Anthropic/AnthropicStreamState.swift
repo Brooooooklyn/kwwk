@@ -1,8 +1,8 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Mutable state the Anthropic stream driver mutates while consuming SSE.
 final class AnthropicStreamState: @unchecked Sendable {
-    private let lock = NSLock()
     let api: String
     let provider: String
     let modelId: String
@@ -25,10 +25,13 @@ final class AnthropicStreamState: @unchecked Sendable {
         case toolUse(id: String, name: String, json: String)
         case fallback(AnthropicFallbackContent)
     }
-    private var blocks: [Int: Block] = [:]
-    private var orderedIndices: [Int] = []
-    /// tool_use blocks whose `content_block_start` carried the whole input.
-    private var wholeInputIndices: Set<Int> = []
+    private struct State {
+        var blocks: [Int: Block] = [:]
+        var orderedIndices: [Int] = []
+        /// tool_use blocks whose `content_block_start` carried the whole input.
+        var wholeInputIndices: Set<Int> = []
+    }
+    private let state = NIOLockedValueBox(State())
 
     init(api: String, provider: String, modelId: String) {
         self.api = api
@@ -113,20 +116,22 @@ final class AnthropicStreamState: @unchecked Sendable {
 
     /// SSE indices include ignored protocol blocks; public indices address content.
     func contentIndex(for wireIndex: Int) -> Int {
-        orderedIndices.sorted().filter { blocks[$0] != nil }.firstIndex(of: wireIndex) ?? 0
+        state.withLockedValue { state in
+            state.orderedIndices.sorted().filter { state.blocks[$0] != nil }.firstIndex(of: wireIndex) ?? 0
+        }
     }
 
     func startBlock(index: Int, type: String, raw: [String: JSONValue]) {
-        lock.withLock {
-            if !orderedIndices.contains(index) { orderedIndices.append(index) }
+        state.withLockedValue { state in
+            if !state.orderedIndices.contains(index) { state.orderedIndices.append(index) }
             switch type {
-            case "text": blocks[index] = .text(TextContent(text: ""))
-            case "thinking": blocks[index] = .thinking(ThinkingContent(thinking: ""))
+            case "text": state.blocks[index] = .text(TextContent(text: ""))
+            case "thinking": state.blocks[index] = .thinking(ThinkingContent(thinking: ""))
             case "redacted_thinking":
                 let data: String = {
                     if case .string(let v) = raw["data"] ?? .null { return v } else { return "" }
                 }()
-                blocks[index] = .thinking(ThinkingContent(
+                state.blocks[index] = .thinking(ThinkingContent(
                     thinking: "[Reasoning redacted]",
                     thinkingSignature: data,
                     redacted: true))
@@ -145,44 +150,44 @@ final class AnthropicStreamState: @unchecked Sendable {
                 if case .object(let input) = raw["input"] ?? .null, !input.isEmpty,
                    let data = try? JSONEncoder().encode(JSONValue.object(input)) {
                     json = String(decoding: data, as: UTF8.self)
-                    wholeInputIndices.insert(index)
+                    state.wholeInputIndices.insert(index)
                 }
-                blocks[index] = .toolUse(id: id, name: name, json: json)
+                state.blocks[index] = .toolUse(id: id, name: name, json: json)
             default: break
             }
         }
     }
 
     func startFallback(index: Int, from: String, to: String) {
-        lock.withLock {
-            if !orderedIndices.contains(index) { orderedIndices.append(index) }
-            blocks[index] = .fallback(AnthropicFallbackContent(from: from, to: to))
+        state.withLockedValue { state in
+            if !state.orderedIndices.contains(index) { state.orderedIndices.append(index) }
+            state.blocks[index] = .fallback(AnthropicFallbackContent(from: from, to: to))
         }
     }
 
     func appendText(index: Int, text: String) {
-        lock.withLock {
-            if case .text(var t) = blocks[index] {
+        state.withLockedValue { state in
+            if case .text(var t) = state.blocks[index] {
                 t.text += text
-                blocks[index] = .text(t)
+                state.blocks[index] = .text(t)
             }
         }
     }
 
     func appendThinking(index: Int, text: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinking += text
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
 
     func appendSignature(index: Int, signature: String) {
-        lock.withLock {
-            if case .thinking(var th) = blocks[index] {
+        state.withLockedValue { state in
+            if case .thinking(var th) = state.blocks[index] {
                 th.thinkingSignature = (th.thinkingSignature ?? "") + signature
-                blocks[index] = .thinking(th)
+                state.blocks[index] = .thinking(th)
             }
         }
     }
@@ -191,10 +196,10 @@ final class AnthropicStreamState: @unchecked Sendable {
     /// delta after that would be appended to complete JSON and break it.
     @discardableResult
     func appendToolJSON(index: Int, chunk: String) -> Bool {
-        lock.withLock {
-            guard !wholeInputIndices.contains(index) else { return false }
-            if case .toolUse(let id, let name, let json) = blocks[index] {
-                blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
+        state.withLockedValue { state in
+            guard !state.wholeInputIndices.contains(index) else { return false }
+            if case .toolUse(let id, let name, let json) = state.blocks[index] {
+                state.blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
             }
             return true
         }
@@ -203,15 +208,15 @@ final class AnthropicStreamState: @unchecked Sendable {
     enum Finalized { case text(String); case thinking(String); case toolCall(ToolCall); case none }
 
     func finishBlock(index: Int) -> Finalized {
-        lock.withLock {
-            guard let block = blocks[index] else { return .none }
+        state.withLockedValue { state in
+            guard let block = state.blocks[index] else { return .none }
             switch block {
             case .fallback: return .none
             case .text(let t): return .text(t.text)
             case .thinking(let th): return .thinking(th.thinking)
             case .toolUse(let id, let name, let json):
                 let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
-                blocks[index] = .toolUse(id: id, name: name, json: json)
+                state.blocks[index] = .toolUse(id: id, name: name, json: json)
                 return .toolCall(call)
             }
         }
@@ -224,10 +229,10 @@ final class AnthropicStreamState: @unchecked Sendable {
     func snapshot() -> AssistantMessage { buildMessage(parseToolArgs: false) }
 
     private func buildMessage(parseToolArgs: Bool) -> AssistantMessage {
-        lock.withLock {
+        state.withLockedValue { state in
             var content: [AssistantBlock] = []
-            for i in orderedIndices.sorted() {
-                guard let block = blocks[i] else { continue }
+            for i in state.orderedIndices.sorted() {
+                guard let block = state.blocks[i] else { continue }
                 switch block {
                 case .fallback(let fallback): content.append(.fallback(fallback))
                 case .text(let t): content.append(.text(t))

@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import NIOConcurrencyHelpers
 
 /// Minimal HTTP client abstraction used by streaming providers. Tests inject a
 /// stub implementation; production code uses `URLSessionHTTPClient`.
@@ -163,14 +164,13 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
         var bodyFinished = false
     }
 
-    private let lock = NSLock()
-    private var states: [Int: TaskState] = [:]
+    private let states = NIOLockedValueBox<[Int: TaskState]>([:])
 
     // MARK: - Registration (called from `stream(...)`)
 
     func makeBodyStream(for id: Int, onCancel: @escaping @Sendable () -> Void) -> AsyncThrowingStream<Data, Error> {
         AsyncThrowingStream<Data, Error> { continuation in
-            let pending: Error?? = lock.withLock {
+            let pending: Error?? = states.withLockedValue { states in
                 var st = states[id] ?? TaskState()
                 // Replay a completion that landed before the consumer hooked in
                 // (server closed between `didReceive response:` and this call).
@@ -178,7 +178,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
                     st.pendingCompletion = nil
                     st.bodyFinished = true
                     states[id] = st
-                    removeIfDoneLocked(id)
+                    Self.removeIfDoneLocked(id, in: &states)
                     return .some(p)
                 }
                 st.bodyContinuation = continuation
@@ -195,13 +195,13 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
 
     func awaitHeader(for id: Int) async throws -> HTTPURLResponse {
         try await withCheckedThrowingContinuation { cont in
-            let pending: Result<HTTPURLResponse, Error>? = lock.withLock {
+            let pending: Result<HTTPURLResponse, Error>? = states.withLockedValue { states in
                 var st = states[id] ?? TaskState()
                 if let p = st.pendingHeader {
                     st.pendingHeader = nil
                     st.headerDelivered = true
                     states[id] = st
-                    removeIfDoneLocked(id)
+                    Self.removeIfDoneLocked(id, in: &states)
                     return p
                 }
                 st.headerContinuation = cont
@@ -237,7 +237,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         let id = dataTask.taskIdentifier
-        let cont = lock.withLock { states[id]?.bodyContinuation }
+        let cont = states.withLockedValue { $0[id]?.bodyContinuation }
         // Deliver the whole chunk in one yield — one stream element per socket
         // read, not one per byte.
         cont?.yield(data)
@@ -248,7 +248,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
         enum HeaderAction { case none, resume(CheckedContinuation<HTTPURLResponse, Error>, Error) }
         enum BodyAction { case none, finish(AsyncThrowingStream<Data, Error>.Continuation, Error?) }
 
-        let actions: (HeaderAction, BodyAction) = lock.withLock {
+        let actions: (HeaderAction, BodyAction) = states.withLockedValue { states in
             guard var st = states[id] else { return (.none, .none) }
             var headerAction: HeaderAction = .none
             // If `didReceive response:` never fired (DNS/connect failure),
@@ -272,7 +272,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
                 st.pendingCompletion = .some(error)
             }
             states[id] = st
-            removeIfDoneLocked(id)
+            Self.removeIfDoneLocked(id, in: &states)
             return (headerAction, bodyAction)
         }
 
@@ -290,7 +290,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
     // MARK: - Helpers
 
     private func deliverHeader(_ id: Int, _ result: Result<HTTPURLResponse, Error>) {
-        let continuation: CheckedContinuation<HTTPURLResponse, Error>? = lock.withLock {
+        let continuation: CheckedContinuation<HTTPURLResponse, Error>? = states.withLockedValue { states in
             var st = states[id] ?? TaskState()
             guard !st.headerResolved else { states[id] = st; return nil }
             st.headerResolved = true
@@ -298,7 +298,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
                 st.headerContinuation = nil
                 st.headerDelivered = true
                 states[id] = st
-                removeIfDoneLocked(id)
+                Self.removeIfDoneLocked(id, in: &states)
                 return cont
             } else {
                 st.pendingHeader = result
@@ -314,7 +314,7 @@ private final class StreamingSessionDelegate: NSObject, URLSessionDataDelegate, 
         }
     }
 
-    private func removeIfDoneLocked(_ id: Int) {
+    private static func removeIfDoneLocked(_ id: Int, in states: inout [Int: TaskState]) {
         guard let st = states[id] else { return }
         if st.headerDelivered && st.bodyFinished {
             states[id] = nil

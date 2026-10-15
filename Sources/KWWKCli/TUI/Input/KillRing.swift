@@ -1,10 +1,12 @@
+import DequeModule
+
 /// Emacs-style kill ring: text removed by a kill command (Ctrl+W, Ctrl+U,
 /// Ctrl+K, Alt+D, Alt+Backspace) is pushed here so Ctrl+Y can yank it back.
 /// Consecutive kills accumulate into a single entry — prepended for backward
 /// deletes, appended for forward — so a run of Ctrl+W yanks as one unit.
 /// Port of pi-tui's `kill-ring.ts`.
 struct KillRing {
-    private var ring: [String] = []
+    private var ring: Deque<String> = []
     private let maxEntries = 60
 
     mutating func push(_ text: String, prepend: Bool, accumulate: Bool) {
@@ -24,7 +26,7 @@ struct KillRing {
     mutating func rotate() {
         guard ring.count > 1 else { return }
         let last = ring.removeLast()
-        ring.insert(last, at: 0)
+        ring.prepend(last)
     }
 
     var count: Int { ring.count }

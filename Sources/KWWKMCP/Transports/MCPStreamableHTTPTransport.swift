@@ -3,6 +3,7 @@ import KWWKAI
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import NIOConcurrencyHelpers
 
 /// MCP "streamable HTTP" transport (spec 2025-03-26 and later).
 ///
@@ -25,7 +26,7 @@ import FoundationNetworking
 /// (at most `maxStepUpRetries` times per request) and otherwise fails with
 /// `MCPAuthError.insufficientScope`. Only requests the server refused are
 /// retried; nothing that ran is sent twice.
-public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable {
+public final class MCPStreamableHTTPTransport: MCPTransport, Sendable {
     public let url: URL
     public let headers: [String: String]
     public let requestTimeoutSeconds: Double
@@ -37,17 +38,20 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
     private let authProvider: (any MCPAuthProvider)?
     /// Shared by 401 recovery, proactive refresh and step-up.
     private let authGate = MCPAuthRunGate()
-    private let lock = NSLock()
-    private var sessionId: String?
-    private var protocolVersion: String?
-    private var continuation: AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
-    private var listenTask: Task<Void, Never>?
-    private var closed = false
-    /// Scope accumulated from challenges and step-up (union).
-    private var scope: String?
-    private var resourceMetadataURL: URL?
+    private let state = NIOLockedValueBox(State())
     /// Cancelled by `close()`; every request carries it.
     private let lifetime = CancellationHandle()
+
+    private struct State {
+        var sessionId: String?
+        var protocolVersion: String?
+        var continuation: AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?
+        var listenTask: Task<Void, Never>?
+        var closed = false
+        /// Scope accumulated from challenges and step-up (union).
+        var scope: String?
+        var resourceMetadataURL: URL?
+    }
 
     /// - Parameters:
     ///   - headers: Extra request headers. A token from `auth` replaces any
@@ -92,16 +96,16 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
 
     /// The session id assigned by the server, if any.
     public var currentSessionId: String? {
-        lock.withLock { sessionId }
+        state.withLockedValue { $0.sessionId }
     }
 
     public func start() async throws -> AsyncThrowingStream<JSONRPCMessage, Error> {
         let (stream, continuation) = AsyncThrowingStream<JSONRPCMessage, Error>.makeStream()
-        try lock.withLock {
-            guard self.continuation == nil, !closed else {
+        try state.withLockedValue { state in
+            guard state.continuation == nil, !state.closed else {
                 throw MCPError.protocolError("transport already started")
             }
-            self.continuation = continuation
+            state.continuation = continuation
         }
         return stream
     }
@@ -128,7 +132,7 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             timeoutSeconds: requestTimeoutSeconds
         )
         if let assigned = response.value(forHTTPHeaderField: "Mcp-Session-Id"), !assigned.isEmpty {
-            lock.withLock { sessionId = assigned }
+            state.withLockedValue { $0.sessionId = assigned }
         }
         let status = response.statusCode
         guard (200..<300).contains(status) else {
@@ -185,7 +189,7 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
         guard let provider = auth?.oauthProvider else {
             throw MCPAuthError.providerMisconfigured("finishAuthorization requires an OAuth client provider")
         }
-        let (scope, metadataURL) = lock.withLock { (self.scope, self.resourceMetadataURL) }
+        let (scope, metadataURL) = state.withLockedValue { ($0.scope, $0.resourceMetadataURL) }
         try await MCPOAuth.finishAuthorization(
             provider,
             serverURL: url,
@@ -230,9 +234,9 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
         isAuthRetry: Bool
     ) async throws {
         let challenge = MCPAuthChallenge(header: response.value(forHTTPHeaderField: "WWW-Authenticate"))
-        lock.withLock {
-            if let metadataURL = challenge.resourceMetadataURL { resourceMetadataURL = metadataURL }
-            scope = MCPOAuth.scopeUnion(scope, challenge.scope)
+        state.withLockedValue { state in
+            if let metadataURL = challenge.resourceMetadataURL { state.resourceMetadataURL = metadataURL }
+            state.scope = MCPOAuth.scopeUnion(state.scope, challenge.scope)
         }
         guard let authProvider else {
             let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -257,10 +261,10 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             )
         }
         let tokens = try await provider.tokens(nil)
-        let (union, metadataURL): (String?, URL?) = lock.withLock {
-            if let metadataURL = challenge.resourceMetadataURL { resourceMetadataURL = metadataURL }
-            scope = MCPOAuth.scopeUnion(scope, tokens?.scope, challenge.scope)
-            return (scope, resourceMetadataURL)
+        let (union, metadataURL): (String?, URL?) = state.withLockedValue { state in
+            if let metadataURL = challenge.resourceMetadataURL { state.resourceMetadataURL = metadataURL }
+            state.scope = MCPOAuth.scopeUnion(state.scope, tokens?.scope, challenge.scope)
+            return (state.scope, state.resourceMetadataURL)
         }
         let interactive = auth?.isInteractive ?? false
         let url = url
@@ -281,25 +285,25 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
     }
 
     public func didInitialize(protocolVersion: String) async {
-        let shouldListen: Bool = lock.withLock {
-            self.protocolVersion = protocolVersion
-            return listenTask == nil && !closed
+        let shouldListen: Bool = state.withLockedValue { state in
+            state.protocolVersion = protocolVersion
+            return state.listenTask == nil && !state.closed
         }
         guard shouldListen else { return }
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
             await self.listen()
         }
-        lock.withLock { listenTask = task }
+        state.withLockedValue { $0.listenTask = task }
     }
 
     public func close() async {
-        let (task, continuation, session, alreadyClosed) = lock.withLock {
-            () -> (Task<Void, Never>?, AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?, String?, Bool) in
-            let result = (listenTask, self.continuation, sessionId, closed)
-            closed = true
-            listenTask = nil
-            self.continuation = nil
+        let (task, continuation, session, alreadyClosed) = state.withLockedValue {
+            state -> (Task<Void, Never>?, AsyncThrowingStream<JSONRPCMessage, Error>.Continuation?, String?, Bool) in
+            let result = (state.listenTask, state.continuation, state.sessionId, state.closed)
+            state.closed = true
+            state.listenTask = nil
+            state.continuation = nil
             return result
         }
         guard !alreadyClosed else { return }
@@ -336,24 +340,24 @@ public final class MCPStreamableHTTPTransport: MCPTransport, @unchecked Sendable
             for key in result.keys where key.lowercased() == "authorization" { result.removeValue(forKey: key) }
             result["Authorization"] = "Bearer \(token)"
         }
-        lock.withLock {
-            if let sessionId { result["Mcp-Session-Id"] = sessionId }
-            if let protocolVersion { result["MCP-Protocol-Version"] = protocolVersion }
+        state.withLockedValue { state in
+            if let sessionId = state.sessionId { result["Mcp-Session-Id"] = sessionId }
+            if let protocolVersion = state.protocolVersion { result["MCP-Protocol-Version"] = protocolVersion }
         }
         return result
     }
 
     /// End the inbound stream: the connection is over.
     private func finish(throwing error: Error) {
-        lock.withLock {
-            let continuation = self.continuation
-            self.continuation = nil
+        state.withLockedValue { state in
+            let continuation = state.continuation
+            state.continuation = nil
             return continuation
         }?.finish(throwing: error)
     }
 
     private func yield(_ messages: [JSONRPCMessage]) {
-        guard let continuation = lock.withLock({ self.continuation }) else { return }
+        guard let continuation = state.withLockedValue({ $0.continuation }) else { return }
         for message in messages { continuation.yield(message) }
     }
 
