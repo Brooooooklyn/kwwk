@@ -778,7 +778,7 @@ swift test
 
 ## A note on OAuth client IDs
 
-`Sources/KWWKAI/OAuthProviders.swift` reuses the OAuth client IDs (and,
+`Sources/KWWKAuth/Providers/OAuthProviders.swift` reuses the OAuth client IDs (and,
 where applicable, public app metadata) shipped by the upstream
 first-party CLIs — Anthropic's Claude Code, OpenAI's Codex CLI, and
 GitHub Copilot's VS Code extension. Those credentials are not secrets in
