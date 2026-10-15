@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import KWWKGenerateModelsCore
 
@@ -22,44 +23,49 @@ import KWWKGenerateModelsCore
 /// files are updated together.
 ///
 @main
-struct GenerateModels {
-    static func main() throws {
-        do {
-            try run()
-        } catch GenerateError.help {
-            FileHandle.standardOutput.write(Data("\(usage)\n".utf8))
-            exit(0)
-        } catch GenerateError.usage(let text) {
-            FileHandle.standardError.write(Data("\(text)\n\n\(usage)\n".utf8))
-            exit(1)
-        } catch {
-            FileHandle.standardError.write(Data("kwwk-generate-models: \(error)\n".utf8))
-            exit(1)
-        }
-    }
+struct GenerateModels: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "kwwk-generate-models",
+        abstract: "Regenerate the bundled model catalog from pi-mono's generated TypeScript catalog.",
+        discussion: """
+        \(GenerateModelsCore.defaultOverridesPath), read from the working directory, is laid over pi-mono's \
+        catalog: kwwk's own corrections, kept across syncs.
 
-    private static func run() throws {
-        let options = try Options.parse(CommandLine.arguments.dropFirst())
+        Also run `swift run kwwk-generate-cursor-models` when syncing: the Cursor catalog \
+        (cursor-models.json) is regenerated separately.
+
+        Current pi-mono checkouts must first run `node packages/ai/scripts/generate-models.ts` in the \
+        pi-mono repository to materialize the Git-ignored provider JSON files.
+        """
+    )
+
+    @Argument(help: ArgumentHelp("pi-mono's packages/ai/src/models.generated.ts.", valueName: "models.generated.ts"))
+    var inputPath: String
+
+    @Argument(help: ArgumentHelp("Output path.", valueName: "output.json"))
+    var outputPath: String = GenerateModelsCore.defaultOutputPath
+
+    func run() throws {
         // kwwk's own corrections ride every regeneration when the command is
         // run from the repository root, where they live.
         let overridesURL = URL(fileURLWithPath: GenerateModelsCore.defaultOverridesPath)
         let hasOverrides = FileManager.default.fileExists(atPath: overridesURL.path)
         let result = try GenerateModelsCore.generate(
-            fromFile: URL(fileURLWithPath: options.inputPath),
+            fromFile: URL(fileURLWithPath: inputPath),
             overridesFile: hasOverrides ? overridesURL : nil
         )
         print(hasOverrides
             ? "applied \(GenerateModelsCore.defaultOverridesPath)"
             : "no \(GenerateModelsCore.defaultOverridesPath) here; pi-mono's catalog as it is")
-        let outputURL = URL(fileURLWithPath: options.outputPath)
+        let outputURL = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         try result.outputData.write(to: outputURL, options: [.atomic])
 
-        printSummary(
-            outputPath: options.outputPath,
+        Self.printSummary(
+            outputPath: outputPath,
             outputBytes: result.outputData.count,
             root: result.root
         )
@@ -85,60 +91,4 @@ struct GenerateModels {
             print("    \(provider)\(pad)  \(count)")
         }
     }
-
-    static let usage = """
-    usage: kwwk-generate-models <models.generated.ts> [output.json]
-
-    arguments:
-      models.generated.ts      pi-mono packages/ai/src/models.generated.ts
-      output.json              optional output path; defaults to \(GenerateModelsCore.defaultOutputPath)
-
-    options:
-      -h, --help               show this help
-
-    \(GenerateModelsCore.defaultOverridesPath), read from the working directory,
-    is laid over pi-mono's catalog: kwwk's own corrections, kept across syncs.
-
-    note: also run `swift run kwwk-generate-cursor-models` when syncing —
-    the Cursor catalog (cursor-models.json) is regenerated separately.
-
-    current pi-mono checkouts must first run
-    `node packages/ai/scripts/generate-models.ts` in the pi-mono repository to
-    materialize the Git-ignored provider JSON files.
-    """
-}
-
-private struct Options {
-    var inputPath: String
-    var outputPath: String
-
-    static func parse(_ rawArguments: ArraySlice<String>) throws -> Options {
-        var positional: [String] = []
-
-        for argument in rawArguments {
-            switch argument {
-            case "-h", "--help":
-                throw GenerateError.help
-            default:
-                if argument.hasPrefix("-") {
-                    throw GenerateError.usage("unknown option: \(argument)")
-                }
-                positional.append(argument)
-            }
-        }
-
-        guard positional.count == 1 || positional.count == 2 else {
-            throw GenerateError.usage("expected input path and optional output path")
-        }
-
-        return Options(
-            inputPath: positional[0],
-            outputPath: positional.count == 2 ? positional[1] : GenerateModelsCore.defaultOutputPath
-        )
-    }
-}
-
-private enum GenerateError: Error {
-    case help
-    case usage(String)
 }

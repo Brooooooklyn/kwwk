@@ -48,6 +48,9 @@ let package = Package(
         // over the system zlib.h clashes with both this module and the Apple
         // SDK's `zlib` module in any package graph that loads either.
         .package(url: "https://github.com/the-swift-collective/zlib.git", from: "1.3.1"),
+        // Command-line parsing for `kwwk`, `kwwk mcp` and the catalog generators: options, help and
+        // usage errors come from one declaration instead of hand-rolled argv loops.
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .target(
@@ -96,7 +99,12 @@ let package = Package(
         ),
         .target(
             name: "KWWKCli",
-            dependencies: ["KWWKAI", "KWWKAgent", "KWWKMCP"],
+            dependencies: [
+                "KWWKAI",
+                "KWWKAgent",
+                "KWWKMCP",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Sources/KWWKCli"
         ),
         .target(
@@ -105,22 +113,34 @@ let package = Package(
         ),
         .executableTarget(
             name: "kwwk",
-            dependencies: ["KWWKCli"],
+            dependencies: [
+                "KWWKCli",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Sources/kwwk"
         ),
         .executableTarget(
             name: "kwwk-generate-models",
-            dependencies: ["KWWKGenerateModelsCore"],
+            dependencies: [
+                "KWWKGenerateModelsCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateModels"
         ),
         .executableTarget(
             name: "kwwk-generate-cursor-models",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateCursorModels"
         ),
         .executableTarget(
             name: "kwwk-generate-devin-models",
-            dependencies: ["KWWKAI"],
+            dependencies: [
+                "KWWKAI",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Scripts/GenerateDevinModels"
         ),
         .testTarget(
@@ -149,6 +169,11 @@ let package = Package(
             name: "KWWKCliTests",
             dependencies: ["KWWKCli", "KWWKAgent", "KWWKAI"],
             path: "Tests/KWWKCliTests"
+        ),
+        .testTarget(
+            name: "kwwkTests",
+            dependencies: ["kwwk"],
+            path: "Tests/kwwkTests"
         ),
     ],
     swiftLanguageModes: [.v6]

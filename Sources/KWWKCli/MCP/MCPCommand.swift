@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import KWWKAI
 import KWWKMCP
@@ -81,35 +82,142 @@ struct MCPConfigEditor {
 }
 
 enum MCPCommand {
-    static let usage = """
-    usage: kwwk mcp <command>
+    /// `kwwk mcp`'s command tree. Declarations only: `run` parses one and
+    /// hands it to `Context`.
+    struct Root: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "kwwk mcp",
+            abstract: "Manage MCP servers.",
+            subcommands: [Add.self, AddJSON.self, List.self, Get.self, Remove.self, Login.self, Logout.self]
+        )
+    }
 
-      add [options] <name> <url>              add a Streamable HTTP server
-      add [options] <name> -- <command> [args...]
-                                              add a stdio server
-      add-json [--scope <scope>] <name> <json>
-                                              add a server from its mcp.json entry
-      list                                    list servers and check each one
-      get <name>                              show a server's configuration
-      remove [--scope <scope>] <name>         remove a server (and its sign-in)
-      login [--no-browser] [--callback-port <port>] <name>
-                                              sign in to an OAuth server
-      logout <name>                           forget a server's sign-in
+    struct Add: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Add a Streamable HTTP server (<name> <url>) or a stdio server (<name> -- <command> [args...])."
+        )
 
-    add options:
-      -t, --transport <stdio|http>   default: http for a URL, else stdio
-      -s, --scope <user|project>     user: ~/.kwwk/mcp.json (default)
-                                     project: .kwwk/mcp.json in this directory
-      -e, --env KEY=value            environment of a stdio server (repeatable)
-      -H, --header "Name: value"     header of an HTTP server (repeatable)
-      --description <text>           one line telling the model what it offers
-      --client-id <id>               pre-registered OAuth client
-      --client-secret <secret>
-      --client-name <name>           client_name for dynamic registration
-      --oauth-scope <scopes>         OAuth scope to request
-      --callback-port <port>         fixed OAuth callback port
-      --no-oauth                     never use OAuth for this server
-    """
+        @Option(name: .shortAndLong, help: "stdio or http (default: http for a URL, else stdio).")
+        var transport: String?
+
+        @Option(name: .shortAndLong, help: scopeHelp, transform: MCPCommand.scope)
+        var scope: MCPConfigScope = .user
+
+        @Option(
+            name: .shortAndLong,
+            help: ArgumentHelp("Environment of a stdio server (repeatable).", valueName: "KEY=value")
+        )
+        var env: [String] = []
+
+        @Option(
+            name: [.customShort("H"), .long],
+            help: ArgumentHelp("Header of an HTTP server (repeatable).", valueName: "Name: value")
+        )
+        var header: [String] = []
+
+        @Option(name: .customLong("description"), help: "One line telling the model what the server offers.")
+        var serverDescription: String?
+
+        @Option(help: "Pre-registered OAuth client.")
+        var clientId: String?
+
+        @Option(help: "Secret of the pre-registered OAuth client.")
+        var clientSecret: String?
+
+        @Option(help: "client_name for dynamic registration.")
+        var clientName: String?
+
+        @Option(help: "OAuth scope to request.")
+        var oauthScope: String?
+
+        @Option(help: "Fixed OAuth callback port.")
+        var callbackPort: Int?
+
+        @Flag(name: .customLong("no-oauth"), help: "Never use OAuth for this server.")
+        var noOAuth = false
+
+        @Argument(help: "Server name.")
+        var name: String
+
+        @Argument(help: "The server's URL, or after -- a stdio server's command and its arguments.")
+        var target: [String] = []
+
+        func validate() throws {
+            if let callbackPort, !(1...65_535).contains(callbackPort) {
+                throw ValidationError("--callback-port needs a port number")
+            }
+        }
+    }
+
+    struct AddJSON: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Add a server from its mcp.json entry.")
+
+        @Option(name: .shortAndLong, help: scopeHelp, transform: MCPCommand.scope)
+        var scope: MCPConfigScope = .user
+
+        @Argument(help: "Server name.")
+        var name: String
+
+        @Argument(help: "The server's mcp.json entry.")
+        var json: String
+    }
+
+    struct List: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List servers and check each one.")
+    }
+
+    struct Get: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Show a server's configuration.")
+
+        @Argument(help: "Server name.")
+        var name: String
+    }
+
+    struct Remove: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Remove a server (and its sign-in).",
+            aliases: ["rm"]
+        )
+
+        @Option(name: .shortAndLong, help: "user or project (default: both).", transform: MCPCommand.scope)
+        var scope: MCPConfigScope?
+
+        @Argument(help: "Server name.")
+        var name: String
+    }
+
+    struct Login: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Sign in to an OAuth server.")
+
+        @Flag(name: .customLong("no-browser"), help: "Print the sign-in URL instead of opening a browser.")
+        var noBrowser = false
+
+        @Option(help: "Fixed OAuth callback port.")
+        var callbackPort: UInt16?
+
+        @Argument(help: "Server name.")
+        var name: String
+
+        func validate() throws {
+            if callbackPort == 0 { throw ValidationError("--callback-port needs a port number") }
+        }
+    }
+
+    struct Logout: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Forget a server's sign-in.")
+
+        @Argument(help: "Server name.")
+        var name: String
+    }
+
+    static let scopeHelp: ArgumentHelp = "user: ~/.kwwk/mcp.json (default); project: .kwwk/mcp.json in this directory."
+
+    static func scope(_ value: String) throws -> MCPConfigScope {
+        guard let scope = MCPConfigScope(rawValue: value) else {
+            throw ValidationError("--scope must be user or project")
+        }
+        return scope
+    }
 
     static func run(
         _ arguments: [String],
@@ -118,34 +226,48 @@ enum MCPCommand {
         environment: [String: String],
         io: MCPCommandIO
     ) async -> Int32 {
-        guard let command = arguments.first else {
-            io.out(usage)
-            return 0
+        var command: ParsableCommand
+        do {
+            command = try Root.parseAsRoot(arguments)
+        } catch {
+            return usage(error, io: io)
         }
-        let rest = Array(arguments.dropFirst())
         let context = Context(cwd: cwd, homeDirectory: homeDirectory, environment: environment, io: io)
+        let name = type(of: command)._commandName
         do {
             switch command {
-            case "add": try context.add(rest)
-            case "add-json": try context.addJSON(rest)
-            case "list": await context.list()
-            case "get": try await context.get(rest)
-            case "remove", "rm": try await context.remove(rest)
-            case "login": try await context.login(rest)
-            case "logout": try await context.logout(rest)
-            case "-h", "--help", "help": io.out(usage)
+            case let add as Add: try context.add(add)
+            case let add as AddJSON: try context.addJSON(add)
+            case is List: await context.list()
+            case let get as Get: try await context.get(get.name)
+            case let remove as Remove: try await context.remove(remove.name, scope: remove.scope)
+            case let login as Login:
+                try await context.login(login.name, openBrowser: !login.noBrowser, port: login.callbackPort)
+            case let logout as Logout: try await context.logout(logout.name)
             default:
-                io.err("kwwk mcp: unknown command '\(command)'\n\n\(usage)")
-                return 2
+                // `kwwk mcp`, `--help` and `help <command>`: their run throws
+                // the help request.
+                do { try command.run() } catch { return usage(error, io: io) }
             }
             return 0
         } catch let error as UsageError {
-            io.err("kwwk mcp \(command): \(error.message)")
+            io.err("kwwk mcp \(name): \(error.message)")
             return 2
         } catch {
-            io.err("kwwk mcp \(command): \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
+            io.err("kwwk mcp \(name): \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
             return 1
         }
+    }
+
+    /// Help goes to stdout with exit 0; a parse error to stderr with exit 2.
+    private static func usage(_ error: Error, io: MCPCommandIO) -> Int32 {
+        let text = Root.fullMessage(for: error)
+        guard Root.exitCode(for: error) == .success else {
+            io.err(text)
+            return 2
+        }
+        io.out(text)
+        return 0
     }
 
     struct UsageError: Error {
@@ -173,95 +295,59 @@ enum MCPCommand {
 
         // MARK: add
 
-        func add(_ arguments: [String]) throws {
-            var options = AddOptions()
-            var positional: [String] = []
-            var command: [String]?
-            var index = 0
-            func value(_ flag: String) throws -> String {
-                index += 1
-                guard index < arguments.count else { throw UsageError(message: "\(flag) needs a value") }
-                return arguments[index]
-            }
-            while index < arguments.count {
-                var argument = arguments[index]
-                var inline: String?
-                if argument.hasPrefix("--"), let equals = argument.firstIndex(of: "=") {
-                    inline = String(argument[argument.index(after: equals)...])
-                    argument = String(argument[..<equals])
+        func add(_ add: Add) throws {
+            var env: [String: String] = [:]
+            for pair in add.env {
+                guard let equals = pair.firstIndex(of: "="), equals != pair.startIndex else {
+                    throw UsageError(message: "--env needs KEY=value, got \(pair)")
                 }
-                func next() throws -> String { if let inline { return inline }; return try value(argument) }
-                switch argument {
-                case "--":
-                    command = Array(arguments[(index + 1)...])
-                    index = arguments.count
-                    continue
-                case "-t", "--transport": options.transport = try next()
-                case "-s", "--scope": options.scope = try Self.scope(try next())
-                case "-e", "--env":
-                    let pair = try next()
-                    guard let equals = pair.firstIndex(of: "="), equals != pair.startIndex else {
-                        throw UsageError(message: "--env needs KEY=value, got \(pair)")
-                    }
-                    options.env[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
-                case "-H", "--header":
-                    let header = try next()
-                    guard let colon = header.firstIndex(of: ":"), colon != header.startIndex else {
-                        throw UsageError(message: "--header needs \"Name: value\", got \(header)")
-                    }
-                    options.headers[String(header[..<colon]).trimmingCharacters(in: .whitespaces)] =
-                        String(header[header.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-                case "--description": options.description = try next()
-                case "--client-id": options.oauth["clientId"] = .string(try next())
-                case "--client-secret": options.oauth["clientSecret"] = .string(try next())
-                case "--client-name": options.oauth["clientName"] = .string(try next())
-                case "--oauth-scope": options.oauth["scope"] = .string(try next())
-                case "--callback-port":
-                    guard let port = Int(try next()), (1...65_535).contains(port) else {
-                        throw UsageError(message: "--callback-port needs a port number")
-                    }
-                    options.oauth["callbackPort"] = .int(port)
-                case "--no-oauth": options.noOAuth = true
-                default:
-                    if argument.hasPrefix("-") && argument.count > 1 {
-                        throw UsageError(message: "unknown option \(argument)")
-                    }
-                    positional.append(argument)
+                env[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
+            }
+            var headers: [String: String] = [:]
+            for header in add.header {
+                guard let colon = header.firstIndex(of: ":"), colon != header.startIndex else {
+                    throw UsageError(message: "--header needs \"Name: value\", got \(header)")
                 }
-                index += 1
+                headers[String(header[..<colon]).trimmingCharacters(in: .whitespaces)] =
+                    String(header[header.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             }
-            guard let name = positional.first else {
-                throw UsageError(message: "missing server name\n\n\(MCPCommand.usage)")
-            }
-            let target = command ?? Array(positional.dropFirst())
+            var oauth: [String: JSONValue] = [:]
+            if let clientId = add.clientId { oauth["clientId"] = .string(clientId) }
+            if let clientSecret = add.clientSecret { oauth["clientSecret"] = .string(clientSecret) }
+            if let clientName = add.clientName { oauth["clientName"] = .string(clientName) }
+            if let scope = add.oauthScope { oauth["scope"] = .string(scope) }
+            if let port = add.callbackPort { oauth["callbackPort"] = .int(port) }
+
+            let name = add.name
+            let target = add.target
             guard !target.isEmpty else { throw UsageError(message: "missing URL or -- command for \(name)") }
             let isURL = target.count == 1
                 && ["http", "https"].contains(URL(string: target[0])?.scheme?.lowercased() ?? "")
-            let transport = options.transport ?? (isURL && command == nil ? "http" : "stdio")
+            let transport = add.transport ?? (isURL ? "http" : "stdio")
 
             var entry: [String: JSONValue] = [:]
             switch transport {
             case "http", "streamable-http":
                 guard target.count == 1 else { throw UsageError(message: "an HTTP server takes exactly one URL") }
-                guard options.env.isEmpty else { throw UsageError(message: "--env applies to stdio servers") }
+                guard env.isEmpty else { throw UsageError(message: "--env applies to stdio servers") }
                 entry["type"] = "http"
                 entry["url"] = .string(target[0])
-                if !options.headers.isEmpty { entry["headers"] = .object(options.headers.mapValues { .string($0) }) }
-                if options.noOAuth {
-                    guard options.oauth.isEmpty else {
+                if !headers.isEmpty { entry["headers"] = .object(headers.mapValues { .string($0) }) }
+                if add.noOAuth {
+                    guard oauth.isEmpty else {
                         throw UsageError(message: "--no-oauth conflicts with OAuth options")
                     }
                     entry["oauth"] = .bool(false)
-                } else if !options.oauth.isEmpty {
-                    entry["oauth"] = .object(options.oauth)
+                } else if !oauth.isEmpty {
+                    entry["oauth"] = .object(oauth)
                 }
             case "stdio":
-                guard options.headers.isEmpty, options.oauth.isEmpty, !options.noOAuth else {
+                guard headers.isEmpty, oauth.isEmpty, !add.noOAuth else {
                     throw UsageError(message: "--header and OAuth options apply to HTTP servers")
                 }
                 entry["command"] = .string(target[0])
                 if target.count > 1 { entry["args"] = .array(target.dropFirst().map { .string($0) }) }
-                if !options.env.isEmpty { entry["env"] = .object(options.env.mapValues { .string($0) }) }
+                if !env.isEmpty { entry["env"] = .object(env.mapValues { .string($0) }) }
             case "sse":
                 throw UsageError(
                     message: "the legacy SSE transport is not supported; use the server's Streamable HTTP URL"
@@ -269,35 +355,18 @@ enum MCPCommand {
             default:
                 throw UsageError(message: "--transport must be stdio or http")
             }
-            if let description = options.description { entry["description"] = .string(description) }
-            try write(name: name, entry: .object(entry), scope: options.scope)
+            if let description = add.serverDescription { entry["description"] = .string(description) }
+            try write(name: name, entry: .object(entry), scope: add.scope)
         }
 
-        func addJSON(_ arguments: [String]) throws {
-            var scope = MCPConfigScope.user
-            var positional: [String] = []
-            var index = 0
-            while index < arguments.count {
-                switch arguments[index] {
-                case "-s", "--scope":
-                    index += 1
-                    guard index < arguments.count else { throw UsageError(message: "--scope needs a value") }
-                    scope = try Self.scope(arguments[index])
-                default:
-                    positional.append(arguments[index])
-                }
-                index += 1
-            }
-            guard positional.count == 2 else {
-                throw UsageError(message: "usage: kwwk mcp add-json [--scope <scope>] <name> <json>")
-            }
+        func addJSON(_ add: AddJSON) throws {
             let entry: JSONValue
             do {
-                entry = try JSONDecoder().decode(JSONValue.self, from: Data(positional[1].utf8))
+                entry = try JSONDecoder().decode(JSONValue.self, from: Data(add.json.utf8))
             } catch {
                 throw UsageError(message: "invalid JSON")
             }
-            try write(name: positional[0], entry: entry, scope: scope)
+            try write(name: add.name, entry: entry, scope: add.scope)
         }
 
         private func write(name: String, entry: JSONValue, scope: MCPConfigScope) throws {
@@ -320,13 +389,6 @@ enum MCPCommand {
             if scope == .project && !trustsProject {
                 io.out("Project servers load only with \(MCPRuntime.allowProjectServersVariable)=1.")
             }
-        }
-
-        static func scope(_ value: String) throws -> MCPConfigScope {
-            guard let scope = MCPConfigScope(rawValue: value) else {
-                throw UsageError(message: "--scope must be user or project")
-            }
-            return scope
         }
 
         // MARK: list / get
@@ -383,10 +445,7 @@ enum MCPCommand {
             }
         }
 
-        func get(_ arguments: [String]) async throws {
-            guard arguments.count == 1, let name = arguments.first else {
-                throw UsageError(message: "usage: kwwk mcp get <name>")
-            }
+        func get(_ name: String) async throws {
             var found = false
             for scope in MCPConfigScope.allCases {
                 guard let raw = try editor(scope).servers()[name] else { continue }
@@ -452,24 +511,7 @@ enum MCPCommand {
 
         // MARK: remove
 
-        func remove(_ arguments: [String]) async throws {
-            var scope: MCPConfigScope?
-            var positional: [String] = []
-            var index = 0
-            while index < arguments.count {
-                switch arguments[index] {
-                case "-s", "--scope":
-                    index += 1
-                    guard index < arguments.count else { throw UsageError(message: "--scope needs a value") }
-                    scope = try Self.scope(arguments[index])
-                default:
-                    positional.append(arguments[index])
-                }
-                index += 1
-            }
-            guard positional.count == 1, let name = positional.first else {
-                throw UsageError(message: "usage: kwwk mcp remove [--scope <scope>] <name>")
-            }
+        func remove(_ name: String, scope: MCPConfigScope?) async throws {
             var removed: [MCPConfigScope] = []
             for candidate in scope.map({ [$0] }) ?? MCPConfigScope.allCases where try editor(candidate).remove(name) {
                 removed.append(candidate)
@@ -488,27 +530,7 @@ enum MCPCommand {
 
         // MARK: login / logout
 
-        func login(_ arguments: [String]) async throws {
-            var openBrowser = true
-            var port: UInt16?
-            var positional: [String] = []
-            var index = 0
-            while index < arguments.count {
-                switch arguments[index] {
-                case "--no-browser": openBrowser = false
-                case "--callback-port":
-                    index += 1
-                    guard index < arguments.count, let value = UInt16(arguments[index]), value > 0 else {
-                        throw UsageError(message: "--callback-port needs a port number")
-                    }
-                    port = value
-                default: positional.append(arguments[index])
-                }
-                index += 1
-            }
-            guard positional.count == 1, let name = positional.first else {
-                throw UsageError(message: "usage: kwwk mcp login [--no-browser] [--callback-port <port>] <name>")
-            }
+        func login(_ name: String, openBrowser: Bool, port: UInt16?) async throws {
             let (provider, store) = try oauthProvider(name, port: port)
             await store.remember(port: provider.callbackPort, server: name)
             io.out("Signing in to \(name)…")
@@ -516,10 +538,7 @@ enum MCPCommand {
             io.out("Signed in to \(name).")
         }
 
-        func logout(_ arguments: [String]) async throws {
-            guard arguments.count == 1, let name = arguments.first else {
-                throw UsageError(message: "usage: kwwk mcp logout <name>")
-            }
+        func logout(_ name: String) async throws {
             _ = try oauthProvider(name, port: nil)
             try await MCPOAuthFileStore(url: MCPOAuthFileStore.defaultURL(homeDirectory: homeDirectory))
                 .remove(server: name)
@@ -553,16 +572,6 @@ enum MCPCommand {
                 store
             )
         }
-    }
-
-    struct AddOptions {
-        var transport: String?
-        var scope: MCPConfigScope = .user
-        var env: [String: String] = [:]
-        var headers: [String: String] = [:]
-        var description: String?
-        var oauth: [String: JSONValue] = [:]
-        var noOAuth = false
     }
 }
 
