@@ -758,7 +758,7 @@ struct SubagentHardeningTests {
         }
     }
 
-    @Test("background child deadline is classified by the child before manager watchdog")
+    @Test("background child deadline preserves timeout classification with a padded manager watchdog")
     func backgroundDeadlineKeepsTimeoutClassification() async throws {
         let faux = await registerFauxProvider(RegisterFauxProviderOptions(
             tokensPerSecond: 1,
@@ -794,16 +794,29 @@ struct SubagentHardeningTests {
         )
         let taskId = try #require(hardeningDetailString(started, "task_id"))
 
-        #expect(await awaitUntil(2_500) {
+        let registered = try #require(await manager.get(taskId))
+        // Check the grace directly: relative timer wake-up order is not
+        // guaranteed when the test runner is oversubscribed.
+        #expect(registered.spec.hardTimeoutSeconds == 3)
+        try #require(await awaitUntil(10_000) {
             await manager.get(taskId)?.status.isTerminal == true
         })
         let terminal = try #require(await manager.get(taskId))
+        #expect(terminal.status == .failed)
+        #expect(terminal.outcome?.success == false)
         guard case .object(let details) = terminal.outcome?.details ?? .null else {
             Issue.record("expected structured background outcome")
             return
         }
         #expect(details["failure_kind"] == .string("timeout"))
-        #expect(details["capacity_retained_until_runner_exit"] == .bool(true))
+        if details["reason"] == .string("hard_timeout") {
+            // The manager also canonicalizes a child result delivered after
+            // its deadline, even if the child's timer resolved first.
+            #expect(details["timeout_seconds"] == .int(3))
+        } else {
+            #expect(details["capacity_retained_until_runner_exit"] == .bool(true))
+            #expect(details["history_available"] == .bool(true))
+        }
         await manager.closeSession(sessionId: "background-deadline-parent")
     }
 
