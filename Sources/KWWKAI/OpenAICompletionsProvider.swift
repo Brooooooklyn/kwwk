@@ -95,10 +95,13 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
     ) async {
         let url = urlBuilder(model, options, defaultBaseURL)
 
+        let strictKey = ToolStrictRefusal.key(api: api, provider: model.provider, url: url)
+        var root: [String: Any] = [:]
         let body: Data
         do {
-            var root = try Self.encodeBodyDict(model: model, context: context, options: options)
+            root = try Self.encodeBodyDict(model: model, context: context, options: options)
             bodyDecorator?(&root, model, context, options)
+            if ToolStrictRefusal.isRefused(strictKey) { ToolStrictRefusal.strip(&root) }
             body = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
         } catch {
             let msg = Self.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
@@ -149,10 +152,25 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
         for (k, v) in options?.headers ?? [:] { headers[k] = v }
 
         do {
-            let (response, stream) = try await client.stream(
+            var (response, stream) = try await client.stream(
                 url: url, method: "POST", headers: headers, body: body,
                 cancellation: options?.cancellation
             )
+            // An upstream that refuses the tools' `strict` is asked once
+            // more without it, and remembered (magpie #1980).
+            var withoutStrict = root
+            if response.statusCode == 400, ToolStrictRefusal.strip(&withoutStrict) {
+                let (text, replay) = await ToolStrictRefusal.readErrorBody(stream)
+                stream = replay
+                if ToolStrictRefusal.isRefusal(text) {
+                    ToolStrictRefusal.remember(strictKey)
+                    (response, stream) = try await client.stream(
+                        url: url, method: "POST", headers: headers,
+                        body: try JSONSerialization.data(withJSONObject: withoutStrict, options: [.sortedKeys]),
+                        cancellation: options?.cancellation
+                    )
+                }
+            }
             if response.statusCode >= 400 {
                 let failure = await ProviderFailure.http(response, body: stream)
                 let msg = Self.makeError(api: api, model: model, text: failure.message, failure: failure)
