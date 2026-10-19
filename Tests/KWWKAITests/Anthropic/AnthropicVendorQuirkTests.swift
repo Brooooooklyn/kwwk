@@ -155,4 +155,39 @@ struct AnthropicVendorQuirkTests {
         #expect(toolCalls(message).map(\.name) == ["bash"])
         #expect(toolCalls(message).first?.arguments == ["command": "date"])
     }
+    /// A relay that puts only the first keys on the block start and streams
+    /// the rest. Seen in production as `bot_send_card` receiving only `action`.
+    @Test("a tool_use whose start carries part of its input keeps the streamed rest", arguments: [
+        // The whole input streamed again.
+        #"{\"action\":\"send\",\"channel_id\":\"proj.x\",\"card\":{\"type\":\"task\"}}"#,
+        // Only the remaining keys, as an object.
+        #"{\"channel_id\":\"proj.x\",\"card\":{\"type\":\"task\"}}"#,
+        // The start's object continued.
+        #",\"channel_id\":\"proj.x\",\"card\":{\"type\":\"task\"}}"#,
+    ])
+    func partialInputOnBlockStart(streamed: String) async {
+        let message = await reply("""
+        event: message_start
+        data: {"type":"message_start","message":{"id":"msg","role":"assistant","content":[],"model":"kimi","usage":{"input_tokens":1,"output_tokens":0}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"bot_send_card","input":{"action":"send"}}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\(streamed)"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """)
+        #expect(toolCalls(message).first?.arguments == [
+            "action": "send", "channel_id": "proj.x", "card": ["type": "task"],
+        ])
+    }
 }
