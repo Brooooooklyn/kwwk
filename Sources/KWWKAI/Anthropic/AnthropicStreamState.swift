@@ -28,8 +28,11 @@ final class AnthropicStreamState: @unchecked Sendable {
     private struct State {
         var blocks: [Int: Block] = [:]
         var orderedIndices: [Int] = []
-        /// tool_use blocks whose `content_block_start` carried the whole input.
-        var wholeInputIndices: Set<Int> = []
+        /// The non-empty input a tool_use block's `content_block_start`
+        /// carried. Some relays send the whole input there and no delta after;
+        /// others send only the first keys there and stream the rest as
+        /// input_json_delta, so deltas are still collected and merged at the end.
+        var startInputs: [Int: [String: JSONValue]] = [:]
     }
     private let state = NIOLockedValueBox(State())
 
@@ -144,15 +147,13 @@ final class AnthropicStreamState: @unchecked Sendable {
                 }()
                 // Anthropic starts a tool_use with `"input": {}` and streams the
                 // arguments as input_json_delta. Some Anthropic-shaped relays
-                // send the whole input here and no delta after (magpie
-                // c5b57b90); without this the call ran with `{}`.
-                var json = ""
-                if case .object(let input) = raw["input"] ?? .null, !input.isEmpty,
-                   let data = try? JSONEncoder().encode(JSONValue.object(input)) {
-                    json = String(decoding: data, as: UTF8.self)
-                    state.wholeInputIndices.insert(index)
+                // put input here: all of it with no delta after (magpie
+                // c5b57b90), or only its first keys with the rest streamed.
+                // Keep it aside; `toolArguments` merges it with the deltas.
+                if case .object(let input) = raw["input"] ?? .null, !input.isEmpty {
+                    state.startInputs[index] = input
                 }
-                state.blocks[index] = .toolUse(id: id, name: name, json: json)
+                state.blocks[index] = .toolUse(id: id, name: name, json: "")
             default: break
             }
         }
@@ -192,17 +193,35 @@ final class AnthropicStreamState: @unchecked Sendable {
         }
     }
 
-    /// False when the block's start already carried its whole input: a
-    /// delta after that would be appended to complete JSON and break it.
-    @discardableResult
-    func appendToolJSON(index: Int, chunk: String) -> Bool {
+    func appendToolJSON(index: Int, chunk: String) {
         state.withLockedValue { state in
-            guard !state.wholeInputIndices.contains(index) else { return false }
             if case .toolUse(let id, let name, let json) = state.blocks[index] {
                 state.blocks[index] = .toolUse(id: id, name: name, json: json + chunk)
             }
-            return true
         }
+    }
+
+    /// A finished tool call's arguments. With no input on the block start this
+    /// is just the streamed JSON. With one, the streamed JSON may repeat the
+    /// whole input, carry only the remaining keys as an object, or continue
+    /// the start's object (`,"k":"v"}`); each is merged over the start's keys,
+    /// the streamed value winning. Nothing streamed leaves the start's input.
+    private static func toolArguments(json: String, start: [String: JSONValue]?) -> JSONValue {
+        guard let start else { return parseJSONObject(json) ?? .object([:]) }
+        let streamed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !streamed.isEmpty else { return .object(start) }
+        var candidates = [streamed]
+        if let data = try? JSONEncoder().encode(JSONValue.object(start)) {
+            let head = String(decoding: data, as: UTF8.self).dropLast() // drop "}"
+            candidates.append(head + streamed)
+            candidates.append(head + "," + streamed)
+        }
+        for candidate in candidates {
+            if case .object(let rest)? = parseJSONObject(candidate) {
+                return .object(start.merging(rest) { _, new in new })
+            }
+        }
+        return .object(start)
     }
 
     enum Finalized { case text(String); case thinking(String); case toolCall(ToolCall); case none }
@@ -215,7 +234,8 @@ final class AnthropicStreamState: @unchecked Sendable {
             case .text(let t): return .text(t.text)
             case .thinking(let th): return .thinking(th.thinking)
             case .toolUse(let id, let name, let json):
-                let call = ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
+                let arguments = Self.toolArguments(json: json, start: state.startInputs[index])
+                let call = ToolCall(id: id, name: name, arguments: arguments)
                 state.blocks[index] = .toolUse(id: id, name: name, json: json)
                 return .toolCall(call)
             }
@@ -238,7 +258,9 @@ final class AnthropicStreamState: @unchecked Sendable {
                 case .text(let t): content.append(.text(t))
                 case .thinking(let th): content.append(.thinking(th))
                 case .toolUse(let id, let name, let json):
-                    let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
+                    let args: JSONValue = parseToolArgs
+                        ? Self.toolArguments(json: json, start: state.startInputs[i])
+                        : .object([:])
                     content.append(.toolCall(ToolCall(id: id, name: name, arguments: args)))
                 }
             }

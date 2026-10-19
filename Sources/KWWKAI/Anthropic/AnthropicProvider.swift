@@ -388,8 +388,8 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                             state.appendSignature(index: index, signature: sig)
                         }
                     case "input_json_delta":
-                        if case .string(let partial) = delta["partial_json"] ?? .null,
-                           state.appendToolJSON(index: index, chunk: partial) {
+                        if case .string(let partial) = delta["partial_json"] ?? .null {
+                            state.appendToolJSON(index: index, chunk: partial)
                             out.push(.toolCallDelta(
                                 contentIndex: state.contentIndex(for: index),
                                 delta: partial,
