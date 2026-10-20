@@ -197,6 +197,139 @@ struct AgentRetryTests {
             Issue.record("expected the credential failure to surface immediately")
         }
     }
+
+    @Test("a main agent whose stream is interrupted after partial text retries from scratch")
+    func mainAgentReplaysInterruptedPartialOutput() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+        registration.setResponses([
+            .message(fauxAssistantMessage(
+                "half an answer",
+                stopReason: .error,
+                errorMessage: "Upstream response stream was interrupted"
+            )),
+            .message(fauxAssistantMessage("done")),
+        ])
+
+        let agent = Agent(initialState: AgentInitialState(model: registration.getModel()))
+        agent.retryBaseDelayMs = 5
+        let recorder = RetryEventRecorder()
+        let rewinds = RetryEventRecorder()
+        _ = agent.subscribe { event, _ in
+            switch event {
+            case .streamRetry(let attempt, let delayMs, let reason):
+                await recorder.record(attempt: attempt, delayMs: delayMs, reason: reason)
+            case .streamRewind:
+                await rewinds.record(attempt: 0, delayMs: 0, reason: "rewind")
+            default:
+                break
+            }
+        }
+
+        try await agent.prompt("hi")
+
+        let entries = await recorder.snapshot()
+        #expect(entries.count == 1)
+        #expect(entries.first?.reason.contains("interrupted") == true)
+        #expect(await rewinds.snapshot().count == 1)
+        // The interrupted attempt is discarded, not kept beside the answer.
+        #expect(agent.state.messages.count == 2)
+        if case .assistant(let msg) = agent.state.messages.last {
+            #expect(msg.stopReason == .stop)
+            let text = msg.content.compactMap { b -> String? in
+                if case .text(let t) = b { return t.text } else { return nil }
+            }.joined()
+            #expect(text == "done")
+        } else {
+            Issue.record("expected the replayed answer")
+        }
+    }
+
+    @Test("output already on an irreversible sink is not replayed")
+    func irreversibleSinkKeepsPartialOutputFinal() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+        registration.setResponses([
+            .message(fauxAssistantMessage(
+                "half an answer",
+                stopReason: .error,
+                errorMessage: "Upstream response stream was interrupted"
+            )),
+            .message(fauxAssistantMessage("never reached")),
+        ])
+
+        var options = AgentOptions(
+            initialState: AgentInitialState(model: registration.getModel())
+        )
+        options.streamsToIrreversibleSink = true
+        let agent = Agent(options: options)
+        agent.retryBaseDelayMs = 5
+        let recorder = RetryEventRecorder()
+        _ = agent.subscribe { event, _ in
+            if case .streamRetry(let attempt, let delayMs, let reason) = event {
+                await recorder.record(attempt: attempt, delayMs: delayMs, reason: reason)
+            }
+        }
+
+        try await agent.prompt("hi")
+
+        #expect(await recorder.snapshot().isEmpty)
+        if case .assistant(let msg) = agent.state.messages.last {
+            #expect(msg.stopReason == .error)
+        } else {
+            Issue.record("expected the interrupted attempt to surface")
+        }
+    }
+
+    @Test("an irreversible sink still retries a thinking-only or empty attempt")
+    func irreversibleSinkRetriesWhenNothingStreamed() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+        registration.setResponses([
+            .message(fauxAssistantMessage(
+                "",
+                stopReason: .error,
+                errorMessage: "Upstream response stream was interrupted"
+            )),
+            .message(fauxAssistantMessage("done")),
+        ])
+
+        let agent = Agent(initialState: AgentInitialState(model: registration.getModel()))
+        agent.streamsToIrreversibleSink = true
+        agent.retryBaseDelayMs = 5
+        try await agent.prompt("hi")
+        if case .assistant(let msg) = agent.state.messages.last {
+            #expect(msg.stopReason == .stop)
+        } else {
+            Issue.record("expected the retried answer")
+        }
+    }
+
+    @Test("partial output followed by a permanent error is not retried")
+    func permanentErrorAfterPartialOutputIsFinal() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+        registration.setResponses([
+            .message(fauxAssistantMessage(
+                "half an answer",
+                stopReason: .error,
+                errorMessage: "HTTP 400: invalid request body"
+            )),
+            .message(fauxAssistantMessage("never reached")),
+        ])
+
+        let agent = Agent(initialState: AgentInitialState(model: registration.getModel()))
+        agent.retryBaseDelayMs = 5
+        let recorder = RetryEventRecorder()
+        _ = agent.subscribe { event, _ in
+            if case .streamRetry(let attempt, let delayMs, let reason) = event {
+                await recorder.record(attempt: attempt, delayMs: delayMs, reason: reason)
+            }
+        }
+
+        try await agent.prompt("hi")
+        #expect(await recorder.snapshot().isEmpty)
+    }
 }
 
 

@@ -55,6 +55,7 @@ public final class Agent: Sendable {
         var compactionModel: Model?
         var authResolver: (@Sendable (Model, String?) async throws -> ResolvedProviderAuth?)?
         var retryBaseDelayMs: UInt64 = 1_000
+        var streamsToIrreversibleSink = false
     }
 
     private let lockedState: NIOLockedValueBox<LockedState>
@@ -161,6 +162,17 @@ public final class Agent: Sendable {
         set { lockedState.withLockedValue { $0.retryBaseDelayMs = newValue } }
     }
 
+    /// Whether a subscriber writes streamed assistant output somewhere it
+    /// cannot take back (e.g. `kwwk -p` printing text deltas to stdout).
+    /// While false (the default), a provider failure that left no side effect
+    /// is retried from scratch even after text or tool-call blocks streamed:
+    /// the partial attempt is discarded with `streamRewind`. While true, such
+    /// an attempt is final, as streamed output is treated as delivered.
+    public var streamsToIrreversibleSink: Bool {
+        get { lockedState.withLockedValue { $0.streamsToIrreversibleSink } }
+        set { lockedState.withLockedValue { $0.streamsToIrreversibleSink = newValue } }
+    }
+
     private let steeringQueue: PendingMessageQueue
     private let followUpQueue: PendingMessageQueue
     /// Machine-generated context (background completions, runtime notices).
@@ -223,7 +235,8 @@ public final class Agent: Sendable {
             autoCompact: options.autoCompact,
             idleCompact: options.idleCompact,
             compactionModel: options.compactionModel,
-            authResolver: options.authResolver
+            authResolver: options.authResolver,
+            streamsToIrreversibleSink: options.streamsToIrreversibleSink
         ))
         self.finalTextOnlyOnLastTurn = options.finalTextOnlyOnLastTurn
         self.terminalToolName = options.terminalToolName
@@ -639,6 +652,7 @@ extension Agent {
         config.finalTextOnlyOnLastTurn = finalTextOnlyOnLastTurn
         config.terminalToolName = terminalToolName
         config.terminalToolReminderLimit = terminalToolReminderLimit
+        config.streamsToIrreversibleSink = streamsToIrreversibleSink
         return config
     }
 

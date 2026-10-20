@@ -465,6 +465,64 @@ struct SubagentToolTests {
         #expect(summary?.subagents.first?.errorMessage == "agent: child blew up")
     }
 
+    @Test("a child whose stream is interrupted after partial text retries and completes")
+    func childRetriesInterruptedStreamAfterPartialText() async throws {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        faux.setResponses([
+            .message(fauxAssistantMessage(
+                blocks: [
+                    fauxToolCall(
+                        name: "agent",
+                        arguments: .object([
+                            "description": .string("interrupted child"),
+                            "prompt": .string("answer from child"),
+                            "subagent_type": .string("mini"),
+                        ]),
+                        id: "agent-1"
+                    ),
+                ],
+                stopReason: .toolUse
+            )),
+            // The child's first attempt streams text, then the stream breaks.
+            .message(fauxAssistantMessage(
+                "half an answer",
+                stopReason: .error,
+                errorMessage: "Upstream response stream was interrupted"
+            )),
+            .message(subagentYieldMessage("child answer after retry")),
+            .message(fauxAssistantMessage("parent done")),
+        ])
+
+        let tool = createAgentTool(
+            cwd: FileManager.default.currentDirectoryPath,
+            subagents: [minimalSubagent()],
+            parentModel: faux.getModel(),
+            parentTools: .readOnly,
+            bashEnvironment: testBashEnvironment
+        )
+        let agent = Agent(initialState: AgentInitialState(
+            model: faux.getModel(),
+            tools: [tool]
+        ))
+
+        try await agent.prompt("delegate")
+
+        let toolResult = agent.state.messages.compactMap { message -> ToolResultMessage? in
+            if case .toolResult(let result) = message, result.toolName == "agent" {
+                return result
+            }
+            return nil
+        }.first
+        let unwrapped = try #require(toolResult)
+        #expect(!unwrapped.isError)
+        let text = unwrapped.content.compactMap { block -> String? in
+            if case .text(let t) = block { return t.text }
+            return nil
+        }.joined()
+        #expect(text.contains("child answer after retry"))
+    }
+
     @Test("subagents that may mutate inherit the parent's deferred tools; read-only ones do not")
     func inheritsToolCatalog() async throws {
         let faux = await registerFauxProvider()

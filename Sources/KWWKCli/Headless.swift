@@ -149,7 +149,12 @@ func runHeadlessInternal(
 func makeHeadlessCodingAgent(_ input: CodingAgentConfig) async -> Agent {
     var config = input
     config.backgroundAutoContinue = false
-    return await makeCodingAgent(config).agent
+    let agent = await makeCodingAgent(config).agent
+    // `runHeadlessInternal` writes text deltas straight to stdout, which
+    // cannot be taken back: an attempt that already streamed output is not
+    // replayed after a provider failure (thinking-only attempts still are).
+    agent.streamsToIrreversibleSink = true
+    return agent
 }
 
 /// Deterministic one-shot teardown for both success and failure paths. This is
