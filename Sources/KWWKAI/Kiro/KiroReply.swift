@@ -288,7 +288,11 @@ struct KiroReply {
     private mutating func endTool(emit: (AssistantMessageEvent) -> Void) {
         guard let current = tool, case .toolCall(var call) = blocks[current.index] else { return }
         tool = nil
-        call.arguments = (try? JSONDecoder().decode(JSONValue.self, from: Data(current.arguments.utf8))) ?? .object([:])
+        // An object input followed by string pieces reads as the object
+        // with the pieces' keys merged in (`StreamedToolArguments`).
+        let decoded = StreamedToolArguments.decode(current.arguments)
+        call.arguments = decoded.arguments
+        call.unparsedArguments = decoded.unparsed
         blocks[current.index] = .toolCall(call)
         emit(.toolCallEnd(contentIndex: current.index, toolCall: call, partial: snapshot()))
     }

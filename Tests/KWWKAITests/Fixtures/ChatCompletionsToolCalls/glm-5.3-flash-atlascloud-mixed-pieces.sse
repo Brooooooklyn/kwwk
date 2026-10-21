@@ -1,0 +1,36 @@
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"Send","reasoning_details":[{"type":"reasoning.text","text":"Send","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" the","reasoning_details":[{"type":"reasoning.text","text":" the","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"id":"chatcmpl-tool-a37643fa5c3b439e","type":"function","function":{"name":"bot_send_card","arguments":""}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"{\"action\": \"send"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"\", \"card\": "}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"{\"body\": \"Build 1.4.2 has been successfully compiled and passed all quality checks, making it ready for distribution. This release includes the latest performance improvements and bug fixes for the iOS app. The build is now available on TestFlight for internal testers, and detailed release notes can be found in the changelog.\", \"buttons\": [{\"label\": \"TestFlight\", \"url\": \"https://testflight.apple.com/join/ABC123\"}, {\"label\": \"Changelog\", \"url\": \"https://example.com/changelog/1.4.2\"}], \"fields\": [{\"name\": \"Version\", \"value\": \"1.4.2\"}, {\"name\": \"Build\", \"value\": \"87\"}, {\"name\": \"Platform\", \"value\": \"iOS\"}], \"title\": \"Build 1.4.2 ready\"}, \"channel_id\": \"ch_"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"8f3a"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"9d2e"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"-71b4"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"-4c55"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"-9e0"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"a-2d"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"6f1c"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"3b7a"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"90\"}"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","system_fingerprint":"vllm-0.30.0-tp4-dp2-ep-e6a7c49e","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}]}
+
+data: {"id":"gen-1792557316-aqC4B5wBSnZRAm7SvU1U","object":"chat.completion.chunk","created":1792557316,"model":"z-ai/glm-5.3-flash","provider":"AtlasCloud","system_fingerprint":"vllm-0.30.0-tp4-dp2-ep-e6a7c49e","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}],"usage":{"prompt_tokens":438,"completion_tokens":239,"total_tokens":677,"cost":0.0001852,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0001852,"upstream_inference_prompt_cost":0.0000657,"upstream_inference_completions_cost":0.0001195},"completion_tokens_details":{"reasoning_tokens":6,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+

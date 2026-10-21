@@ -81,11 +81,28 @@ final class OpenAIResponsesState: @unchecked Sendable {
                   case .toolUse(let currentId, let currentName, let currentJSON) = state.blocks[index]
             else { return }
             state.blocks[index] = .toolUse(
-                id: callId ?? currentId,
-                name: name ?? currentName,
-                json: arguments ?? currentJSON
+                id: callId.flatMap { $0.isEmpty ? nil : $0 } ?? currentId,
+                name: name.flatMap { $0.isEmpty ? nil : $0 } ?? currentName,
+                json: Self.settledArguments(streamed: currentJSON, done: arguments)
             )
         }
+    }
+
+    /// The arguments a finished function call keeps. `output_item.done`
+    /// normally repeats the streamed arguments whole; a relay's can carry
+    /// nothing, only some of them, or the rest. An empty or unreadable one
+    /// leaves what was streamed, one where the stream was unreadable
+    /// replaces it, and with both readable the done keys are laid over the
+    /// streamed ones so neither loses a key.
+    static func settledArguments(streamed: String, done: String?) -> String {
+        guard let done, !done.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let doneObject = StreamedToolArguments.object(done) else { return streamed }
+        guard let streamedObject = StreamedToolArguments.object(streamed), !streamedObject.isEmpty else {
+            return done
+        }
+        let merged = streamedObject.merging(doneObject) { _, new in new }
+        guard let data = try? JSONEncoder().encode(JSONValue.object(merged)) else { return done }
+        return String(decoding: data, as: UTF8.self)
     }
 
     func textIndex(for outputIndex: Int) -> Int? {
@@ -155,7 +172,8 @@ final class OpenAIResponsesState: @unchecked Sendable {
     func toolCallValue(at index: Int) -> ToolCall? {
         state.withLockedValue { state in
             guard case .toolUse(let id, let name, let json) = state.blocks[index] else { return nil }
-            return ToolCall(id: id, name: name, arguments: parseJSONObject(json) ?? .object([:]))
+            let decoded = StreamedToolArguments.decode(json)
+            return ToolCall(id: id, name: name, arguments: decoded.arguments, unparsedArguments: decoded.unparsed)
         }
     }
 
@@ -196,8 +214,15 @@ final class OpenAIResponsesState: @unchecked Sendable {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json):
-                        let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
-                        return .toolCall(ToolCall(id: id, name: name, arguments: args))
+                        let decoded: (arguments: JSONValue, unparsed: String?) = parseToolArgs
+                            ? StreamedToolArguments.decode(json)
+                            : (.object([:]), nil)
+                        return .toolCall(ToolCall(
+                            id: id,
+                            name: name,
+                            arguments: decoded.arguments,
+                            unparsedArguments: decoded.unparsed
+                        ))
                     case .none: return nil
                     }
                 },

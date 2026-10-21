@@ -1636,6 +1636,13 @@ public enum AgentLoop {
         guard let tool = context.tools.first(where: { $0.name == toolCall.name }) else {
             return .immediate(errorToolResult("Tool \(toolCall.name) not found"), true)
         }
+        // The stream broke the call's arguments up (a provider's tool-call
+        // parser splitting one call into several, say). Running it on what
+        // could be kept would act on arguments the model never meant and
+        // answer with a misleading "is required".
+        if let unparsed = toolCall.unparsedArguments {
+            return .immediate(errorToolResult(unparsedArgumentsMessage(unparsed)), true)
+        }
         let kwwkaiTool = tool.toKWWKAITool()
         var normalizedCall = toolCall
         normalizedCall.arguments = tool.normalizingBlankOptionalArguments(toolCall.arguments)
@@ -1685,6 +1692,14 @@ public enum AgentLoop {
             }
         }
         return .prepared(PreparedToolCall(call: toolCall, tool: tool, args: effectiveArgs))
+    }
+
+    static func unparsedArgumentsMessage(_ unparsed: String) -> String {
+        let limit = 2_000
+        let shown = unparsed.count > limit ? String(unparsed.prefix(limit)) + "…" : unparsed
+        return "This call was not run: its arguments did not arrive as one valid JSON object "
+            + "(the stream from the model provider was malformed). Received: \(shown)\n"
+            + "Call the tool again with all of its arguments."
     }
 
     private static func schemaValidationMessage(_ error: Error) -> String {

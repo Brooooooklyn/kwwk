@@ -227,6 +227,24 @@ struct KiroReplyTests {
         #expect(ended == ["tooluse_1", "tooluse_2"])
     }
 
+    @Test("An object input and string pieces after it are merged into one call")
+    func objectInputThenPieces() async throws {
+        let (message, _) = await turn(KiroStubClient(
+            kiroEvent("toolUseEvent", #"{"name":"send","toolUseId":"t1","input":{"action":"send"}}"#),
+            kiroEvent("toolUseEvent", #"{"name":"send","toolUseId":"t1","input":",\"channel_id\":\"ch_1\"}"}"#),
+            kiroEvent("toolUseEvent", #"{"name":"send","toolUseId":"t2","input":{"action":"send"}}"#),
+            kiroEvent("toolUseEvent", #"{"name":"send","toolUseId":"t2","input":"{\"channel_id\":\"ch_2\"}"}"#),
+            kiroEvent("toolUseEvent", #"{"name":"send","toolUseId":"t3","input":"{\"chan"}"#)
+        ))
+        let calls = message.content.compactMap { if case .toolCall(let c) = $0 { return c } else { return nil } }
+        #expect(calls.map(\.arguments) == [
+            .object(["action": "send", "channel_id": "ch_1"]),
+            .object(["action": "send", "channel_id": "ch_2"]),
+            .object([:]),
+        ])
+        #expect(calls.map(\.unparsedArguments) == [nil, nil, #"{"chan"#])
+    }
+
     @Test("With no token counts, the input is how full Kiro says the context is")
     func usageFromContextPercentage() async throws {
         let (message, _) = await turn(KiroStubClient(
