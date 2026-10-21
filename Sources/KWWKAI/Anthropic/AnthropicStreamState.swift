@@ -206,22 +206,16 @@ final class AnthropicStreamState: @unchecked Sendable {
     /// whole input, carry only the remaining keys as an object, or continue
     /// the start's object (`,"k":"v"}`); each is merged over the start's keys,
     /// the streamed value winning. Nothing streamed leaves the start's input.
-    private static func toolArguments(json: String, start: [String: JSONValue]?) -> JSONValue {
-        guard let start else { return parseJSONObject(json) ?? .object([:]) }
-        let streamed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !streamed.isEmpty else { return .object(start) }
-        var candidates = [streamed]
-        if let data = try? JSONEncoder().encode(JSONValue.object(start)) {
-            let head = String(decoding: data, as: UTF8.self).dropLast() // drop "}"
-            candidates.append(head + streamed)
-            candidates.append(head + "," + streamed)
+    /// Streamed text that reads as none of these is handed back as unparsed.
+    private static func toolArguments(
+        json: String,
+        start: [String: JSONValue]?
+    ) -> (arguments: JSONValue, unparsed: String?) {
+        guard let start else { return StreamedToolArguments.decode(json) }
+        if let merged = StreamedToolArguments.merging(start: start, streamed: json) {
+            return (.object(merged), nil)
         }
-        for candidate in candidates {
-            if case .object(let rest)? = parseJSONObject(candidate) {
-                return .object(start.merging(rest) { _, new in new })
-            }
-        }
-        return .object(start)
+        return (.object(start), json)
     }
 
     enum Finalized { case text(String); case thinking(String); case toolCall(ToolCall); case none }
@@ -234,8 +228,13 @@ final class AnthropicStreamState: @unchecked Sendable {
             case .text(let t): return .text(t.text)
             case .thinking(let th): return .thinking(th.thinking)
             case .toolUse(let id, let name, let json):
-                let arguments = Self.toolArguments(json: json, start: state.startInputs[index])
-                let call = ToolCall(id: id, name: name, arguments: arguments)
+                let decoded = Self.toolArguments(json: json, start: state.startInputs[index])
+                let call = ToolCall(
+                    id: id,
+                    name: name,
+                    arguments: decoded.arguments,
+                    unparsedArguments: decoded.unparsed
+                )
                 state.blocks[index] = .toolUse(id: id, name: name, json: json)
                 return .toolCall(call)
             }
@@ -258,10 +257,15 @@ final class AnthropicStreamState: @unchecked Sendable {
                 case .text(let t): content.append(.text(t))
                 case .thinking(let th): content.append(.thinking(th))
                 case .toolUse(let id, let name, let json):
-                    let args: JSONValue = parseToolArgs
+                    let decoded: (arguments: JSONValue, unparsed: String?) = parseToolArgs
                         ? Self.toolArguments(json: json, start: state.startInputs[i])
-                        : .object([:])
-                    content.append(.toolCall(ToolCall(id: id, name: name, arguments: args)))
+                        : (.object([:]), nil)
+                    content.append(.toolCall(ToolCall(
+                        id: id,
+                        name: name,
+                        arguments: decoded.arguments,
+                        unparsedArguments: decoded.unparsed
+                    )))
                 }
             }
             return AssistantMessage(

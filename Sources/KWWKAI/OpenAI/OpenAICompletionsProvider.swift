@@ -291,7 +291,10 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                 // WorkBuddy repeats `"function": {"name": ""}` on every
                 // argument fragment after the first (magpie chattidy.go), so
                 // an empty id or name says nothing and never replaces the
-                // real one.
+                // real one. A fragment naming no function never opens a call
+                // while one is open, whatever id or index it carries; and
+                // arguments that close and then go on are merged when the
+                // call ends (`StreamedToolArguments`).
                 if case .array(let toolCalls) = delta["tool_calls"] ?? .null {
                     for (position, entry) in toolCalls.enumerated() {
                         guard case .object(let call) = entry else { continue }
@@ -303,7 +306,15 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                             if case .string(let id) = call["id"] ?? .null, !id.isEmpty { return id }
                             return nil
                         }()
-                        let (contentIndex, firstSeen) = state.noteToolCallBlock(at: rawIndex, id: id)
+                        let function: [String: JSONValue]? = {
+                            if case .object(let function) = call["function"] ?? .null { return function }
+                            return nil
+                        }()
+                        let name: String? = {
+                            if case .string(let name) = function?["name"] ?? .null, !name.isEmpty { return name }
+                            return nil
+                        }()
+                        let (contentIndex, firstSeen) = state.noteToolCallBlock(at: rawIndex, id: id, name: name)
                         if !emittedStart {
                             out.push(.start(partial: state.snapshot()))
                             emittedStart = true
@@ -311,8 +322,8 @@ public final class OpenAICompletionsProvider: APIProvider, @unchecked Sendable {
                         if let id {
                             state.updateToolCallID(rawIndex: rawIndex, id: id)
                         }
-                        if case .object(let function) = call["function"] ?? .null {
-                            if case .string(let name) = function["name"] ?? .null, !name.isEmpty {
+                        if let function {
+                            if let name {
                                 state.updateToolCallName(rawIndex: rawIndex, name: name)
                             }
                             if firstSeen {

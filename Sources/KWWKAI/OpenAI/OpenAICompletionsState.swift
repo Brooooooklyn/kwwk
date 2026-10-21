@@ -28,6 +28,8 @@ final class OpenAICompletionsState: @unchecked Sendable {
         var thinkingBlockIndex: Int?
         /// Map from OpenAI `tool_calls[i].index` → our content index.
         var toolCallIndexMap: [Int: Int] = [:]
+        /// The content index of the call opened last.
+        var lastToolCallIndex: Int?
         /// Map from a settled tool-call `id` → our content index. Used to attach
         /// encrypted reasoning details, which arrive keyed by tool-call id.
         var toolCallContentIndexById: [String: Int] = [:]
@@ -68,18 +70,38 @@ final class OpenAICompletionsState: @unchecked Sendable {
         }
     }
 
-    /// The content block a tool-call fragment at `rawIndex` belongs to. A
-    /// fragment naming an id other than the one the index's open call goes
-    /// by is the next call, not more of this one; a fragment with no id, or
-    /// repeating the open call's, continues it.
-    func noteToolCallBlock(at rawIndex: Int, id: String? = nil) -> (index: Int, firstSeen: Bool) {
+    /// The content block a tool-call fragment at `rawIndex` belongs to.
+    ///
+    /// A fragment that names the function starts the next call when it
+    /// names an id other than the one the index's open call goes by (magpie
+    /// #395, parallel calls all sent at index 0) or a different function;
+    /// otherwise it continues the open call.
+    ///
+    /// A fragment that names no function never starts a call while one is
+    /// open: it is more of the call at its index, or, at an index no call
+    /// has used, more of the last call. Some relays put a fresh id or index
+    /// on each piece of one call's arguments, and read as new calls those
+    /// pieces ran as calls of their own, the first with only its first key.
+    func noteToolCallBlock(
+        at rawIndex: Int,
+        id: String? = nil,
+        name: String? = nil
+    ) -> (index: Int, firstSeen: Bool) {
         state.withLockedValue { state in
             if let idx = state.toolCallIndexMap[rawIndex] {
-                guard let id, case .toolUse(let openID, _, _, _) = state.blocks[idx],
-                      !openID.isEmpty, openID != id else { return (idx, false) }
+                guard let name, case .toolUse(let openID, let openName, _, _) = state.blocks[idx] else {
+                    return (idx, false)
+                }
+                let otherID = id.map { !openID.isEmpty && openID != $0 } ?? false
+                let otherName = !openName.isEmpty && openName != name
+                if !otherID && !otherName { return (idx, false) }
+            } else if name == nil, let last = state.lastToolCallIndex {
+                state.toolCallIndexMap[rawIndex] = last
+                return (last, false)
             }
             let idx = state.order.count
             state.toolCallIndexMap[rawIndex] = idx
+            state.lastToolCallIndex = idx
             state.order.append(idx)
             state.blocks[idx] = .toolUse(id: "", name: "", json: "", thoughtSignature: nil)
             return (idx, true)
@@ -116,7 +138,9 @@ final class OpenAICompletionsState: @unchecked Sendable {
     func updateToolCallID(rawIndex: Int, id: String) {
         state.withLockedValue { state in
             guard let contentIndex = state.toolCallIndexMap[rawIndex] else { return }
-            if case .toolUse(_, let name, let json, let sig) = state.blocks[contentIndex] {
+            if case .toolUse(let openID, let name, let json, let sig) = state.blocks[contentIndex] {
+                // A piece of this call sent under another id keeps the first.
+                guard openID.isEmpty || openID == id else { return }
                 var newSig = sig
                 if let pending = state.pendingReasoningById.removeValue(forKey: id) { newSig = pending }
                 state.blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: newSig)
@@ -128,7 +152,7 @@ final class OpenAICompletionsState: @unchecked Sendable {
     func updateToolCallName(rawIndex: Int, name: String) {
         state.withLockedValue { state in
             guard let contentIndex = state.toolCallIndexMap[rawIndex] else { return }
-            if case .toolUse(let id, _, let json, let sig) = state.blocks[contentIndex] {
+            if case .toolUse(let id, let openName, let json, let sig) = state.blocks[contentIndex], openName.isEmpty {
                 state.blocks[contentIndex] = .toolUse(id: id, name: name, json: json, thoughtSignature: sig)
             }
         }
@@ -220,8 +244,16 @@ final class OpenAICompletionsState: @unchecked Sendable {
                     case .text(let t): return .text(t)
                     case .thinking(let th): return .thinking(th)
                     case .toolUse(let id, let name, let json, let sig):
-                        let args: JSONValue = parseToolArgs ? parseJSONObject(json) ?? .object([:]) : .object([:])
-                        return .toolCall(ToolCall(id: id, name: name, arguments: args, thoughtSignature: sig))
+                        let decoded: (arguments: JSONValue, unparsed: String?) = parseToolArgs
+                            ? StreamedToolArguments.decode(json)
+                            : (.object([:]), nil)
+                        return .toolCall(ToolCall(
+                            id: id,
+                            name: name,
+                            arguments: decoded.arguments,
+                            thoughtSignature: sig,
+                            unparsedArguments: decoded.unparsed
+                        ))
                     case .none: return nil
                     }
                 },
@@ -251,11 +283,13 @@ final class OpenAICompletionsState: @unchecked Sendable {
             case .thinking(let th):
                 emit(.thinkingEnd(contentIndex: idx, content: th.thinking, partial: partial))
             case .toolUse(let id, let name, let json, let sig):
+                let decoded = StreamedToolArguments.decode(json)
                 let call = ToolCall(
                     id: id,
                     name: name,
-                    arguments: parseJSONObject(json) ?? .object([:]),
-                    thoughtSignature: sig
+                    arguments: decoded.arguments,
+                    thoughtSignature: sig,
+                    unparsedArguments: decoded.unparsed
                 )
                 emit(.toolCallEnd(contentIndex: idx, toolCall: call, partial: partial))
             }

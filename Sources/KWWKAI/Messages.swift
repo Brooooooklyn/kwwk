@@ -58,18 +58,26 @@ public struct ToolCall: Codable, Sendable, Hashable {
     /// server-driven exec channel. The agent loop must not run it again; the
     /// paired tool result arrives out-of-band via `CursorExecBridge.execute`.
     public var cursorExecResolved: Bool?
+    /// The arguments text as the stream gave it, set only when it did not
+    /// read as a JSON object (a provider's tool-call parser breaking up the
+    /// model's call, say); `arguments` is then what could be kept, often
+    /// `{}`. The agent loop answers such a call with an error instead of
+    /// running it on arguments the model never meant.
+    public var unparsedArguments: String?
     public init(
         id: String,
         name: String,
         arguments: JSONValue,
         thoughtSignature: String? = nil,
-        cursorExecResolved: Bool? = nil
+        cursorExecResolved: Bool? = nil,
+        unparsedArguments: String? = nil
     ) {
         self.id = id
         self.name = name
         self.arguments = arguments
         self.thoughtSignature = thoughtSignature
         self.cursorExecResolved = cursorExecResolved
+        self.unparsedArguments = unparsedArguments
     }
 }
 
