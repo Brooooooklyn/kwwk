@@ -1,10 +1,24 @@
 {
   "$note": "kwwk's corrections to pi-mono's catalog, laid over it by kwwk-generate-models. Objects merge key by key, other values replace, null removes. Say why and when beside each group.",
   "kimi-coding": {
-    "$note": "Kimi's coding endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k is priced, not free.",
+    "$note": "kwwk speaks Anthropic Messages to Kimi's coding endpoint (registerKimiCoding pins anthropic-messages), so the Chat Completions wire pi-mono moved kimi-coding to on 2026-10-15 is held back here: base URL without /v1, Anthropic compat, no Chat Completions flags. That endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k is priced, not free.",
     "k3-256k": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
       "compat": {
-        "allowEmptySignature": true
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
       },
       "cost": {
         "input": 3,
@@ -13,8 +27,51 @@
       }
     },
     "kimi-for-coding-highspeed": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
       "compat": {
-        "allowEmptySignature": true
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "thinkingLevelMap": null
+    },
+    "k3": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
+      "compat": {
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    },
+    "kimi-for-coding": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
+      "compat": {
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
       }
     }
   },
