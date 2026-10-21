@@ -261,7 +261,9 @@ private func registerCodex(
         originator: "kwwk"
     ), scope: "chatgpt-codex")
 
-    let modelId = modelOverride ?? "gpt-5.5"
+    // Codex refuses gpt-5.5 for a ChatGPT account ("not supported when using
+    // Codex with a ChatGPT account"); gpt-6.1-sol is the default it serves.
+    let modelId = modelOverride ?? "gpt-6.1-sol"
     let catalogEntry = ModelsCatalog.model(provider: "openai-codex", id: modelId)
     let model = Model(
         id: modelId,

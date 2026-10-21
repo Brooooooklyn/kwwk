@@ -88,6 +88,35 @@ struct GenerateModelsCoreTests {
         #expect((root["google"] as? [String: Any])?.count == 1)
     }
 
+    @Test("An override marked $replace stands in whole, its nulls kept")
+    func replacingOverride() throws {
+        let raw = """
+        export const MODELS = {
+          "kimi-coding": {
+            "k3": {
+              id: "k3",
+              compat: {
+                thinkingFormat: "openai",
+                supportsStore: false,
+              },
+            },
+          },
+        } as const;
+        """
+        let overrides = Data(#"""
+        {"kimi-coding": {"k3": {
+          "compat": {"$replace": true, "allowEmptySignature": true},
+          "thinkingLevelMap": {"$replace": true, "high": "high", "off": null}}}}
+        """#.utf8)
+        let root = try GenerateModelsCore.generate(from: raw, overrides: overrides).root
+        let k3 = try #require((root["kimi-coding"] as? [String: Any])?["k3"] as? [String: Any])
+        let compat = try #require(k3["compat"] as? [String: Any])
+        #expect(compat.keys.sorted() == ["allowEmptySignature"])
+        let map = try #require(k3["thinkingLevelMap"] as? [String: Any])
+        #expect(map.keys.sorted() == ["high", "off"])
+        #expect(map["off"] is NSNull)
+    }
+
     @Test("The checked-in overrides are what the bundled catalog carries")
     func bundledCatalogCarriesOverrides() throws {
         let repo = URL(fileURLWithPath: #filePath)

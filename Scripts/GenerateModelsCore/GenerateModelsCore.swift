@@ -27,7 +27,10 @@ public enum GenerateModelsCore {
     ///
     /// An object merges into the one under it, key by key; any other value
     /// replaces; `null` takes the key — or the model, or the provider — out.
-    /// A key beginning with `$` is a note to the reader and is dropped.
+    /// An object marked `"$replace": true` stands in whole for the one under
+    /// it instead, its nulls kept as values (a `thinkingLevelMap` that turns a
+    /// level off). A key beginning with `$` is a note to the reader and is
+    /// dropped.
     static func applying(overrides: Data, to root: [String: Any]) throws -> [String: Any] {
         guard let patch = try JSONSerialization.jsonObject(with: overrides) as? [String: Any] else {
             throw GenerateModelsCoreError.conversion("overrides are not a JSON object")
@@ -40,6 +43,8 @@ public enum GenerateModelsCore {
         for (key, value) in patch where !key.hasPrefix("$") {
             if value is NSNull {
                 out[key] = nil
+            } else if let object = value as? [String: Any], object["$replace"] as? Bool == true {
+                out[key] = object.filter { !$0.key.hasPrefix("$") }
             } else if let object = value as? [String: Any] {
                 out[key] = merge(object, into: out[key] as? [String: Any] ?? [:])
             } else {
