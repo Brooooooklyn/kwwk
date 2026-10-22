@@ -117,6 +117,9 @@ public struct AgentOptions: Sendable {
     public var maxRetryDelayMs: Int?
     /// Hard cap on assistant turns per run. Nil = unlimited.
     public var maxTurns: Int?
+    /// See `Agent.streamsToIrreversibleSink`. Default false: a failed attempt
+    /// with no side effect is retried even after it streamed partial output.
+    public var streamsToIrreversibleSink = false
     /// Subagent-only lifecycle policy. Kept internal so the public Agent SDK's
     /// maxTurns contract remains a strict hard stop by default.
     var finalTextOnlyOnLastTurn = false

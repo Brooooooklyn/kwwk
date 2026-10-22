@@ -734,7 +734,25 @@ public enum AgentLoop {
             )
 
             var emittedStart = false
-            var replayUnsafe = false
+            // Whether this attempt streamed visible output (non-blank text
+            // or tool-call blocks), as opposed to thinking only.
+            var streamedOutput = false
+            // A failed attempt may be discarded and asked again exactly when
+            // it has had no side effect. Streamed text, thinking and tool-call
+            // blocks are not side effects by themselves: tools only run after
+            // the assistant message settles, nothing is persisted before
+            // `messageEnd`, and `streamRewind` tells live renderers to drop the
+            // partial. The side effects are:
+            //   (a) a tool already invoked during the stream (Cursor's inline
+            //       exec) — `hasInvokedTools`, re-checked atomically by
+            //       `preventInvocationsForReplay` before replaying a settled
+            //       error;
+            //   (b) output already written to a sink that cannot take it back
+            //       (`streamsToIrreversibleSink`, e.g. `kwwk -p` on stdout).
+            func hadSideEffect(streamedOutput: Bool) -> Bool {
+                if inlineAttempt.hasInvokedTools { return true }
+                return config.streamsToIrreversibleSink && streamedOutput
+            }
             do {
                 let response = try await streamFn(requestModel, llmContext, options)
 
@@ -749,7 +767,7 @@ public enum AgentLoop {
                 for await event in response {
                     switch event {
                     case .start(let partial):
-                        replayUnsafe = replayUnsafe || partial.hasReplayUnsafeContent
+                        streamedOutput = streamedOutput || partial.hasReplayUnsafeContent
                         if !emittedStart {
                             await emit(.messageStart(message: .assistant(partial)))
                             emittedStart = true
@@ -765,7 +783,7 @@ public enum AgentLoop {
                          .toolCallStart(_, let partial),
                          .toolCallDelta(_, _, let partial),
                          .toolCallEnd(_, _, let partial):
-                        replayUnsafe = replayUnsafe || partial.hasReplayUnsafeContent
+                        streamedOutput = streamedOutput || partial.hasReplayUnsafeContent
                         if !emittedStart {
                             await emit(.messageStart(message: .assistant(partial)))
                             emittedStart = true
@@ -792,7 +810,7 @@ public enum AgentLoop {
                 }
 
                 if final.stopReason == .error,
-                   !replayUnsafe, !final.hasReplayUnsafeContent,
+                   !hadSideEffect(streamedOutput: streamedOutput || final.hasReplayUnsafeContent),
                    let failure = final.providerFailure,
                    let rejection = rejectedCredential(failure),
                    try await renewRejectedCredential(rejection),
@@ -809,10 +827,10 @@ public enum AgentLoop {
                     continue
                 }
 
-                // Retry only before output/tool effects are committed. Close
-                // the inline invocation gate atomically with the safety check.
+                // Retry whenever no side effect has happened. Close the
+                // inline invocation gate atomically with the safety check.
                 if final.stopReason == .error,
-                   !replayUnsafe, !final.hasReplayUnsafeContent,
+                   !hadSideEffect(streamedOutput: streamedOutput || final.hasReplayUnsafeContent),
                    let failure = final.providerFailure,
                    let delayMs = retryPolicy.delay(for: failure, attempt: attemptIndex, jitter: .random(in: 0.75...1)),
                    inlineAttempt.preventInvocationsForReplay() {
@@ -879,22 +897,28 @@ public enum AgentLoop {
                         emittedStart: emittedStart
                     )
                 }
-                if !replayUnsafe, !inlineAttempt.hasInvokedTools,
+                if !hadSideEffect(streamedOutput: streamedOutput),
                    let rejection = rejectedCredential(.capture(error)) {
                     let discarded = cursorResults.drain()
                     turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
                     if try await renewRejectedCredential(rejection) {
                         turnToolState.resetPollGateForRetry()
+                        if emittedStart {
+                            await emit(.streamRewind)
+                        }
                         await emit(.streamRetry(attempt: attemptIndex, delayMs: 0, reason: credentialRetryReason))
                         continue
                     }
                     throw error
                 }
-                if !replayUnsafe, !inlineAttempt.hasInvokedTools,
+                if !hadSideEffect(streamedOutput: streamedOutput),
                    let delayMs = retryPolicy.delay(for: .capture(error), attempt: attemptIndex, jitter: .random(in: 0.75...1)) {
                     let discarded = cursorResults.drain()
                     turnToolState.rollbackLeases(for: discarded.map(\.toolCallId))
                     turnToolState.resetPollGateForRetry()
+                    if emittedStart {
+                        await emit(.streamRewind)
+                    }
                     await emit(.streamRetry(attempt: attemptIndex, delayMs: delayMs, reason: reason))
                     try await waitForRetryDelay(delayMs, cancellation: cancellation)
                     continue

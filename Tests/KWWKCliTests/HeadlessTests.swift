@@ -6,6 +6,33 @@ import Testing
 
 @Suite("Headless background policy", .serialized)
 struct HeadlessTests {
+    @Test("headless stdout is an irreversible sink; other agents are not")
+    func headlessMarksStdoutIrreversible() async throws {
+        let faux = await registerFauxProvider()
+        defer { faux.unregister() }
+        let cwd = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kwwk-headless-sink-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cwd) }
+        let config = CodingAgentConfig(
+            model: faux.getModel(),
+            cwd: cwd.path,
+            tools: .readOnly,
+            sessionId: "headless-sink",
+            autoCompactThreshold: nil,
+            bashEnvironment: [:]
+        )
+        let headless = await makeHeadlessCodingAgent(config)
+        #expect(headless.streamsToIrreversibleSink)
+        await cleanupHeadlessAgent(headless)
+
+        var interactiveConfig = config
+        interactiveConfig.sessionId = "interactive-sink"
+        let interactive = await makeCodingAgent(interactiveConfig).agent
+        #expect(!interactive.streamsToIrreversibleSink)
+        await interactive.closeSession()
+    }
+
     @Test("headless preserves reusable background-default subagents")
     func headlessPreservesDefinitionDefault() async throws {
         let faux = await registerFauxProvider()

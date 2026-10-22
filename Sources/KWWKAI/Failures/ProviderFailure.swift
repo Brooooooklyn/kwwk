@@ -353,7 +353,14 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             "you can retry your request", "please retry your request", "try your request again", "exceeded request buffer limit"].contains(where: text.contains) { return .server }
         if ["network", "connection", "disconnect", "econnreset", "enotconn", "epipe", "broken pipe", "reset by peer",
             "socket closed", "socket error", "socket hang up", "other side closed", "reset before headers", "http2 request did not get a response", "closed before", "closed unexpectedly", "stream stall", "fetch failed",
-            "enotfound", "eai_again", "getaddrinfo", "ended without", "stream ended before", "terminated"].contains(where: text.contains) { return .transport }
+            "enotfound", "eai_again", "getaddrinfo", "ended without", "stream ended before", "terminated",
+            // Gateway / proxy stream drops (pi retry.ts:55-63, omp
+            // error/flags.ts STREAM_DROP_PATTERN). OpenRouter's mid-stream
+            // error chunk reads "Upstream response stream was interrupted".
+            "stream was interrupted", "stream interrupted", "upstream_stream_read_error",
+            "unable to forward upstream", "upstream request failed", "upstream_request_failed",
+            "http/2 stream failed", "http2 stream failed", "stream disconnected before completion",
+            "pending stream has been canceled"].contains(where: text.contains) { return .transport }
         return .unknown
     }
 

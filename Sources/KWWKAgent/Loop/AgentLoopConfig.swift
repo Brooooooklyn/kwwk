@@ -31,6 +31,11 @@ public struct AgentLoopConfig: Sendable {
     /// completed delegated task.
     var terminalToolName: String?
     var terminalToolReminderLimit: Int = 0
+    /// Streamed assistant output reaches a sink that cannot take it back, so an
+    /// attempt that streamed text or tool-call blocks counts as having a side
+    /// effect and is not retried. Default false: such output is discarded with
+    /// `streamRewind` and the attempt is retried within the provider budget.
+    public var streamsToIrreversibleSink: Bool = false
     // Base delay for exponential backoff between stream retries. Prod
     // defaults to 1_000 ms; tests override to something small.
     public var retryBaseDelayMs: UInt64

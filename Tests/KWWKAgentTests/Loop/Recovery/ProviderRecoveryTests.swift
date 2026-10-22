@@ -13,13 +13,28 @@ struct ProviderRecoveryTests {
         maxTokens: 1_000
     )
 
-    @Test("committed text and tool calls are never automatically replayed", arguments: [false, true])
-    func preventsUnsafeReplay(tool: Bool) async throws {
-        let attempts = RecoveryAttempts()
+    /// A stream that streams `committed output` (or a tool call), then fails
+    /// with a retryable transport error; succeeds on `succeedOnAttempt`.
+    private func partialThenFailAgent(
+        tool: Bool,
+        attempts: RecoveryAttempts,
+        succeedOnAttempt: Int? = nil
+    ) -> Agent {
         let model = model
-        let agent = Agent(initialState: .init(model: model), streamFn: { _, _, _ in
-            await attempts.record()
+        return Agent(initialState: .init(model: model), streamFn: { _, _, _ in
+            let attempt = await attempts.record()
             let pair = AssistantMessageStream.makeStream()
+            if attempt == succeedOnAttempt {
+                let done = AssistantMessage(
+                    content: [.text(TextContent(text: "recovered"))],
+                    api: model.api, provider: model.provider, model: model.id,
+                    stopReason: .stop
+                )
+                pair.continuation.push(.start(partial: done))
+                pair.continuation.push(.done(reason: .stop, message: done))
+                pair.continuation.end(done)
+                return pair.stream
+            }
             let block: AssistantBlock = tool
                 ? .toolCall(ToolCall(id: "call", name: "write", arguments: .object([:])))
                 : .text(TextContent(text: "committed output"))
@@ -37,7 +52,34 @@ struct ProviderRecoveryTests {
             pair.continuation.end(failure)
             return pair.stream
         })
+    }
+
+    @Test("streamed text and un-executed tool calls are not side effects: the turn is replayed", arguments: [false, true])
+    func replaysPartialOutputWithoutSideEffects(tool: Bool) async throws {
+        let attempts = RecoveryAttempts()
+        let agent = partialThenFailAgent(tool: tool, attempts: attempts, succeedOnAttempt: 2)
         agent.retryBaseDelayMs = 0
+        let rewinds = RecoveryAttempts()
+        _ = agent.subscribe { event, _ in
+            if case .streamRewind = event { await rewinds.record() }
+        }
+        try await agent.prompt("go")
+        #expect(await attempts.count == 2)
+        #expect(await rewinds.count == 1)
+        let assistants = agent.state.messages.compactMap { message -> AssistantMessage? in
+            if case .assistant(let assistant) = message { return assistant }; return nil
+        }
+        // The failed attempt is discarded, never kept beside the answer.
+        #expect(assistants.count == 1)
+        #expect(assistants.last?.stopReason == .stop)
+    }
+
+    @Test("output streamed to an irreversible sink is never automatically replayed", arguments: [false, true])
+    func preventsReplayAfterIrreversibleOutput(tool: Bool) async throws {
+        let attempts = RecoveryAttempts()
+        let agent = partialThenFailAgent(tool: tool, attempts: attempts, succeedOnAttempt: 2)
+        agent.retryBaseDelayMs = 0
+        agent.streamsToIrreversibleSink = true
         try await agent.prompt("go")
         #expect(await attempts.count == 1)
         let final = try #require(agent.state.messages.compactMap { message -> AssistantMessage? in

@@ -22,6 +22,29 @@ struct ProviderContextClassificationTests {
         #expect(!ProviderContextLimit.isInputOverflow(message))
         #expect(ProviderFailure(message: message).isRetryable)
     }
+    @Test("an interrupted upstream stream is a retryable transport failure")
+    func interruptedUpstreamStreamIsTransport() {
+        let bare = ProviderFailure(message: "Upstream response stream was interrupted")
+        #expect(bare.category == .transport)
+        #expect(bare.isRetryable)
+        // OpenRouter's mid-stream error chunk, with or without a code.
+        let chunk = ProviderFailure.payload(.object([
+            "error": .object(["message": .string("Upstream response stream was interrupted")]),
+        ]))
+        #expect(chunk.isRetryable)
+        for text in [
+            "upstream_stream_read_error: read failed",
+            "Unable to forward upstream stream",
+            "upstream_error: Upstream request failed",
+            "Upstream HTTP/2 stream failed",
+            "stream disconnected before completion",
+            "Anthropic stream ended without message_stop",
+            "The pending stream has been canceled",
+        ] {
+            #expect(ProviderFailure(message: text).category == .transport, "\(text)")
+        }
+    }
+
     @Test("overflow phrases are not treated as transient transport failures")
     func overflowClassificationPrecedesRetry() {
         #expect(ProviderContextLimit.isInputOverflow("context_length_exceeded"))
