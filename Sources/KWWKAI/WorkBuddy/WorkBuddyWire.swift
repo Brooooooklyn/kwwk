@@ -217,11 +217,24 @@ enum WorkBuddyWire {
     /// main branch in the first user message), and pays no mind to case.
     /// Claude Code's billing header means nothing to WorkBuddy's models and
     /// goes.
+    ///
+    /// DeepSeek Harness opens its system prompt with a line refused as 11128
+    /// (plugin 0.1.27, 82452c5 / plugins#279), and a line of its prompt a
+    /// model can quote back into an assistant message is refused there
+    /// (0.1.30, 575f1e2 / plugins#291, measured 400 then 200 with this
+    /// wording by the reporter). An assistant message can't be moved as the
+    /// system prompt is (`systemAsUser`), so these are reworded in every
+    /// message.
     private static let flagged: [(NSRegularExpression, String)] = [
         (#"x-anthropic-billing-header:[^\n]*\n?"#, ""),
         (#"You are Claude Code, Anthropic['’]s official CLI for Claude"#, "You are Claude Code, Anthropic's CLI for Claude"),
         (#"Main branch \(you will usually use this for PRs\)"#, "Main branch (usually the base for PRs)"),
         (#"(?<!the )Codex CLI is an open source project led by OpenAI\."#, "The Codex CLI is an open source project led by OpenAI."),
+        (#"You are an AI agent powered by DeepSeek Harness\.?"#, "You are an AI agent that helps the user with programming tasks."),
+        (
+            #"Web GUI whose URL the runtime context names\.\s+When the user refers"#,
+            "Web GUI whose URL the runtime context names. The interface, when the user refers"
+        ),
     ].map { (try! NSRegularExpression(pattern: $0.0, options: .caseInsensitive), $0.1) }
 
     static func unflagged(_ text: String) -> String {
@@ -499,15 +512,28 @@ enum WorkBuddyWire {
 
     /// What can be done about "Illegal API invocation from an unapproved
     /// channel". Both builds answer it, 400 with code 11101 or 11128, to a
-    /// chat holding words of Codex's or Claude Code's own prompts, at any
-    /// reasoning level, on any account and whatever the headers (magpie #182,
-    /// 2033df0f): it is about what the chat says, never about the account.
-    /// `flagged` rewords the ones known; this is for one it doesn't know.
-    /// magpie's own hint (`WBRefusedHint`) names the agents it routes for;
-    /// this one says the same of a prompt.
+    /// chat whose system or assistant messages hold a line it knows from
+    /// another agent, at any reasoning level, on any account and whatever
+    /// the headers (magpie #182, 2033df0f): it is about what the chat says,
+    /// never about the account. Codex's and Claude Code's lines were the
+    /// first, DeepSeek Harness's and Claude Desktop's came later, so the
+    /// hint names no client (plugin 0.1.28, 3fd9625). `flagged` rewords the
+    /// lines known and a refused system prompt is sent again as the user's
+    /// instructions (`systemAsUser`); this is for a refusal that stands after
+    /// both, which is in an assistant message, and only a new conversation
+    /// clears.
     static let refusedHint =
-        "WorkBuddy refuses chats that hold words of Codex's or Claude Code's own prompts, whatever the account; "
-        + "take them out of the system prompt, or use another provider"
+        "WorkBuddy refused words in this chat (most often its system prompt, or a line quoted back in an "
+        + "assistant message), whatever the account; start a new conversation, or use another provider"
+
+    /// What can be done about WorkBuddy's 403 code 11140 "request illegal",
+    /// whose `displayMsg` says "Your account has been restricted due to
+    /// unusual activity" (plugin 0.1.17, caf3908 / magpie #1849): the account
+    /// is out until WorkBuddy lifts the restriction, which an appeal asks
+    /// for. The words are magpie's own (`WBRestrictedHint`).
+    static let restrictedHint =
+        "WorkBuddy restricted this account for unusual activity; it stays out until WorkBuddy lifts that, "
+        + "which an appeal (Submit feedback in WorkBuddy) asks for"
 
     /// WorkBuddy wants an active credit package even for a model it serves
     /// free: an account with no package, or none left, is answered 429 with
@@ -527,13 +553,20 @@ enum WorkBuddyWire {
         pattern: #"credits exhausted|额度已用尽|["']code["']\s*:\s*["']?14018(?![\d.])"#,
         options: .caseInsensitive
     )
+    /// The restriction's code, matched whole as 14018's is, in a body cut
+    /// short too; never by its words.
+    private static let restricted = try! NSRegularExpression(
+        pattern: #"["']code["']\s*:\s*["']?11140(?![\d.])"#,
+        options: .caseInsensitive
+    )
 
     /// A failed chat's failure in WorkBuddy's own words. Its gateway answers
     /// `{"code", "msg"}`, which reads as no error body of OpenAI's shape and
     /// would be shown whole; the message is its `msg` and the code its
-    /// `code`. The channel refusal and spent credits say what to do, and
-    /// spent credits are named `insufficient_quota`, as the plugin names
-    /// them, so they read as quota.
+    /// `code`. The channel refusal, a restricted account and spent credits
+    /// say what to do, and spent credits are named `insufficient_quota`, as
+    /// the plugin names them, so they read as quota. A restricted account
+    /// keeps its code, 11140: it is the account's, but no sign-in renews it.
     static func explained(_ failure: ProviderFailure) -> ProviderFailure {
         let raw = failure.message
         var failure = failure
@@ -561,6 +594,9 @@ enum WorkBuddyWire {
         }
         if matches(refused, raw) {
             failure.message += " — \(refusedHint)"
+        } else if code == "11140" || matches(restricted, raw) {
+            failure.message += " — \(restrictedHint)"
+            failure.providerCode = "11140"
         } else if code == "14018" || matches(exhausted, raw) {
             failure.message += " — \(exhaustedHint)"
             failure.providerCode = "insufficient_quota"

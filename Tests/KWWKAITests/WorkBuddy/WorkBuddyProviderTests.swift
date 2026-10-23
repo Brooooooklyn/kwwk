@@ -546,6 +546,58 @@ struct WorkBuddyProviderTests {
         #expect(!failure.isRetryable)
     }
 
+    // The plugin's refused.test.mjs (0.1.17, caf3908): the body WorkBuddy AI
+    // answered for an account it restricted, as the reporter posted it. The
+    // plugin's case of an OpenAI-shaped `{"error": {"code": 11140}}` isn't
+    // here: the chat provider keeps no number code of that shape, and the
+    // gateway's own refusal is `{code, msg}` at the root.
+    private static let restrictedBody = #"""
+    {"code":11140,"msg":"request illegal",
+     "displayMsg":{"en":"Your account has been restricted due to unusual activity",
+                   "zh":"账号存在异常行为，已被限制使用","zh-hant":"帳號存在異常行為，已被限制使用"},
+     "displayTips":{"en":"We detected unusual activity on this account. Submit feedback to appeal this restriction",
+                    "zh":"系统检测到该账号存在异常使用行为，如需申诉请提交反馈"},
+     "actions":["EDIT_INPUT","SUBMIT_FEEDBACK"]}
+    """#
+
+    @Test("A restricted account's 11140 says its msg, then what can be done, and is no sign-in to renew", arguments: [
+        restrictedBody,
+        #"{"code":"11140","msg":"request illegal"}"#,
+        #"{"error":{"data":{"code":11140,"msg":"request illegal"}}}"#,
+        #"{"code":11140,"msg":"request ill"#,
+    ])
+    func restricted(body: String) async throws {
+        let failure = try #require(await refusal(status: 403, body))
+        #expect(failure.message.hasSuffix(" — \(WorkBuddyWire.restrictedHint)"))
+        #expect(failure.providerCode == "11140")
+        #expect(failure.httpStatus == 403)
+        #expect(!failure.isCredentialRejection)
+        #expect(!failure.isRetryable)
+        #expect(failure.outcome == .accessDenied)
+    }
+
+    @Test("The restriction's hint is magpie's word for word, and the channel refusal's names no client")
+    func hints() async throws {
+        #expect(try #require(await refusal(status: 403, Self.restrictedBody)).message
+            == "request illegal — \(WorkBuddyWire.restrictedHint)")
+        #expect(WorkBuddyWire.restrictedHint == "WorkBuddy restricted this account for unusual activity; it stays out until "
+            + "WorkBuddy lifts that, which an appeal (Submit feedback in WorkBuddy) asks for")
+        #expect(WorkBuddyWire.refusedHint.range(of: "codex|claude|deepseek", options: [.regularExpression, .caseInsensitive]) == nil)
+    }
+
+    @Test("A code that only begins with 11140, and 11128, are not a restriction")
+    func notRestricted() async throws {
+        for body in [#"{"code":111400,"msg":"request illegal"}"#, #"{"error":{"code":111400,"message":"x"}}"#] {
+            let failure = try #require(await refusal(status: 403, body))
+            #expect(!failure.message.contains(WorkBuddyWire.restrictedHint))
+            #expect(failure.providerCode != "11140")
+        }
+        let channel = try #require(await refusal(
+            status: 403, #"{"error":{"message":"Illegal API invocation from an unapproved channel","code":11128}}"#
+        ))
+        #expect(channel.message.hasSuffix(WorkBuddyWire.refusedHint))
+    }
+
     @Test("A code that only begins with 14018 is another error")
     func otherCode() async throws {
         let failure = try #require(await refusal(status: 429, #"{"code":140185,"msg":"busy"}"#))
@@ -596,6 +648,27 @@ struct WorkBuddyWireTests {
         }
     }
 
+    // The plugin's unflag.test.mjs (0.1.30, 575f1e2 / plugins#291).
+    @Test("A refused line quoted back into an assistant message is reworded there too")
+    func quotedBack() throws {
+        let line = "There is a Web GUI whose URL the runtime context names. When the user refers to it, open it."
+        let fixed = "There is a Web GUI whose URL the runtime context names. The interface, when the user refers to it, open it."
+        #expect(WorkBuddyWire.unflagged(line) == fixed)
+        #expect(WorkBuddyWire.unflagged(line.replacingOccurrences(of: ". When", with: ".\nWhen")) == fixed)
+        #expect(WorkBuddyWire.unflagged(fixed) == fixed)
+        var root: [String: Any] = ["messages": [
+            ["role": "system", "content": "be brief"],
+            ["role": "user", "content": "hi"],
+            ["role": "assistant", "content": line],
+            ["role": "assistant", "content": [["type": "text", "text": line]]],
+            ["role": "user", "content": "go on"],
+        ]]
+        WorkBuddyWire.mendMessages(&root)
+        let messages = try #require(root["messages"] as? [[String: Any]])
+        #expect(messages[2]["content"] as? String == fixed)
+        #expect((messages[3]["content"] as? [[String: Any]])?.first?["text"] as? String == fixed)
+    }
+
     @Test("An object tool choice of any spelling becomes a string, or goes")
     func mendToolChoice() {
         func mended(_ choice: Any) -> [String: Any] {
@@ -633,6 +706,11 @@ struct WorkBuddyWireTests {
         #expect(WorkBuddyWire.unflagged("the Codex CLI is an open source project led by OpenAI.")
             == "the Codex CLI is an open source project led by OpenAI.")
         #expect(WorkBuddyWire.unflagged("You are kwwk. $1 \\0") == "You are kwwk. $1 \\0")
+        // DeepSeek Harness's opening line (plugin 0.1.27, plugins#279).
+        #expect(WorkBuddyWire.unflagged("You are an AI agent powered by DeepSeek Harness. Be brief.")
+            == "You are an AI agent that helps the user with programming tasks. Be brief.")
+        #expect(WorkBuddyWire.unflagged("YOU ARE AN AI AGENT POWERED BY DEEPSEEK HARNESS")
+            == "You are an AI agent that helps the user with programming tasks.")
 
         // A system message that was the billing header alone goes; a user
         // message's text is reworded where it stands, its other parts kept.
