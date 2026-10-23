@@ -23995,6 +23995,9 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24045,6 +24048,9 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24095,6 +24101,9 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24145,6 +24154,10 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority",
+          "ultrafast"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24199,6 +24212,9 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24253,6 +24269,9 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,
@@ -24307,6 +24326,10 @@
       "api" : "openai-codex-responses",
       "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
       "compat" : {
+        "serviceTiers" : [
+          "priority",
+          "ultrafast"
+        ],
         "supportsAdditionalTools" : true,
         "supportsMidConvoSystemMessages" : true,
         "supportsOpenAIGrammarTools" : true,

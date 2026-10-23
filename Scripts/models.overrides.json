@@ -494,5 +494,43 @@
       "provider": "xai",
       "reasoning": false
     }
+  },
+  "openai-codex": {
+    "$note": "Service tiers Codex's own catalog lists for each model (GET chatgpt.com/backend-api/codex/models?client_version=0.163.0, plan promax, 2026-10-23); OpenAIResponsesProvider sends a Codex request only a listed tier. ultrafast ran gpt-6.1-sol at 330 tok/s against 48 standard and 84 priority the same day. The listing is per account, and this is one account's.",
+    "gpt-5.6-luna": {
+      "compat": {
+        "serviceTiers": ["priority"]
+      }
+    },
+    "gpt-5.6-sol": {
+      "compat": {
+        "serviceTiers": ["priority"]
+      }
+    },
+    "gpt-5.6-terra": {
+      "compat": {
+        "serviceTiers": ["priority"]
+      }
+    },
+    "gpt-6-astra": {
+      "compat": {
+        "serviceTiers": ["priority", "ultrafast"]
+      }
+    },
+    "gpt-6-luna": {
+      "compat": {
+        "serviceTiers": ["priority"]
+      }
+    },
+    "gpt-6-sol": {
+      "compat": {
+        "serviceTiers": ["priority"]
+      }
+    },
+    "gpt-6.1-sol": {
+      "compat": {
+        "serviceTiers": ["priority", "ultrafast"]
+      }
+    }
   }
 }

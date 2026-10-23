@@ -1157,6 +1157,21 @@ public final class OpenAIResponsesProvider:
         return nil
     }
 
+    /// The tier a request for `model` carries. The ChatGPT Codex backend
+    /// honours only the tiers its catalog lists for a model: it refuses some
+    /// others and quietly ignores the rest. Measured 2026-10-23: `flex`
+    /// answers 400 "Unsupported service_tier: flex", while `ultrafast` on
+    /// gpt-6-sol, which does not list it, is accepted and runs at standard
+    /// speed (95 tok/s standard, 105 ultrafast; gpt-6.1-sol, which lists it:
+    /// 48 standard, 84 priority, 330 ultrafast). The response's
+    /// `service_tier` reads `default` either way. As in Codex CLI
+    /// (`service_tier_for_request`), only a listed tier is sent, so the
+    /// request names the tier the turn actually runs at.
+    static func requestServiceTier(_ tier: ServiceTier?, for model: Model) -> ServiceTier? {
+        guard let tier, model.api == "chatgpt-codex" else { return tier }
+        return (model.compat?.serviceTiers ?? [.priority]).contains(tier) ? tier : nil
+    }
+
     private static func makeRequest(
         model: Model,
         context: Context,
@@ -1199,14 +1214,13 @@ public final class OpenAIResponsesProvider:
             root["max_output_tokens"] = .int(maxTokens)
         }
         // The ChatGPT Codex backend answers 400 "Unsupported parameter" to a
-        // temperature and to any service tier but priority (measured
-        // 2026-10-09), so neither reaches it.
+        // temperature (measured 2026-10-09), so it never reaches it.
         let codex = model.api == "chatgpt-codex"
         if let temp = options?.temperature, !codex { root["temperature"] = .double(temp) }
         // Processing-tier pass-through (pi openai-responses.ts:253-255). Cost
         // multipliers are computed downstream in AgentLoop, which has no
         // service-tier awareness, so only the request field is ported here.
-        if let serviceTier = options?.serviceTier, !codex || serviceTier == .priority {
+        if let serviceTier = Self.requestServiceTier(options?.serviceTier, for: model) {
             root["service_tier"] = .string(serviceTier.rawValue)
         }
         if let sys = context.systemPrompt, !sys.isEmpty {

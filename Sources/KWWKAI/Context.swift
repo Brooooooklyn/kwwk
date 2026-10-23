@@ -47,12 +47,15 @@ public enum ReasoningSummary: String, Codable, Sendable, Hashable {
 
 /// OpenAI Responses processing tier. `nil` (field absent) ⇒ provider default.
 /// pi additionally allows `null`; in Swift `nil` already means "field absent".
+/// `ultrafast` is the ChatGPT Codex backend's tier above `priority` (which
+/// Codex CLI calls Fast), offered only on the models its catalog lists it for.
 public enum ServiceTier: String, Codable, Sendable, Hashable {
     case auto
     case `default`
     case flex
     case scale
     case priority
+    case ultrafast
 }
 
 /// Bedrock reasoning display mode for the `thinking.display` field. `summarized`

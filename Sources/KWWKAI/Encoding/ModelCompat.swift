@@ -63,6 +63,12 @@ public struct ModelCompat: Codable, Sendable, Hashable {
     /// `tool_search_call` / `tool_search_output` items.
     public var supportsToolSearch: Bool?
 
+    // MARK: chatgpt-codex
+    /// The `service_tier` values the Codex backend honours for this model, as
+    /// its catalog (`/backend-api/codex/models` `service_tiers`) lists them.
+    /// nil ⇒ `priority` only.
+    public var serviceTiers: [ServiceTier]?
+
     // MARK: devin-agent
     /// Server-side router slot (e.g. Devin `adaptive`): resolved to a concrete
     /// model through `AssignModel` before every chat request.
