@@ -300,7 +300,9 @@ enum WorkBuddyWire {
         guard case .object = parameters else {
             return .object(["type": .string("object"), "properties": .object([:])])
         }
-        guard case .object(var root) = ToolSchemaRoot.objectRoot(fitSchema(parameters)) else { return parameters }
+        guard case .object(var root) = ToolSchemaRoot.objectRoot(fitShape(fitSchema(parameters))) else {
+            return parameters
+        }
         if root["type"] != .string("object") {
             root["type"] = .string("object")
             if case .object? = root["properties"] {} else { root["properties"] = .object([:]) }
@@ -329,6 +331,145 @@ enum WorkBuddyWire {
             return .object(object.mapValues { fitSchema($0, depth: depth + 1) })
         default:
             return schema
+        }
+    }
+
+    // MARK: Shapes Kimi takes
+
+    /// Kimi (kimi-k3-1, kimi-k2.7) answers 11133 too, to the tools of an MCP
+    /// server or a plugin, and DeepSeek 11129 (plugin 0.1.22, a6bed5e /
+    /// plugins#122; `tools.test.mjs`). Tried on a real account 2026-10-14,
+    /// each alone in an otherwise plain chat: Kimi turns away an enum with
+    /// no type (`["a","b"]` as much as `[1,"a",null]`), an empty enum, an
+    /// enum whose type lists two types besides null, a schema that is
+    /// `true` or `false` where a schema goes (`properties.x: true`,
+    /// `items: true`), a `required` that isn't a list, and a type it doesn't
+    /// know (`"any"`, `"String"`). It takes an enum typed T or `[T, "null"]`,
+    /// an `anyOf` of such enums, `{"not": {}}`, `{}`, and
+    /// `additionalProperties: true` or `false`. `fitShape` gives each the
+    /// shape it takes, meaning the same: none of it narrows or widens what
+    /// a call may hold, except that an empty enum, which nothing fits, is
+    /// left out.
+    private static let schemaTypes: Set = ["string", "number", "integer", "boolean", "object", "array", "null"]
+    /// The keywords whose value is a schema, a list of schemas, and a map of
+    /// names to schemas. `additionalProperties` and `unevaluatedProperties`
+    /// are left as they are when `true` or `false`.
+    private static let oneSchema = [
+        "items", "additionalItems", "unevaluatedItems", "contains", "not", "if", "then", "else", "propertyNames",
+        "additionalProperties", "unevaluatedProperties",
+    ]
+    private static let schemaLists = ["anyOf", "oneOf", "allOf", "prefixItems"]
+    private static let schemaMaps = ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]
+    private static let booleanKept: Set = ["additionalProperties", "unevaluatedProperties"]
+
+    /// Mends a schema and each schema under it into the shapes Kimi takes;
+    /// a name under `properties` is never read as a keyword.
+    static func fitShape(_ schema: JSONValue, depth: Int = 0) -> JSONValue {
+        guard depth <= 64, case .object(var object) = schema else { return schema }
+        if let type = object["type"] {
+            let listed: [JSONValue] = if case .array(let types) = type { types } else { [type] }
+            var known: [String] = []
+            for case .string(let name) in listed {
+                let name = name.lowercased()
+                if schemaTypes.contains(name), !known.contains(name) { known.append(name) }
+            }
+            object["type"] = known.isEmpty ? nil : known.count == 1 ? .string(known[0])
+                : .array(known.map(JSONValue.string))
+        }
+        switch object["required"] {
+        case .array(let names)?:
+            object["required"] = .array(names.filter { if case .string = $0 { true } else { false } })
+        case nil:
+            break
+        default:
+            object["required"] = nil
+        }
+        fitEnum(&object)
+        for key in oneSchema {
+            guard let value = object[key] else { continue }
+            object[key] = fitShape(subSchema(value, key: key), depth: depth + 1)
+        }
+        for key in schemaLists {
+            guard case .array(let values)? = object[key] else { continue }
+            object[key] = .array(values.map { fitShape(subSchema($0, key: key), depth: depth + 1) })
+        }
+        for key in schemaMaps {
+            guard case .object(let values)? = object[key] else { continue }
+            object[key] = .object(values.mapValues { fitShape(subSchema($0, key: key), depth: depth + 1) })
+        }
+        return .object(object)
+    }
+
+    /// A schema found under `key` as an object Kimi takes: `true` is `{}`,
+    /// `false` is `{"not": {}}`.
+    private static func subSchema(_ value: JSONValue, key: String) -> JSONValue {
+        guard case .bool(let allows) = value, !booleanKept.contains(key) else { return value }
+        return allows ? .object([:]) : .object(["not": .object([:])])
+    }
+
+    /// Gives a schema's enum a type: the one its values have, or that and
+    /// `"null"`; values of several types are an `anyOf` of an enum for each.
+    private static func fitEnum(_ object: inout [String: JSONValue]) {
+        guard let values = object["enum"] else { return }
+        guard case .array(let values) = values, !values.isEmpty else {
+            object["enum"] = nil
+            return
+        }
+        let listed: [JSONValue] = switch object["type"] {
+        case .array(let types)?: types
+        case .string(let type)?: [.string(type)]
+        default: []
+        }
+        if listed.filter({ $0 != .string("null") }).count == 1 { return }
+        var byType: [(type: String, values: [JSONValue])] = []
+        for value in values {
+            let type = valueType(value)
+            if let index = byType.firstIndex(where: { $0.type == type }) {
+                byType[index].values.append(value)
+            } else {
+                byType.append((type, [value]))
+            }
+        }
+        if let integers = byType.firstIndex(where: { $0.type == "integer" }),
+           let numbers = byType.firstIndex(where: { $0.type == "number" }) {
+            byType[numbers].values += byType[integers].values
+            byType.remove(at: integers)
+        }
+        let hasNull = byType.contains { $0.type == "null" }
+        byType.removeAll { $0.type == "null" }
+        if byType.count <= 1 {
+            let want: JSONValue = switch byType.first?.type {
+            case nil: .string("null")
+            case let type? where hasNull: .array([.string(type), .string("null")])
+            case let type?: .string(type)
+            }
+            object["type"] = want
+            return
+        }
+        var split = byType.map { JSONValue.object(["type": .string($0.type), "enum": .array($0.values)]) }
+        if hasNull { split.append(.object(["type": .string("null")])) }
+        object["enum"] = nil
+        object["type"] = nil
+        if case .array = object["anyOf"] {
+            var all: [JSONValue] = if case .array(let all)? = object["allOf"] { all } else { [] }
+            all.append(.object(["anyOf": .array(split)]))
+            object["allOf"] = .array(all)
+        } else {
+            object["anyOf"] = .array(split)
+        }
+    }
+
+    /// The JSON Schema type of an enum's value; a whole number is an
+    /// integer, however it was written.
+    private static func valueType(_ value: JSONValue) -> String {
+        switch value {
+        case .null: "null"
+        case .bool: "boolean"
+        case .int: "integer"
+        case .double(let number): number.rounded() == number && number.isFinite ? "integer" : "number"
+        case .string: "string"
+        case .array: "array"
+        case .object: "object"
         }
     }
 

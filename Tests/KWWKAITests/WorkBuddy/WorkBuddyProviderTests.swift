@@ -387,6 +387,87 @@ struct WorkBuddyProviderTests {
         ])]))
     }
 
+    // The plugin's tools.test.mjs (0.1.22, a6bed5e / plugins#122): each
+    // shape below was refused by Kimi with 11133 on a real account and
+    // passed once mended as here, on Kimi, DeepSeek (11129 before) and GLM.
+    private func params(_ json: String) throws -> JSONValue {
+        WorkBuddyWire.fitParameters(try #require(parseJSONObject(json)))
+    }
+
+    private func prop(_ json: String) throws -> JSONValue? {
+        guard case .object(let root) = try params(#"{"type":"object","properties":{"a":\#(json)}}"#),
+              case .object(let properties)? = root["properties"] else { return nil }
+        return properties["a"]
+    }
+
+    private func json(_ text: String) -> JSONValue? { parseJSONObject(text) }
+
+    @Test("An enum with no type takes its values' type, or that and null")
+    func untypedEnum() throws {
+        #expect(try prop(#"{"enum":["x","y"],"description":"d"}"#) == json(#"{"enum":["x","y"],"description":"d","type":"string"}"#))
+        #expect(try prop(#"{"enum":[1,2]}"#) == json(#"{"enum":[1,2],"type":"integer"}"#))
+        #expect(try prop(#"{"enum":[1,2.5]}"#) == json(#"{"enum":[1,2.5],"type":"number"}"#))
+        #expect(try prop(#"{"enum":[true,null]}"#) == json(#"{"enum":[true,null],"type":["boolean","null"]}"#))
+        #expect(try prop(#"{"enum":[null]}"#) == json(#"{"enum":[null],"type":"null"}"#))
+        // Under items, anyOf and an unused $defs alike.
+        #expect(try prop(#"{"type":"array","items":{"enum":["a"]}}"#) == json(#"{"type":"array","items":{"enum":["a"],"type":"string"}}"#))
+        #expect(try prop(#"{"anyOf":[{"enum":["a"]},{"type":"integer"}]}"#)
+            == json(#"{"anyOf":[{"enum":["a"],"type":"string"},{"type":"integer"}]}"#))
+        #expect(try params(#"{"type":"object","properties":{},"$defs":{"x":{"enum":["a"]}}}"#)
+            == json(#"{"type":"object","properties":{},"$defs":{"x":{"enum":["a"],"type":"string"}}}"#))
+    }
+
+    @Test("An enum of several types is an anyOf of an enum for each, typed or not")
+    func mixedEnum() throws {
+        let split = #"[{"type":"string","enum":["x"]},{"type":"integer","enum":[1]},{"type":"null"}]"#
+        #expect(try prop(#"{"enum":["x",1,null],"description":"d"}"#) == json(#"{"description":"d","anyOf":\#(split)}"#))
+        #expect(try prop(#"{"type":["string","integer","null"],"enum":["x",1,null]}"#) == json(#"{"anyOf":\#(split)}"#))
+        #expect(try prop(#"{"anyOf":[{"minLength":1}],"enum":["x",1]}"#)
+            == json(#"{"anyOf":[{"minLength":1}],"allOf":[{"anyOf":[{"type":"string","enum":["x"]},{"type":"integer","enum":[1]}]}]}"#))
+    }
+
+    @Test("An enum Kimi takes is left: typed T, or T and null", arguments: [
+        #"{"type":"string","enum":["a"]}"#,
+        #"{"type":["integer","null"],"enum":[1,null]}"#,
+        #"{"type":["null","string"],"enum":[null,"a"]}"#,
+        #"{"type":"null","enum":[null]}"#,
+        #"{"type":"string","enum":[1]}"#,
+    ])
+    func typedEnum(schema: String) throws {
+        #expect(try prop(schema) == json(schema))
+    }
+
+    @Test("An empty enum, a required that isn't a list, and a type Kimi doesn't know are left out")
+    func unknownShapes() throws {
+        #expect(try prop(#"{"type":"string","enum":[]}"#) == json(#"{"type":"string"}"#))
+        #expect(try prop(#"{"type":"object","properties":{"x":{"type":"string"}},"required":"x"}"#)
+            == json(#"{"type":"object","properties":{"x":{"type":"string"}}}"#))
+        #expect(try prop(#"{"type":"String"}"#) == json(#"{"type":"string"}"#))
+        #expect(try prop(#"{"type":"any"}"#) == json(#"{}"#))
+        #expect(try prop(#"{"type":["Integer","foo","null"]}"#) == json(#"{"type":["integer","null"]}"#))
+    }
+
+    @Test("true and false where a schema goes are {} and {not: {}}; additionalProperties is left")
+    func booleanSchemas() throws {
+        let fitted = try params(#"""
+        {"type":"object","additionalProperties":false,"properties":{"a":true,"b":false,
+         "c":{"type":"array","items":true},"d":{"type":"object","additionalProperties":true}}}
+        """#)
+        #expect(fitted == json(#"""
+        {"type":"object","additionalProperties":false,"properties":{"a":{},"b":{"not":{}},
+         "c":{"type":"array","items":{}},"d":{"type":"object","additionalProperties":true}}}
+        """#))
+    }
+
+    @Test("A property named enum, type or required is a name, not a keyword")
+    func keywordNames() throws {
+        let schema = #"""
+        {"type":"object","properties":{"enum":{"type":"string"},"type":{"type":"string","enum":["a"]},
+         "required":{"type":"boolean"}},"required":["enum"]}
+        """#
+        #expect(try params(schema) == json(schema))
+    }
+
     // MARK: - Refusals
 
     private func refusal(status: Int, _ body: String) async -> ProviderFailure? {
