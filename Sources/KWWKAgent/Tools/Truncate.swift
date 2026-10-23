@@ -6,6 +6,9 @@ public enum Truncate {
     public static let grepMaxLineLength = 300
     public static let grepMaxTotalBytes = 30 * 1024
     public static let grepDefaultLimit = 50
+    /// How long a grep may run before it returns what it has (seconds).
+    public static let grepDefaultTimeBudgetSeconds: Double = 30
+    public static let grepMaxTimeBudgetSeconds: Double = 600
 
     public struct Result: Sendable {
         public var content: String

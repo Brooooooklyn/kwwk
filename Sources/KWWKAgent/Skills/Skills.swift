@@ -92,6 +92,11 @@ final class IgnoreMatcher {
         }
     }
 
+    /// Drops every rule added so far.
+    func removeAll() {
+        rules.removeAll()
+    }
+
     /// Whether `relPath` (POSIX, relative to the root dir) is ignored. Dir
     /// queries pass a trailing `/`. Later rules override earlier ones.
     func ignores(_ relPath: String) -> Bool {
