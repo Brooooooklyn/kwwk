@@ -791,6 +791,66 @@ struct WorkBuddyModelsTests {
         #expect(listings.prefix(2).map(\.model.name) == ["Deepseek-V4.1-Flash", "Deepseek-V4.1-Flash (SG)"])
     }
 
+    // The plugin's efforts.test.mjs (plugins#255): WorkBuddy AI's own
+    // config of 2026-10-20, cut to the models it names.
+    @Test("A model that says only supportsReasoning and a default takes low, high, max and its default")
+    func defaultEffortOnly() throws {
+        let config = try #require(JSONSerialization.jsonObject(with: Data(#"""
+        {"agents":[{"name":"cli","models":["default-model","fast-model","primary-model","deepseek-v4.1-flash-sg","hy3","gpt-5.6-sol","glm-5.2","kimi-k3"]}],
+         "models":[{"id":"default-model","name":"Default"},
+          {"id":"fast-model","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"medium","summary":"auto"}},
+          {"id":"primary-model","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"high","summary":"auto"}},
+          {"id":"deepseek-v4.1-flash-sg","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"high","summary":"auto"}},
+          {"id":"hy3","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"canDisableThinking":false,"defaultEffort":"high","supportedEfforts":["low","high"]}},
+          {"id":"gpt-5.6-sol","supportsReasoning":true,"onlyReasoning":false,"reasoning":{"canDisableThinking":true,"defaultEffort":"high","supportedEfforts":["low","medium","high","xhigh","max"]}},
+          {"id":"glm-5.2","supportsReasoning":true,"onlyReasoning":false,"reasoning":{"canDisableThinking":true,"defaultEffort":"high","supportedEfforts":["high","xhigh"]}},
+          {"id":"kimi-k3","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"medium","summary":"auto"}}]}
+        """#.utf8)) as? [String: Any])
+        let models = Dictionary(
+            uniqueKeysWithValues: WorkBuddyModels.listings(fromConfig: config, site: .international).map { ($0.model.id, $0.model) }
+        )
+        func levels(_ id: String) throws -> [ModelThinkingLevel] { supportedThinkingLevels(try #require(models[id])) }
+        #expect(try levels("fast-model") == [.low, .medium, .high, .max])
+        #expect(try levels("kimi-k3") == [.low, .medium, .high, .max])
+        #expect(try levels("primary-model") == [.low, .high, .max])
+        #expect(try levels("deepseek-v4.1-flash-sg") == [.low, .high, .max])
+        #expect(models["fast-model"]?.reasoning == true)
+        // Listed levels are kept as they are; a model that doesn't reason
+        // gets none.
+        #expect(try levels("hy3") == [.low, .high])
+        #expect(try levels("gpt-5.6-sol") == [.off, .low, .medium, .high, .xhigh, .max])
+        #expect(try levels("glm-5.2") == [.off, .high, .xhigh])
+        #expect(models["default-model"]?.reasoning == false)
+    }
+
+    // The plugin's usage.test.mjs, "WorkBuddy AI's GLM models are text-only"
+    // (0.1.16, cb90931).
+    @Test("WorkBuddy AI's GLM models are text-only; its others and China's GLM keep images")
+    func glmTextOnly() throws {
+        let ids = ["glm-5.3-flash", "glm-5.3", "glm-5.2", "glm-6", "deepseek-v4.1-flash", "kimi-k3", "gemini-3.5-flash", "gpt-5.5", "hy3"]
+        let config: [String: Any] = [
+            "agents": [["name": "cli", "models": ids + ["said-nothing"]]],
+            "models": ids.map { ["id": $0, "name": $0, "supportsImages": $0 != "hy3"] } + [["id": "said-nothing"]],
+        ]
+        func images(_ site: WorkBuddySite) -> [String: Bool] {
+            Dictionary(uniqueKeysWithValues: WorkBuddyModels.listings(fromConfig: config, site: site).map {
+                ($0.model.id, $0.model.input.contains(.image))
+            })
+        }
+        #expect(images(.international) == [
+            "glm-5.3-flash": false, "glm-5.3": false, "glm-5.2": false, "glm-6": false,
+            "deepseek-v4.1-flash": true, "kimi-k3": true, "gemini-3.5-flash": true, "gpt-5.5": true,
+            "hy3": false, "said-nothing": false,
+        ])
+        #expect(images(.china) == [
+            "glm-5.3-flash": true, "glm-5.3": true, "glm-5.2": true, "glm-6": true,
+            "deepseek-v4.1-flash": true, "kimi-k3": true, "gemini-3.5-flash": true, "gpt-5.5": true,
+            "hy3": false, "said-nothing": false,
+        ])
+        // The family, by its id's start: not a model whose id only has glm in it.
+        #expect(!WorkBuddyModels.textOnly(site: .international, id: "my-glm-5"))
+    }
+
     // magpie's TestWorkBuddyDistinctNames.
     @Test("A later model of the same name is named for what its id adds, or else its id")
     func distinctNames() {
