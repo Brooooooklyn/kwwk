@@ -87,7 +87,6 @@ final class GrepScan: @unchecked Sendable {
     private var stop: GrepScanStop?
     private var finished = false
     private var continuation: CheckedContinuation<Void, Never>?
-    private var deadline: DispatchWorkItem?
 
     init(_ configuration: Configuration) {
         self.configuration = configuration
@@ -110,10 +109,8 @@ final class GrepScan: @unchecked Sendable {
 
     private func start() {
         let workers = max(1, configuration.workers)
-        let deadline = DispatchWorkItem { [weak self] in self?.halt(.timeBudget) }
         condition.lock()
         runningWorkers = workers
-        self.deadline = deadline
         if !configuration.rootIsDirectory {
             pending = [(0, configuration.root.path)]
             filesFound = 1
@@ -122,8 +119,7 @@ final class GrepScan: @unchecked Sendable {
         let alreadyFinished = finished
         condition.unlock()
         if alreadyFinished {
-            // Cancelled before it started: no threads, no timer.
-            deadline.cancel()
+            // Cancelled before it started: no threads.
             condition.lock()
             runningWorkers = 0
             condition.unlock()
@@ -140,7 +136,26 @@ final class GrepScan: @unchecked Sendable {
             worker.name = "kwwk.grep.\(n)"
             worker.start()
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + configuration.timeBudget, execute: deadline)
+        // The budget has its own thread rather than a Dispatch timer: the
+        // global queues are only as wide as the CPU count, and a busy process
+        // (on a 4-core CI runner, 9 s late) can starve the timer.
+        let deadline = Date(timeIntervalSinceNow: configuration.timeBudget)
+        let watchdog = Thread { [self] in watch(until: deadline) }
+        watchdog.name = "kwwk.grep.deadline"
+        watchdog.start()
+    }
+
+    /// Ends the scan at `deadline` unless it ends first; wakes on every
+    /// broadcast, so it exits as soon as the scan finishes.
+    private func watch(until deadline: Date) {
+        condition.lock()
+        defer { condition.unlock() }
+        while !finished {
+            if !condition.wait(until: deadline) && !finished && Date() >= deadline {
+                stop = .timeBudget
+                finishLocked()
+            }
+        }
     }
 
     private func wait(with continuation: CheckedContinuation<Void, Never>) {
@@ -169,8 +184,6 @@ final class GrepScan: @unchecked Sendable {
 
     private func finishLocked() {
         finished = true
-        deadline?.cancel()
-        deadline = nil
         condition.broadcast()
         let pending = continuation
         continuation = nil
