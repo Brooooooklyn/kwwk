@@ -126,11 +126,12 @@ struct GrepScanTests {
         for i in 0..<32 { try file(String(format: "f%02d.txt", i), in: root) }
 
         let started = Date()
-        let outcome = await scan(root: root, workers: 16, budget: 30, delay: 0.2)
+        let outcome = await scan(root: root, workers: 16, budget: 60, delay: 0.5)
         #expect(outcome.stop == nil)
         #expect(outcome.filesSearched == 32)
-        // Serial would take 6.4 s; 16 workers need about 0.4 s.
-        #expect(Date().timeIntervalSince(started) < 3)
+        // Serial would take 16 s; 16 workers need about 1 s. The bound leaves
+        // room for loaded CI machines.
+        #expect(Date().timeIntervalSince(started) < 8)
         // Results stay in walk (name) order regardless of completion order.
         let names = outcome.matches.map { URL(fileURLWithPath: $0.file).lastPathComponent }
         #expect(names == (0..<32).map { String(format: "f%02d.txt", $0) })
@@ -143,8 +144,9 @@ struct GrepScanTests {
         for i in 0..<40 { try file(String(format: "f%02d.txt", i), in: root) }
 
         let started = Date()
-        let outcome = await scan(root: root, workers: 2, budget: 0.5, delay: 0.1)
-        #expect(Date().timeIntervalSince(started) < 2)
+        let outcome = await scan(root: root, workers: 2, budget: 0.5, delay: 0.5)
+        // A full scan would take 10 s; the bound leaves room for loaded CI.
+        #expect(Date().timeIntervalSince(started) < 6)
         #expect(outcome.stop == .timeBudget)
         #expect(outcome.walkComplete)
         #expect(outcome.filesFound == 40)
