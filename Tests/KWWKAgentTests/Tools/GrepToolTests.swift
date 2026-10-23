@@ -144,9 +144,10 @@ struct GrepScanTests {
         for i in 0..<40 { try file(String(format: "f%02d.txt", i), in: root) }
 
         let started = Date()
-        let outcome = await scan(root: root, workers: 2, budget: 0.5, delay: 0.5)
-        // A full scan would take 10 s; the bound leaves room for loaded CI.
-        #expect(Date().timeIntervalSince(started) < 6)
+        let outcome = await scan(root: root, workers: 2, budget: 1.5, delay: 0.5)
+        // A full scan would take 10 s; the budget fits a few files per worker,
+        // and the bound leaves room for loaded CI.
+        #expect(Date().timeIntervalSince(started) < 8)
         #expect(outcome.stop == .timeBudget)
         #expect(outcome.walkComplete)
         #expect(outcome.filesFound == 40)
