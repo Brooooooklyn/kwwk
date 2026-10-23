@@ -706,7 +706,9 @@ private func registerAnthropicAPIKey(
         reasoning: catalog?.reasoning ?? false,
         input: catalog?.input ?? [.text, .image],
         contextWindow: catalog?.contextWindow ?? 200_000,
-        maxTokens: catalog?.maxTokens ?? 128_000
+        maxTokens: catalog?.maxTokens ?? 128_000,
+        compat: catalog?.compat,
+        thinkingLevelMap: catalog?.thinkingLevelMap
     )
     return ResolvedAuth(
         model: model,
@@ -735,7 +737,9 @@ private func registerOpenAIAPIKey(
         reasoning: catalog?.reasoning ?? true,
         input: catalog?.input ?? [.text, .image],
         contextWindow: catalog?.contextWindow ?? 200_000,
-        maxTokens: catalog?.maxTokens ?? 128_000
+        maxTokens: catalog?.maxTokens ?? 128_000,
+        compat: catalog?.compat,
+        thinkingLevelMap: catalog?.thinkingLevelMap
     )
     return ResolvedAuth(
         model: model,
@@ -767,7 +771,9 @@ private func registerGoogleAPIKey(
         reasoning: catalog?.reasoning ?? true,
         input: catalog?.input ?? [.text, .image],
         contextWindow: catalog?.contextWindow ?? 1_048_576,
-        maxTokens: catalog?.maxTokens ?? 128_000
+        maxTokens: catalog?.maxTokens ?? 128_000,
+        compat: catalog?.compat,
+        thinkingLevelMap: catalog?.thinkingLevelMap
     )
     return ResolvedAuth(
         model: model,
