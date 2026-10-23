@@ -360,6 +360,36 @@ struct ProviderVariantsTests {
         #expect(payload["store"] as? Bool == false)
     }
 
+    @Test("A Codex login takes the catalog's tiers, and ultrafast reaches only a model that lists it",
+          arguments: [("gpt-6.1-sol", [ServiceTier.priority, .ultrafast], "ultrafast"), ("gpt-6-sol", [.priority], nil)])
+    func codexUltrafast(id: String, tiers: [ServiceTier], sent: String?) async throws {
+        let store = OAuthStore()
+        try await store.set(
+            OAuthCredentials(access: "codex-bearer", refresh: "", expires: Int64.max, extras: ["accountId": "acct-xyz"]),
+            for: "openai-codex"
+        )
+        let resolved = try #require(try await registerStored(
+            storeId: "openai-codex", store: store, modelOverride: id, primeToken: false
+        ))
+        #expect(resolved.model.compat?.serviceTiers == tiers)
+
+        let connection = StubWebSocketConnection(batches: [Self.webSocketMessages(from: Self.openaiResponsesSSE)])
+        let provider = ProviderVariants.chatgptCodex(
+            accessToken: "codex-bearer",
+            accountId: "acct-xyz",
+            client: StubSSEClient(body: Self.openaiResponsesSSE),
+            webSocketClient: StubWebSocketClient(connection: connection)
+        )
+        let s = provider.stream(
+            model: resolved.model,
+            context: Context(messages: [.user(UserMessage(text: "hi"))]),
+            options: StreamOptions(sessionId: "codex-ultrafast", serviceTier: .ultrafast)
+        )
+        for await _ in s {}
+        let payload = try Self.jsonObject(connection.sentTexts[0])
+        #expect(payload["service_tier"] as? String == sent)
+    }
+
     private static func webSocketMessages(from sse: String) -> [String] {
         sse.components(separatedBy: "\n\n").compactMap { block in
             let dataLines = block.split(separator: "\n").compactMap { line -> String? in

@@ -517,6 +517,34 @@ struct OpenAIResponsesTests {
         #expect(openai?["service_tier"] as? String == "flex")
     }
 
+    @Test("ChatGPT Codex carries a tier only when the model lists it")
+    func codexSendsListedTiersOnly() {
+        func codex(_ tiers: [ServiceTier]?) -> Model {
+            var model = Self.model
+            model.api = "chatgpt-codex"
+            if let tiers {
+                var compat = ModelCompat()
+                compat.serviceTiers = tiers
+                model.compat = compat
+            }
+            return model
+        }
+        let tier = OpenAIResponsesProvider.requestServiceTier
+        let fastest = codex([.priority, .ultrafast])
+        #expect(tier(.ultrafast, fastest) == .ultrafast)
+        #expect(tier(.priority, fastest) == .priority)
+        #expect(tier(.flex, fastest) == nil)
+        #expect(tier(nil, fastest) == nil)
+        // An unlisted tier would run at standard speed, so none is sent.
+        #expect(tier(.ultrafast, codex([.priority])) == nil)
+        #expect(tier(.priority, codex([])) == nil)
+        // A model with no list keeps the earlier rule: priority only.
+        #expect(tier(.priority, codex(nil)) == .priority)
+        #expect(tier(.ultrafast, codex(nil)) == nil)
+        // The public API takes whatever was asked for.
+        #expect(tier(.ultrafast, Self.model) == .ultrafast)
+    }
+
     @Test("a call id over 64 characters is hashed the same on the call and its output")
     func longCallIdBounded() async throws {
         let client = StubSSEClient(body: Self.textSSE)

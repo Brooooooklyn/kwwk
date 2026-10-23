@@ -265,6 +265,13 @@ private func registerCodex(
     // Codex with a ChatGPT account"); gpt-6.1-sol is the default it serves.
     let modelId = modelOverride ?? "gpt-6.1-sol"
     let catalogEntry = ModelsCatalog.model(provider: "openai-codex", id: modelId)
+    // The catalog's tier list decides which `service_tier` a request may
+    // carry (OpenAIResponsesProvider.requestServiceTier).
+    let compat = catalogEntry?.compat?.serviceTiers.map { tiers in
+        var listed = ModelCompat()
+        listed.serviceTiers = tiers
+        return listed
+    }
     let model = Model(
         id: modelId,
         name: catalogEntry?.name ?? modelId,
@@ -278,6 +285,7 @@ private func registerCodex(
         // the field in the request body regardless of what the catalog
         // reports.
         maxTokens: 0,
+        compat: compat,
         // Codex answers 400 to an effort the model does not take —
         // "minimal" on every model — so the catalog's map decides what a
         // level is sent as.
