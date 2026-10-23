@@ -247,6 +247,106 @@ enum WorkBuddyWire {
         }
     }
 
+    // MARK: - Sent again
+
+    /// A chat ending with tool results then the user's message(s), with an
+    /// empty assistant message between them, as if the model had said
+    /// nothing after the results; nil for any other chat. WorkBuddy AI's
+    /// gemini-3.8-flash answers 400 code 11153 "the conversation must end
+    /// with a user message" to tool results followed by a user message,
+    /// which kwwk sends for a tool's images, a message steered in mid-task,
+    /// and a result hoisted ahead of a user message. The chat does end with
+    /// a user message; with any other message between, it is served. Tried
+    /// on a real account (plugin 0.1.20, a4f8178 / plugins#113;
+    /// `aftertools.test.mjs`): the model follows the user's message as the
+    /// user's, where folded into the tool's result it was read as the
+    /// tool's output and its ask left undone. A chat ending with the
+    /// assistant's message is a prefill, refused as it is.
+    static func replyAfterTools(_ root: [String: Any]) -> [String: Any]? {
+        guard var messages = root["messages"] as? [[String: Any]] else { return nil }
+        var index = messages.count - 1
+        while index >= 0, messages[index]["role"] as? String == "user" { index -= 1 }
+        guard index != messages.count - 1, index >= 0, messages[index]["role"] as? String == "tool" else { return nil }
+        messages.insert(["role": "assistant", "content": ""], at: index + 1)
+        var root = root
+        root["messages"] = messages
+        return root
+    }
+
+    /// The tags a moved system prompt is read to the model in. They name no
+    /// one.
+    static let instructionTags = ("<instructions>\n", "\n</instructions>")
+
+    /// A chat with its system prompt read to the model as the first thing
+    /// the user says, in `instructionTags`, and the default system prompt
+    /// first, as both builds want a system message there; a system message
+    /// later in the chat becomes the user's where it stands. Nil when there
+    /// is nothing to move.
+    ///
+    /// WorkBuddy's channel check reads the system and assistant messages
+    /// only: each refused line was served in a user message, a user
+    /// message's parts and a tool's result, and refused again in the system
+    /// or an assistant message. It matches a line whole and exactly, so
+    /// `flagged` only ever knows the lines met so far, and an agent's line
+    /// not met yet is refused until one is added. A chat refused as an
+    /// unapproved channel is sent once more moved (plugin 0.1.29, af360a5;
+    /// `systemasuser.test.mjs`, tried with real accounts on both builds).
+    static func systemAsUser(_ root: [String: Any]) -> [String: Any]? {
+        guard let messages = root["messages"] as? [[String: Any]] else { return nil }
+        var lead: [String] = []
+        var index = 0
+        while index < messages.count, messages[index]["role"] as? String == "system" {
+            lead.append(text(of: messages[index]["content"]))
+            index += 1
+        }
+        let said = lead.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var later = false
+        var rest = messages[index...].map { message -> [String: Any] in
+            guard message["role"] as? String == "system" else { return message }
+            later = true
+            var message = message
+            message["role"] = "user"
+            return message
+        }
+        let moved = !said.isEmpty && said != defaultSystemPrompt
+        guard moved || later else { return nil }
+        if moved {
+            let instructions = instructionTags.0 + said + instructionTags.1
+            if let user = rest.firstIndex(where: { $0["role"] as? String == "user" }) {
+                if let content = rest[user]["content"] as? String {
+                    rest[user]["content"] = instructions + "\n\n" + content
+                } else if let parts = rest[user]["content"] as? [Any] {
+                    rest[user]["content"] = [["type": "text", "text": instructions] as [String: Any]] + parts
+                } else {
+                    rest[user]["content"] = instructions
+                }
+            } else {
+                rest.insert(["role": "user", "content": instructions], at: 0)
+            }
+        }
+        var root = root
+        root["messages"] = [["role": "system", "content": defaultSystemPrompt]] + rest
+        return root
+    }
+
+    /// The text of a chat's system messages, which a system prompt refused
+    /// once is known by; "" for the default one, which is never moved.
+    static func systemKey(_ root: [String: Any]) -> String {
+        let messages = root["messages"] as? [[String: Any]] ?? []
+        let key = messages.filter { $0["role"] as? String == "system" }
+            .map { text(of: $0["content"]) }
+            .joined(separator: "\n")
+        return key.trimmingCharacters(in: .whitespacesAndNewlines) == defaultSystemPrompt ? "" : key
+    }
+
+    private static func text(of content: Any?) -> String {
+        if let text = content as? String { return text }
+        let parts = content as? [Any] ?? []
+        return parts.compactMap { ($0 as? [String: Any])?["text"] as? String }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
     // MARK: - Tools
 
     /// A chat's tools in shapes WorkBuddy's models take, and the names given
@@ -571,22 +671,9 @@ enum WorkBuddyWire {
         let raw = failure.message
         var failure = failure
         var code = failure.providerCode
-        if case .object(let root)? = parseJSONObject(raw) {
-            let error = object(root["error"]) ?? root
-            code = [object(error["data"])?["code"], error["code"], root["code"], object(root["data"])?["code"]]
-                .lazy.compactMap(text).first ?? code
-            let said = [
-                error["message"],
-                object(error["data"])?["msg"],
-                root["error"],
-                root["msg"],
-                object(root["data"])?["msg"]
-            ]
-                .lazy.compactMap { value -> String? in
-                    guard case .string(let words)? = value, !words.isEmpty else { return nil }
-                    return words
-                }.first
-            if let said {
+        if let refusal = refusal(raw) {
+            code = refusal.code ?? code
+            if let said = refusal.message {
                 failure.message = said
                 failure.upstreamMessage = failure.upstreamMessage ?? raw
             }
@@ -602,6 +689,37 @@ enum WorkBuddyWire {
             failure.providerCode = "insufficient_quota"
         }
         return failure
+    }
+
+    /// A refusal's code and words, where WorkBuddy puts them: its gateway's
+    /// own `{code, msg}`, under `data` or `error` as some endpoints nest it,
+    /// or OpenAI's `{"error": {"message"}}`. Nil for a body that isn't JSON.
+    static func refusal(_ body: String) -> (code: String?, message: String?)? {
+        guard case .object(let root)? = parseJSONObject(body) else { return nil }
+        let error = object(root["error"]) ?? root
+        let code = [object(error["data"])?["code"], error["code"], root["code"], object(root["data"])?["code"]]
+            .lazy.compactMap(text).first
+        let message = [error["message"], object(error["data"])?["msg"], root["error"], root["msg"], object(root["data"])?["msg"]]
+            .lazy.compactMap { value -> String? in
+                guard case .string(let words)? = value, !words.isEmpty else { return nil }
+                return words
+            }.first
+        return (code, message)
+    }
+
+    /// Whether a 400 is the channel refusal the system prompt's move answers
+    /// (`systemAsUser`): code 11101 or 11128. The gateway gives 11128 to
+    /// "first message is not system prompt" too, which no move mends, so
+    /// the code's words are read as well.
+    static func refusesChannel(_ body: String) -> Bool {
+        guard let refusal = refusal(body), ["11101", "11128"].contains(refusal.code) else { return false }
+        return matches(refused, refusal.message ?? "")
+    }
+
+    /// Whether a 400 is code 11153, "the conversation must end with a user
+    /// message", which `replyAfterTools` answers.
+    static func refusesAfterTools(_ body: String) -> Bool {
+        refusal(body)?.code == "11153"
     }
 
     private static func matches(_ pattern: NSRegularExpression, _ text: String) -> Bool {
