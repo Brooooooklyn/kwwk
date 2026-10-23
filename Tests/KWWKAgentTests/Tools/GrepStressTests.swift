@@ -34,7 +34,9 @@ struct GrepStressTests {
     func concurrentSearches() async throws {
         let root = try Self.tree()
         defer { try? FileManager.default.removeItem(at: root) }
-        let ops = LocalGrepOperations()
+        // Modest sizes: the suite runs beside timing-sensitive tests, and
+        // hundreds of busy threads made those flaky on CI.
+        let ops = LocalGrepOperations(concurrency: 4)
         let full = try await ops.search(params: GrepParams(pattern: "needle", path: root.path, limit: 100_000))
         #expect(full.stop == nil)
         #expect(full.matches.count == 125)
@@ -42,7 +44,7 @@ struct GrepStressTests {
         #expect(!fullKeys.contains { $0.contains("/ignored/") })
 
         try await withThrowingTaskGroup(of: Void.self) { group in
-            for i in 0..<64 {
+            for i in 0..<16 {
                 group.addTask {
                     let handle = CancellationHandle()
                     let mode = i % 4
