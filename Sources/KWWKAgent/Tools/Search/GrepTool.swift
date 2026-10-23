@@ -11,9 +11,29 @@ public struct GrepToolOptions: Sendable {
 }
 
 public struct LocalGrepOperations: GrepOperations {
-    public init() {}
+    /// Files read at once. Reads are latency-bound on network filesystems,
+    /// so this is well above the core count.
+    public var concurrency: Int
+
+    public init(concurrency: Int = 16) {
+        self.concurrency = max(1, concurrency)
+    }
 
     public func grep(params: GrepParams) async throws -> [GrepMatch] {
+        let result = try await search(params: params)
+        if result.stop == .bytes {
+            // Keep the sentinel older callers look for.
+            return result.matches + [GrepMatch(
+                file: "",
+                line: 0,
+                text: "[truncated: total output exceeded \(Truncate.formatSize(Truncate.grepMaxTotalBytes))]"
+            )]
+        }
+        return result.matches
+    }
+
+    public func search(params: GrepParams) async throws -> GrepSearchResult {
+        try params.cancellation?.throwIfCancelled()
         let pattern: NSRegularExpression
         do {
             let patternString = params.literal
@@ -26,61 +46,102 @@ public struct LocalGrepOperations: GrepOperations {
             throw CodingToolError.invalidArgument("grep: invalid pattern — \(error)")
         }
 
-        let fm = FileManager.default
-        let rootURL = URL(fileURLWithPath: params.path)
         var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: params.path, isDirectory: &isDirectory) else {
+        guard FileManager.default.fileExists(atPath: params.path, isDirectory: &isDirectory) else {
             throw CodingToolError.fileNotFound(params.path)
         }
 
-        var results: [GrepMatch] = []
-        let files = isDirectory.boolValue
-            ? collectFiles(at: rootURL, glob: params.glob)
-            : [rootURL]
-
-        let limit = params.limit ?? Truncate.grepDefaultLimit
+        let limit = max(1, params.limit ?? Truncate.grepDefaultLimit)
         let maxLineChars = Truncate.grepMaxLineLength
         let maxTotalBytes = Truncate.grepMaxTotalBytes
         let context = max(0, params.context)
-        var totalBytes = 0
+        let budget = Self.timeBudget(params.timeBudget)
 
-        outer: for fileURL in files {
-            guard let data = try? Data(contentsOf: fileURL) else { continue }
-            // Skip files that look binary (ripgrep, which pi shells out to,
-            // does the same by ignoring files with NUL bytes).
-            if looksBinary(data) { continue }
-            guard let text = String(data: data, encoding: .utf8) else { continue }
-            let lines = text.components(separatedBy: "\n")
-            for (i, line) in lines.enumerated() {
-                let ns = line as NSString
-                guard pattern.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) != nil else { continue }
-                let match = makeMatch(
-                    file: fileURL.path,
-                    lines: lines,
-                    index: i,
-                    context: context,
-                    maxLineChars: maxLineChars
-                )
-                let entryBytes = blockBytes(match)
-                if totalBytes + entryBytes > maxTotalBytes && !results.isEmpty {
-                    // Mark the last result so the caller knows we
-                    // stopped because of the byte budget.
-                    results.append(GrepMatch(
-                        file: "",
-                        line: 0,
-                        text: "[truncated: total output exceeded \(Truncate.formatSize(maxTotalBytes))]"
-                    ))
-                    break outer
-                }
-                totalBytes += entryBytes
-                results.append(match)
-                if results.count >= limit { break outer }
-            }
+        let scan = GrepScan(GrepScan.Configuration(
+            root: URL(fileURLWithPath: params.path),
+            rootIsDirectory: isDirectory.boolValue,
+            glob: params.glob,
+            includeIgnored: params.includeIgnored,
+            limit: limit,
+            maxTotalBytes: maxTotalBytes,
+            workers: concurrency,
+            timeBudget: budget,
+            match: { url, cap in
+                Self.matches(in: url, pattern: pattern, context: context, maxLineChars: maxLineChars, cap: cap)
+            },
+            bytes: { Self.blockBytes($0) }
+        ))
+        let outcome = await scan.run(cancellation: params.cancellation)
+        if outcome.stop == .cancelled {
+            try params.cancellation?.throwIfCancelled()
+            throw CancellationError()
         }
-        return results
+
+        // Apply the match limit and byte budget in walk order.
+        var matches: [GrepMatch] = []
+        var totalBytes = 0
+        var stop: GrepSearchResult.Stop?
+        for match in outcome.matches {
+            let entryBytes = Self.blockBytes(match)
+            if totalBytes + entryBytes > maxTotalBytes && !matches.isEmpty {
+                stop = .bytes
+                break
+            }
+            if matches.count >= limit {
+                stop = .limit
+                break
+            }
+            totalBytes += entryBytes
+            matches.append(match)
+        }
+        if stop == nil, matches.count >= limit, outcome.stop == .limit {
+            stop = .limit
+        }
+        if outcome.stop == .timeBudget {
+            // Partial either way: say so even if a cap was also reached.
+            stop = .timeBudget(
+                seconds: budget,
+                filesSearched: outcome.filesSearched,
+                filesFound: outcome.filesFound,
+                walkComplete: outcome.walkComplete
+            )
+        }
+        return GrepSearchResult(matches: matches, stop: stop)
     }
 
-    private func makeMatch(
+    static func timeBudget(_ requested: Double?) -> Double {
+        guard let requested, requested.isFinite, requested > 0 else {
+            return Truncate.grepDefaultTimeBudgetSeconds
+        }
+        return min(requested, Truncate.grepMaxTimeBudgetSeconds)
+    }
+
+    /// Up to `cap` matches in one file, or none for unreadable, binary and
+    /// non-UTF-8 files.
+    static func matches(
+        in url: URL,
+        pattern: NSRegularExpression,
+        context: Int,
+        maxLineChars: Int,
+        cap: Int
+    ) -> [GrepMatch] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        // Skip files that look binary (ripgrep does the same by ignoring
+        // files with NUL bytes).
+        if looksBinary(data) { return [] }
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        let lines = text.components(separatedBy: "\n")
+        var found: [GrepMatch] = []
+        for (i, line) in lines.enumerated() {
+            let ns = line as NSString
+            guard pattern.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) != nil else { continue }
+            found.append(makeMatch(file: url.path, lines: lines, index: i, context: context, maxLineChars: maxLineChars))
+            if found.count >= cap { break }
+        }
+        return found
+    }
+
+    private static func makeMatch(
         file: String,
         lines: [String],
         index i: Int,
@@ -114,64 +175,15 @@ public struct LocalGrepOperations: GrepOperations {
         return GrepMatch(file: file, line: i + 1, text: text, before: before, after: after)
     }
 
-    private func blockBytes(_ m: GrepMatch) -> Int {
+    static func blockBytes(_ m: GrepMatch) -> Int {
         var total = "\(m.file):\(m.line):\(m.text)\n".utf8.count
         for c in m.before { total += "\(m.file)-\(c.line)-\(c.text)\n".utf8.count }
         for c in m.after { total += "\(m.file)-\(c.line)-\(c.text)\n".utf8.count }
         return total
     }
 
-    private func looksBinary(_ data: Data) -> Bool {
+    private static func looksBinary(_ data: Data) -> Bool {
         data.prefix(8192).contains(0)
-    }
-
-    private func collectFiles(at rootURL: URL, glob: String?) -> [URL] {
-        let fm = FileManager.default
-        // Canonicalize the root before enumerating so a slash-anchored glob's
-        // relative-path prefix strips the right number of leading characters
-        // (see `Glob.canonicalDirectoryPath` — the enumerator yields
-        // firmlink-resolved paths that `standardizedFileURL` doesn't produce).
-        let rootPath = Glob.canonicalDirectoryPath(rootURL.path)
-        guard let enumerator = fm.enumerator(
-            at: URL(fileURLWithPath: rootPath),
-            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey]
-        ) else {
-            return []
-        }
-        // Compile the glob regex once, up front, rather than per visited file.
-        // A glob without a slash filters on the basename at any depth (ripgrep's
-        // `--glob '*.ts'` semantics); one with a slash matches the path relative
-        // to the search root.
-        let globRegex = glob.flatMap { try? NSRegularExpression(pattern: Glob.patternToRegex($0)) }
-        let globMatchesRelative = glob?.contains("/") ?? false
-        var out: [URL] = []
-        for case let url as URL in enumerator {
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-            if values?.isDirectory == true {
-                // Prune VCS metadata and dependency trees during traversal.
-                if ignoredWalkDirectoryNames.contains(url.lastPathComponent) {
-                    enumerator.skipDescendants()
-                }
-                continue
-            }
-            guard values?.isRegularFile == true else { continue }
-            if let globRegex {
-                let candidate = globMatchesRelative
-                    ? relativePath(of: url.path, under: rootPath)
-                    : url.lastPathComponent
-                let ns = candidate as NSString
-                if globRegex.firstMatch(in: candidate, options: [], range: NSRange(location: 0, length: ns.length)) == nil {
-                    continue
-                }
-            }
-            out.append(url)
-        }
-        return out
-    }
-
-    private func relativePath(of path: String, under root: String) -> String {
-        let prefix = root.hasSuffix("/") ? root.count : root.count + 1
-        return path.count > prefix ? String(path.dropFirst(prefix)) : path
     }
 }
 
@@ -190,6 +202,8 @@ public func createGrepTool(
             "literal": ["type": "boolean"],
             "context": ["type": "number"],
             "limit": ["type": "number"],
+            "includeIgnored": ["type": "boolean"],
+            "timeoutSeconds": ["type": "number"],
         ],
         "required": ["pattern"],
     ]
@@ -197,6 +211,8 @@ public func createGrepTool(
     let defaultLimit = Truncate.grepDefaultLimit
     let maxLineChars = Truncate.grepMaxLineLength
     let maxTotalBytes = Truncate.grepMaxTotalBytes
+    let defaultBudget = Int(Truncate.grepDefaultTimeBudgetSeconds)
+    let maxBudget = Int(Truncate.grepMaxTimeBudgetSeconds)
     var tool = AgentTool(
         name: "grep",
         label: "grep",
@@ -205,7 +221,9 @@ public func createGrepTool(
           - Default \(defaultLimit) matches (override with `limit`)
           - Single lines truncated to \(maxLineChars) chars
           - Total output capped at ~\(Truncate.formatSize(maxTotalBytes))
-        Use a tighter `limit` or a more specific pattern when searching large codebases.
+        Files ignored by .gitignore, .ignore or the repository's info/exclude, and dependency folders like node_modules, are skipped; set `includeIgnored` to search them too.
+        The search stops after `timeoutSeconds` (default \(defaultBudget), at most \(maxBudget)) and returns the matches found so far, saying how many files it searched.
+        Use a tighter `limit`, `path` or `glob`, or a more specific pattern when searching large codebases.
         """,
         parameters: parameters,
         execute: { _, args, cancellation, _ in
@@ -254,25 +272,54 @@ public func createGrepTool(
                 if case .double(let v) = obj["limit"] ?? .null { return clampedToolInt(v) }
                 return nil
             }()
+            let includeIgnored: Bool = {
+                if case .bool(let v) = obj["includeIgnored"] ?? .null { return v }
+                return false
+            }()
+            let timeBudget: Double? = {
+                if case .int(let v) = obj["timeoutSeconds"] ?? .null { return Double(v) }
+                if case .double(let v) = obj["timeoutSeconds"] ?? .null { return v }
+                return nil
+            }()
 
-            let matches = try await ops.grep(params: GrepParams(
+            let result = try await ops.search(params: GrepParams(
                 pattern: pattern,
                 path: path,
                 glob: glob,
                 ignoreCase: ignoreCase,
                 literal: literal,
                 context: context,
-                limit: limit
+                limit: limit,
+                includeIgnored: includeIgnored,
+                timeBudget: timeBudget,
+                cancellation: cancellation
             ))
-
-            // Detect the sentinel we inject when the byte budget is hit.
-            let byteTruncated = matches.last?.text.hasPrefix("[truncated: total output exceeded") == true
-            let effectiveMatches = byteTruncated ? Array(matches.dropLast()) : matches
+            let effectiveMatches = result.matches
+            let byteTruncated = result.stop == .bytes
+            var timeNotice: String?
+            var timeDetails: [String: JSONValue] = [:]
+            if case .timeBudget(let seconds, let searched, let found, let walkComplete)? = result.stop {
+                let total = walkComplete ? "\(found)" : "\(found)+"
+                timeNotice = "[stopped at the \(formatSeconds(seconds)) time budget after searching \(searched) of \(total) files; matches are partial. Narrow `path` or `glob`, or raise `timeoutSeconds`.]"
+                timeDetails = [
+                    "filesSearched": .int(searched),
+                    "filesFound": .int(found),
+                    "walkComplete": .bool(walkComplete),
+                ]
+            }
 
             if effectiveMatches.isEmpty {
+                var details: [String: JSONValue] = ["matches": .array([])]
+                var text = "No matches found for \(pattern)"
+                if let timeNotice {
+                    text += "\n" + timeNotice
+                    details["truncated"] = .bool(true)
+                    details["truncatedBy"] = .string("time")
+                    details.merge(timeDetails) { $1 }
+                }
                 return AgentToolResult(
-                    content: [.text(TextContent(text: "No matches found for \(pattern)"))],
-                    details: .object(["matches": .array([])])
+                    content: [.text(TextContent(text: text))],
+                    details: .object(details)
                 )
             }
 
@@ -284,6 +331,9 @@ public func createGrepTool(
             }
             if byteTruncated {
                 lines.append("[truncated: total output exceeded \(Truncate.formatSize(maxTotalBytes))]")
+            }
+            if let timeNotice {
+                lines.append(timeNotice)
             }
             let body = lines.joined(separator: "\n")
 
@@ -302,14 +352,18 @@ public func createGrepTool(
                 return .object(obj)
             }
 
+            let limitTruncated = result.stop == .limit || effectiveMatches.count >= (limit ?? defaultLimit)
             var details: [String: JSONValue] = [
                 "matches": .array(encoded),
                 "totalMatches": .int(effectiveMatches.count),
-                "truncated": .bool(byteTruncated || effectiveMatches.count >= (limit ?? defaultLimit)),
+                "truncated": .bool(byteTruncated || limitTruncated || timeNotice != nil),
             ]
-            if byteTruncated {
+            if timeNotice != nil {
+                details["truncatedBy"] = .string("time")
+                details.merge(timeDetails) { $1 }
+            } else if byteTruncated {
                 details["truncatedBy"] = .string("bytes")
-            } else if effectiveMatches.count >= (limit ?? defaultLimit) {
+            } else if limitTruncated {
                 details["truncatedBy"] = .string("limit")
             }
 
@@ -323,4 +377,8 @@ public func createGrepTool(
     tool.fileAccessCwd = cwd
     tool.codingToolCapabilities = .grep
     return tool
+}
+
+private func formatSeconds(_ seconds: Double) -> String {
+    seconds == seconds.rounded() ? "\(Int(seconds)) s" : String(format: "%.1f s", seconds)
 }

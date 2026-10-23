@@ -62,6 +62,44 @@ public protocol BashOperations: Sendable {
 
 public protocol GrepOperations: Sendable {
     func grep(params: GrepParams) async throws -> [GrepMatch]
+    /// The same search, saying why it stopped early. The default wraps
+    /// `grep(params:)`, so existing conformers keep working.
+    func search(params: GrepParams) async throws -> GrepSearchResult
+}
+
+extension GrepOperations {
+    public func search(params: GrepParams) async throws -> GrepSearchResult {
+        let matches = try await grep(params: params)
+        // Older conformers mark a byte-budget stop with a trailing sentinel.
+        if let last = matches.last, last.file.isEmpty,
+           last.text.hasPrefix("[truncated: total output exceeded") {
+            return GrepSearchResult(matches: Array(matches.dropLast()), stop: .bytes)
+        }
+        let limit = params.limit ?? Truncate.grepDefaultLimit
+        return GrepSearchResult(matches: matches, stop: matches.count >= limit ? .limit : nil)
+    }
+}
+
+/// A grep search's matches and, when it ended early, why.
+public struct GrepSearchResult: Sendable, Equatable {
+    public enum Stop: Sendable, Equatable {
+        /// `limit` matches were found.
+        case limit
+        /// The output byte budget was used up.
+        case bytes
+        /// The time budget ran out. The matches are those of the files
+        /// searched so far; `filesFound` counts the files the walk had found,
+        /// and `walkComplete` says whether it had finished.
+        case timeBudget(seconds: Double, filesSearched: Int, filesFound: Int, walkComplete: Bool)
+    }
+
+    public var matches: [GrepMatch]
+    public var stop: Stop?
+
+    public init(matches: [GrepMatch], stop: Stop? = nil) {
+        self.matches = matches
+        self.stop = stop
+    }
 }
 
 public protocol FindOperations: Sendable {
@@ -98,6 +136,14 @@ public struct GrepParams: Sendable {
     public var literal: Bool
     public var context: Int
     public var limit: Int?
+    /// Search files that `.gitignore`, `.ignore` and the repository's
+    /// `info/exclude` leave out, and dependency trees like `node_modules`.
+    /// Version-control directories stay skipped.
+    public var includeIgnored: Bool
+    /// Seconds the search may take before it returns what it found so far.
+    /// Nil means `Truncate.grepDefaultTimeBudgetSeconds`.
+    public var timeBudget: Double?
+    public var cancellation: CancellationHandle?
 
     public init(
         pattern: String,
@@ -106,7 +152,10 @@ public struct GrepParams: Sendable {
         ignoreCase: Bool = false,
         literal: Bool = false,
         context: Int = 0,
-        limit: Int? = nil
+        limit: Int? = nil,
+        includeIgnored: Bool = false,
+        timeBudget: Double? = nil,
+        cancellation: CancellationHandle? = nil
     ) {
         self.pattern = pattern
         self.path = path
@@ -115,6 +164,9 @@ public struct GrepParams: Sendable {
         self.literal = literal
         self.context = context
         self.limit = limit
+        self.includeIgnored = includeIgnored
+        self.timeBudget = timeBudget
+        self.cancellation = cancellation
     }
 }
 
