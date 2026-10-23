@@ -7,8 +7,11 @@ import Testing
 // file gives, wherever the chunk and read boundaries fall.
 
 private func reference(_ text: String, pattern: NSRegularExpression, context: Int, cap: Int, file: String) -> [GrepMatch] {
-    var lines = text.components(separatedBy: "\n")
-    // Not `hasSuffix("\n")`: a text ending in "\r\n" ends in that one Character.
+    // Split on the byte. Neither `components(separatedBy: "\n")` (on Linux it
+    // keeps "\r\n" whole) nor `hasSuffix("\n")` (a text ending in "\r\n" ends
+    // in that one Character) sees every line break.
+    var lines = text.utf8.split(separator: 0x0A, omittingEmptySubsequences: false)
+        .map { String(decoding: Array($0), as: UTF8.self) }
     if text.utf8.last == 0x0A { lines.removeLast() }
     if text.isEmpty { lines = [] }
     var found: [GrepMatch] = []
