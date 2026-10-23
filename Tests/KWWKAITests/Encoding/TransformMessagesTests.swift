@@ -184,6 +184,134 @@ struct TransformMessagesTests {
         #expect(out[0].role == .user)
     }
 
+    private func call(_ id: String, _ name: String = "f") -> AssistantBlock {
+        .toolCall(ToolCall(id: id, name: name, arguments: .null))
+    }
+
+    private func toolResult(_ id: String, _ text: String = "ok", name: String = "f") -> Message {
+        .toolResult(ToolResultMessage(toolCallId: id, toolName: name, content: [.text(TextContent(text: text))]))
+    }
+
+    /// Each message as a short tag, so a whole transcript's shape is one compare.
+    private func shape(_ messages: [Message]) -> [String] {
+        messages.map { message in
+            switch message {
+            case .user(let u):
+                return "user:" + u.content.compactMap { if case .text(let t) = $0 { return t.text } else { return nil } }.joined()
+            case .assistant(let a):
+                let ids = a.content.compactMap { if case .toolCall(let tc) = $0 { return tc.id } else { return nil } }
+                return "assistant[" + ids.joined(separator: ",") + "]"
+            case .toolResult(let r):
+                return "result:\(r.toolCallId)" + (r.isError ? "!" : "")
+            case .system:
+                return "system"
+            }
+        }
+    }
+
+    @Test("parallel calls with one result missing get one synthetic result, after the real one")
+    func parallelCallsPartialResults() {
+        let msgs: [Message] = [
+            .user(UserMessage(text: "go")),
+            assistant([call("a"), call("b"), call("c")], stopReason: .toolUse),
+            toolResult("b"),
+            toolResult("a"),
+            .user(UserMessage(text: "next")),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["user:go", "assistant[a,b,c]", "result:b", "result:a", "result:c!", "user:next"])
+    }
+
+    @Test("a result recorded after a user message moves up to its turn instead of a synthetic one")
+    func lateResultHoisted() {
+        let msgs: [Message] = [
+            assistant([call("a"), call("b")], stopReason: .toolUse),
+            toolResult("a"),
+            .user(UserMessage(text: "steer")),
+            .system(SystemMessage(toolsRemoved: ["x"])),
+            toolResult("b"),
+            assistant([.text(TextContent(text: "done"))]),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["assistant[a,b]", "result:a", "result:b", "user:steer", "system", "assistant[]"])
+        #expect(text(out[2]) == ["ok"])
+    }
+
+    @Test("a restart mid-tool leaves a call that gets a synthetic result before the resumed message")
+    func restartMidTool() {
+        let msgs: [Message] = [
+            .user(UserMessage(text: "build")),
+            assistant([call("a", "bash")], stopReason: .toolUse),
+            .user(UserMessage(text: "are you there?")),
+            assistant([.text(TextContent(text: "yes"))]),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["user:build", "assistant[a]", "result:a!", "user:are you there?", "assistant[]"])
+    }
+
+    @Test("a second result for the same call is dropped")
+    func duplicateResultDropped() {
+        let msgs: [Message] = [
+            assistant([call("a")], stopReason: .toolUse),
+            toolResult("a", "first"),
+            toolResult("a", "again"),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["assistant[a]", "result:a"])
+        #expect(text(out[1]) == ["first"])
+    }
+
+    @Test("a result for an earlier turn's call does not land in a later turn")
+    func staleResultFromEarlierTurnDropped() {
+        let msgs: [Message] = [
+            assistant([call("a")], stopReason: .toolUse),
+            .user(UserMessage(text: "interrupt")),
+            assistant([call("b")], stopReason: .toolUse),
+            toolResult("a"),
+            toolResult("b"),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["assistant[a]", "result:a!", "user:interrupt", "assistant[b]", "result:b"])
+    }
+
+    @Test("ids reused across turns pair each result with its own turn")
+    func reusedIdsAcrossTurns() {
+        let msgs: [Message] = [
+            assistant([call("call_0")], stopReason: .toolUse),
+            toolResult("call_0", "one"),
+            assistant([call("call_0")], stopReason: .toolUse),
+            toolResult("call_0", "two"),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["assistant[call_0]", "result:call_0", "assistant[call_0]", "result:call_0"])
+        #expect(text(out[1]) == ["one"])
+        #expect(text(out[3]) == ["two"])
+    }
+
+    @Test("a result whose call was compacted away is dropped")
+    func resultCutByCompactionDropped() {
+        let msgs: [Message] = [
+            .user(UserMessage(text: "<previous-session-summary>…</previous-session-summary>")),
+            toolResult("gone"),
+            assistant([.text(TextContent(text: "hi"))]),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        #expect(shape(out) == ["user:<previous-session-summary>…</previous-session-summary>", "assistant[]"])
+    }
+
+    @Test("an aborted turn between a call and its result does not cut the pair")
+    func abortedTurnEndsSpan() {
+        let msgs: [Message] = [
+            assistant([call("a")], stopReason: .toolUse),
+            assistant([call("x")], stopReason: .aborted),
+            toolResult("x"),
+            toolResult("a"),
+        ]
+        let out = TransformMessages.repairToolFlow(msgs)
+        // The aborted turn still ends the span: "a" was answered too late to replay.
+        #expect(shape(out) == ["assistant[a]", "result:a!"])
+    }
+
     // MARK: - (e) Surrogate sanitization
 
     // Note: Swift `String`/`Unicode.Scalar` cannot natively hold a lone

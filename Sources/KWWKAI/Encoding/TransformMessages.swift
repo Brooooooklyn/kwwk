@@ -352,61 +352,72 @@ public enum TransformMessages {
 
     // MARK: - (c)+(d) Error-turn skip & tool-flow repair
 
-    /// Skip errored/aborted assistant turns and balance tool calls with
-    /// results: synthesize placeholder tool results for orphaned tool calls and
-    /// drop tool results whose originating tool call was removed.
+    /// Text of the result synthesized for a tool call that has none.
+    static let missingToolResultText = "No result provided"
+
+    /// Skip errored/aborted assistant turns and pair every replayed tool call
+    /// with exactly one result, right after its assistant turn.
+    ///
+    /// A tool-calling turn's span runs to the next assistant message. Within
+    /// it, the first result for each of the turn's calls is kept and moved up
+    /// to sit directly after the turn, ahead of any user or system message
+    /// that landed between them (a steer, a tool declaration, a resume after
+    /// a restart mid-tool). A call with no result gets a synthetic error
+    /// result. Every other tool result is dropped: a second result for the
+    /// same call, a result for another turn's call (ids some providers reuse
+    /// per turn), one whose turn was skipped as failed, or one cut loose by
+    /// compaction. Providers refuse any of these with a 400 (Anthropic,
+    /// OpenAI's "tool messages must follow tool_calls", WorkBuddy's 11148
+    /// "tool calls and tool results do not match"), and the transcript would
+    /// fail the same way on every later turn.
     public static func repairToolFlow(_ messages: [Message]) -> [Message] {
         var result: [Message] = []
-        var pendingToolCalls: [ToolCall] = []
-        var existingResultIds = Set<String>()
-        // Tool-call ids that survived into `result` (so we can drop orphaned
-        // tool results whose assistant turn was skipped).
-        var liveToolCallIds = Set<String>()
-
-        func flushSynthetic() {
-            guard !pendingToolCalls.isEmpty else { return }
-            for tc in pendingToolCalls where !existingResultIds.contains(tc.id) {
-                result.append(.toolResult(ToolResultMessage(
-                    toolCallId: tc.id,
-                    toolName: tc.name,
-                    content: [.text(TextContent(text: "No result provided"))],
-                    isError: true
-                )))
-            }
-            pendingToolCalls = []
-            existingResultIds = []
-        }
-
-        for message in messages {
+        result.reserveCapacity(messages.count)
+        var index = messages.startIndex
+        while index < messages.endIndex {
+            let message = messages[index]
+            index += 1
             switch message {
-            case .assistant(let a):
-                flushSynthetic()
-                // (c) Skip incomplete turns that must not be replayed verbatim.
-                if a.stopReason == .error || a.stopReason == .aborted {
-                    continue
-                }
-                let toolCalls: [ToolCall] = a.content.compactMap {
-                    if case .toolCall(let tc) = $0 { return tc } else { return nil }
-                }
-                if !toolCalls.isEmpty {
-                    pendingToolCalls = toolCalls
-                    existingResultIds = []
-                    for tc in toolCalls { liveToolCallIds.insert(tc.id) }
-                }
-                result.append(message)
-            case .toolResult(let r):
-                // (d) Drop tool results orphaned by a skipped assistant turn.
-                if !liveToolCallIds.contains(r.toolCallId) {
-                    continue
-                }
-                existingResultIds.insert(r.toolCallId)
-                result.append(message)
             case .user, .system:
-                flushSynthetic()
                 result.append(message)
+            case .toolResult:
+                // Outside any live tool-calling turn's span: it answers nothing.
+                continue
+            case .assistant(let a):
+                // (c) Skip incomplete turns that must not be replayed verbatim.
+                if a.stopReason == .error || a.stopReason == .aborted { continue }
+                result.append(message)
+                var seenCallIds = Set<String>()
+                let calls: [ToolCall] = a.content.compactMap {
+                    guard case .toolCall(let tc) = $0, seenCallIds.insert(tc.id).inserted else { return nil }
+                    return tc
+                }
+                guard !calls.isEmpty else { continue }
+                let spanEnd = messages[index...].firstIndex { $0.role == .assistant } ?? messages.endIndex
+                var answered = Set<String>()
+                var others: [Message] = []
+                for later in messages[index..<spanEnd] {
+                    guard case .toolResult(let r) = later else {
+                        others.append(later)
+                        continue
+                    }
+                    // (d) Keep only the first result for one of this turn's calls.
+                    if seenCallIds.contains(r.toolCallId), answered.insert(r.toolCallId).inserted {
+                        result.append(later)
+                    }
+                }
+                for tc in calls where !answered.contains(tc.id) {
+                    result.append(.toolResult(ToolResultMessage(
+                        toolCallId: tc.id,
+                        toolName: tc.name,
+                        content: [.text(TextContent(text: missingToolResultText))],
+                        isError: true
+                    )))
+                }
+                result.append(contentsOf: others)
+                index = spanEnd
             }
         }
-        flushSynthetic()
         return result
     }
 }
