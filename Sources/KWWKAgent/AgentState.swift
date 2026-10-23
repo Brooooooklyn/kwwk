@@ -14,6 +14,7 @@ public final class AgentState: Sendable {
         var model: Model
         var thinkingLevel: ThinkingLevel
         var thinkingDisplay: ThinkingDisplay
+        var serviceTier: ServiceTier?
         var verboseEnabled: Bool
         var tools: [AgentTool]
         var toolCatalog: ToolCatalog?
@@ -80,6 +81,13 @@ public final class AgentState: Sendable {
     public var thinkingDisplay: ThinkingDisplay {
         get { state.withLockedValue { $0.thinkingDisplay } }
         set { state.withLockedValue { $0.thinkingDisplay = newValue } }
+    }
+
+    /// Processing tier for the agent's turns (`StreamOptions.serviceTier`).
+    /// Nil leaves the field out, so the provider's default applies.
+    public var serviceTier: ServiceTier? {
+        get { state.withLockedValue { $0.serviceTier } }
+        set { state.withLockedValue { $0.serviceTier = newValue } }
     }
 
     public var verboseEnabled: Bool {

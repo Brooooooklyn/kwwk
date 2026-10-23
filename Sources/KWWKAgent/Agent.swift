@@ -649,6 +649,7 @@ extension Agent {
             contextCompaction: builtInContextCompactionHook()
         )
         config.currentTools = { [state] in state.effectiveTools }
+        config.serviceTier = state.serviceTier
         config.finalTextOnlyOnLastTurn = finalTextOnlyOnLastTurn
         config.terminalToolName = terminalToolName
         config.terminalToolReminderLimit = terminalToolReminderLimit
