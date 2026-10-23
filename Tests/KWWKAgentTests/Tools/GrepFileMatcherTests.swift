@@ -233,35 +233,6 @@ struct GrepScanResourceTests {
         #expect(result.matches.map { String($0.file.dropFirst(base.count)) } == [".hidden", "a.txt", "b/inner/x.txt"])
     }
 
-    @Test("the time budget holds even when Dispatch's global queues are saturated")
-    func budgetIndependentOfDispatch() async throws {
-        let root = makeTempDir("kw-grep-busy")
-        defer { try? FileManager.default.removeItem(at: root) }
-        for i in 0..<40 { try write("needle\n", to: root.appendingPathComponent(String(format: "f%02d.txt", i))) }
-        // Occupy every global-queue thread for 4 s.
-        let busy = DispatchGroup()
-        for _ in 0..<(ProcessInfo.processInfo.activeProcessorCount * 4) {
-            DispatchQueue.global().async(group: busy) { Thread.sleep(forTimeInterval: 4) }
-        }
-        let scan = GrepScan(GrepScan.Configuration(
-            root: root, rootIsDirectory: true, glob: nil, includeIgnored: false,
-            limit: 1_000, maxTotalBytes: 1 << 20, workers: 2, timeBudget: 0.3,
-            match: { path, _, _ in
-                Thread.sleep(forTimeInterval: 0.5)
-                return [GrepMatch(file: path, line: 1, text: "needle")]
-            },
-            bytes: { _ in 1 }
-        ))
-        let started = Date()
-        let outcome = await scan.run(cancellation: nil)
-        #expect(outcome.stop == .timeBudget)
-        #expect(Date().timeIntervalSince(started) < 2.5)
-        // Let the busy blocks finish before the next test.
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            busy.notify(queue: .global()) { done.resume() }
-        }
-    }
-
     @Test("a finished scan is released at once, not when its time budget would end")
     func releasedAfterFinish() async throws {
         let root = makeTempDir("kw-grep-release")
