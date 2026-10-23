@@ -110,9 +110,9 @@ struct GrepScanTests {
             maxTotalBytes: 1 << 20,
             workers: workers,
             timeBudget: budget,
-            match: { url, _ in
+            match: { path, _, _ in
                 Thread.sleep(forTimeInterval: delay)
-                return [GrepMatch(file: url.path, line: 1, text: "needle")]
+                return [GrepMatch(file: path, line: 1, text: "needle")]
             },
             bytes: { _ in 1 }
         ))

@@ -34,13 +34,13 @@ public struct LocalGrepOperations: GrepOperations {
 
     public func search(params: GrepParams) async throws -> GrepSearchResult {
         try params.cancellation?.throwIfCancelled()
+        let patternString = params.literal
+            ? NSRegularExpression.escapedPattern(for: params.pattern)
+            : params.pattern
+        var options: NSRegularExpression.Options = []
+        if params.ignoreCase { options.insert(.caseInsensitive) }
         let pattern: NSRegularExpression
         do {
-            let patternString = params.literal
-                ? NSRegularExpression.escapedPattern(for: params.pattern)
-                : params.pattern
-            var options: NSRegularExpression.Options = []
-            if params.ignoreCase { options.insert(.caseInsensitive) }
             pattern = try NSRegularExpression(pattern: patternString, options: options)
         } catch {
             throw CodingToolError.invalidArgument("grep: invalid pattern — \(error)")
@@ -57,6 +57,13 @@ public struct LocalGrepOperations: GrepOperations {
         let context = max(0, params.context)
         let budget = Self.timeBudget(params.timeBudget)
 
+        let matcher = GrepFileMatcher(
+            pattern: pattern,
+            patternString: patternString,
+            options: options,
+            context: context,
+            maxLineChars: maxLineChars
+        )
         let scan = GrepScan(GrepScan.Configuration(
             root: URL(fileURLWithPath: params.path),
             rootIsDirectory: isDirectory.boolValue,
@@ -66,8 +73,8 @@ public struct LocalGrepOperations: GrepOperations {
             maxTotalBytes: maxTotalBytes,
             workers: concurrency,
             timeBudget: budget,
-            match: { url, cap in
-                Self.matches(in: url, pattern: pattern, context: context, maxLineChars: maxLineChars, cap: cap)
+            match: { path, cap, shouldStop in
+                matcher.matches(inFileAt: path, cap: cap, shouldStop: shouldStop)
             },
             bytes: { Self.blockBytes($0) }
         ))
@@ -116,74 +123,11 @@ public struct LocalGrepOperations: GrepOperations {
         return min(requested, Truncate.grepMaxTimeBudgetSeconds)
     }
 
-    /// Up to `cap` matches in one file, or none for unreadable, binary and
-    /// non-UTF-8 files.
-    static func matches(
-        in url: URL,
-        pattern: NSRegularExpression,
-        context: Int,
-        maxLineChars: Int,
-        cap: Int
-    ) -> [GrepMatch] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        // Skip files that look binary (ripgrep does the same by ignoring
-        // files with NUL bytes).
-        if looksBinary(data) { return [] }
-        guard let text = String(data: data, encoding: .utf8) else { return [] }
-        let lines = text.components(separatedBy: "\n")
-        var found: [GrepMatch] = []
-        for (i, line) in lines.enumerated() {
-            let ns = line as NSString
-            guard pattern.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) != nil else { continue }
-            found.append(makeMatch(file: url.path, lines: lines, index: i, context: context, maxLineChars: maxLineChars))
-            if found.count >= cap { break }
-        }
-        return found
-    }
-
-    private static func makeMatch(
-        file: String,
-        lines: [String],
-        index i: Int,
-        context: Int,
-        maxLineChars: Int
-    ) -> GrepMatch {
-        let text = Truncate.truncateLine(lines[i], maxChars: maxLineChars).text
-        var before: [GrepContextLine] = []
-        var after: [GrepContextLine] = []
-        if context > 0 {
-            for j in max(0, i - context)..<i {
-                before.append(
-                    GrepContextLine(
-                        line: j + 1,
-                        text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text
-                    )
-                )
-            }
-            let end = min(lines.count - 1, i + context)
-            if i < end {
-                for j in (i + 1)...end {
-                    after.append(
-                        GrepContextLine(
-                            line: j + 1,
-                            text: Truncate.truncateLine(lines[j], maxChars: maxLineChars).text
-                        )
-                    )
-                }
-            }
-        }
-        return GrepMatch(file: file, line: i + 1, text: text, before: before, after: after)
-    }
-
     static func blockBytes(_ m: GrepMatch) -> Int {
         var total = "\(m.file):\(m.line):\(m.text)\n".utf8.count
         for c in m.before { total += "\(m.file)-\(c.line)-\(c.text)\n".utf8.count }
         for c in m.after { total += "\(m.file)-\(c.line)-\(c.text)\n".utf8.count }
         return total
-    }
-
-    private static func looksBinary(_ data: Data) -> Bool {
-        data.prefix(8192).contains(0)
     }
 }
 
