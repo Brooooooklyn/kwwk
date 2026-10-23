@@ -281,6 +281,56 @@ struct BashToolBackgroundTests {
         ])
     }
 
+    @Test(
+        "build-and-test policy allows AirBuild runners and python test scripts",
+        arguments: [
+            "runtest 3F2A --source /tmp/frozen-worktree --script upper-layout-1491",
+            "runbuild 3F2A --follow --run 42",
+            "runmacos 3F2A --source .",
+            "python3 -B /tmp/dir/test_synthetic.py -v",
+            "python3 -m unittest discover -s tests",
+            "python -X dev -m pytest -q",
+        ]
+    )
+    func buildAndTestPolicyAllowsRunnersAndPythonTests(command: String) async throws {
+        let cwdDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: cwdDir) }
+        let operations = RecordingBashOperations()
+        let tool = createBashTool(cwd: cwdDir.path, options: BashToolOptions(
+            environment: testBashEnvironment,
+            operations: operations,
+            commandPolicy: .buildAndTestOnly
+        ))
+
+        _ = try await tool.execute("allowed", .object(["command": .string(command)]), nil, nil)
+        #expect(await operations.recordedCommands() == [command])
+    }
+
+    @Test(
+        "build-and-test policy refuses non-test python and names what is allowed",
+        arguments: ["python3 -c 'import os'", "python3 scripts/deploy.py", "rm -rf build"]
+    )
+    func buildAndTestPolicyRefusalNamesAllowed(command: String) async throws {
+        let cwdDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: cwdDir) }
+        let operations = RecordingBashOperations()
+        let tool = createBashTool(cwd: cwdDir.path, options: BashToolOptions(
+            environment: testBashEnvironment,
+            operations: operations,
+            commandPolicy: .buildAndTestOnly
+        ))
+
+        do {
+            _ = try await tool.execute("refused", .object(["command": .string(command)]), nil, nil)
+            Issue.record("expected \(command) to be refused")
+        } catch {
+            let message = "\(error)"
+            #expect(message.contains("allowed:"))
+            #expect(message.contains("runtest"))
+        }
+        #expect(await operations.recordedCommands().isEmpty)
+    }
+
     @Test("build-and-test policy rejects pipelines because output is already bounded")
     func buildAndTestPolicyRejectsPipeline() async throws {
         let cwdDir = makeTempDir()

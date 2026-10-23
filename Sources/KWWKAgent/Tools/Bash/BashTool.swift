@@ -447,9 +447,7 @@ private func validateBuildAndTestWords(_ originalWords: [String]) throws {
     case "swift":
         accepted = loweredArguments.first.map { ["build", "test"].contains($0) } ?? false
     case "python", "python3":
-        accepted = loweredArguments.count >= 2
-            && loweredArguments[0] == "-m"
-            && ["pytest", "unittest", "tox", "nox"].contains(loweredArguments[1])
+        accepted = pythonArgumentsAreTest(arguments)
     case "npm", "pnpm", "yarn", "bun":
         accepted = packageManagerArgumentsAreBuildOrTest(loweredArguments)
     case "cargo":
@@ -474,15 +472,63 @@ private func validateBuildAndTestWords(_ originalWords: [String]) throws {
         accepted = loweredArguments.contains { buildOrTestToken($0) }
     case "pytest", "py.test", "tox", "nox", "rspec", "rake", "jest", "vitest", "mocha", "ctest":
         accepted = true
+    case "runtest", "runbuild", "runmacos":
+        // AirBuild's sandbox build/test entry points: each sends the project to
+        // a remote builder and runs one Build there, which is the documented
+        // way to build and test there (the sandbox has no local Xcode).
+        accepted = true
     default:
         accepted = false
     }
 
     guard accepted else {
         throw RestrictedBashCommandError(
-            message: "executable '\(executable)' is not an allowed build/test invocation"
+            message: "executable '\(executable)' is not an allowed build/test invocation "
+                + "(allowed: \(allowedBuildAndTestInvocations))"
         )
     }
+}
+
+/// What the refusal names as allowed, so a rejected call can be rewritten
+/// into one that runs instead of being retried as-is.
+private let allowedBuildAndTestInvocations = [
+    "swift build|test", "xcodebuild", "runtest", "runbuild", "runmacos",
+    "python3 -m pytest|unittest|tox|nox", "python3 <test_*.py|*_test.py>",
+    "pytest", "npm|pnpm|yarn|bun test|build|check|lint|typecheck|run <build/test script>",
+    "cargo build|test|check|clippy|bench", "go build|test|vet", "dotnet build|test",
+    "mix compile|test", "make|ninja <build/test target>", "cmake --build",
+    "gradle|mvn|bazel <build/test task>", "tox", "nox", "rspec", "rake", "jest",
+    "vitest", "mocha", "ctest",
+].joined(separator: ", ")
+
+/// `python3 [flags] -m pytest|unittest|tox|nox ...`, or
+/// `python3 [flags] <script>` where the script is named like a test file
+/// (`test_*.py`, `*_test.py`, `tests.py`). Interpreter flags such as `-B`,
+/// `-u`, `-X dev` and `-W error` are skipped; `-c` (inline code) is not a
+/// test invocation.
+private func pythonArgumentsAreTest(_ arguments: [String]) -> Bool {
+    var index = 0
+    while index < arguments.count {
+        let argument = arguments[index]
+        if argument == "-m" {
+            guard index + 1 < arguments.count else { return false }
+            return ["pytest", "unittest", "tox", "nox"].contains(arguments[index + 1].lowercased())
+        }
+        if argument == "-c" || argument == "-" { return false }
+        if argument == "-X" || argument == "-W" || argument == "--check-hash-based-pycs" {
+            index += 2
+            continue
+        }
+        if argument.hasPrefix("-") {
+            index += 1
+            continue
+        }
+        let script = URL(fileURLWithPath: argument).lastPathComponent.lowercased()
+        guard script.hasSuffix(".py") else { return false }
+        let stem = String(script.dropLast(3))
+        return stem.hasPrefix("test_") || stem.hasSuffix("_test") || stem == "tests" || stem == "test"
+    }
+    return false
 }
 
 private func isShellEnvironmentAssignment(_ word: String) -> Bool {

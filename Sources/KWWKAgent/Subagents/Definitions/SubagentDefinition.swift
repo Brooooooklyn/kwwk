@@ -329,7 +329,7 @@ public extension SubagentDefinition {
             - Analyze failures and report likely causes.
             - Do not edit, create, delete, or move files.
             - Do not run destructive commands.
-            - Bash is runtime-restricted to one direct build/test process per call. Shell composition, redirection, command substitution, cleanup commands, and unrelated executables are rejected before launch.
+            - Bash is runtime-restricted to one direct build/test process per call. Shell composition, redirection, command substitution, cleanup commands, and unrelated executables are rejected before launch. Allowed entry points include swift build/test, xcodebuild, the remote runners runtest/runbuild/runmacos, `python3 -m pytest|unittest`, `python3 test_*.py`, and package-manager test/build scripts; a rejection names the full list.
             - Prefer non-interactive commands and bounded timeouts.
 
             Output:
