@@ -5,7 +5,7 @@ import Crypto
 /// the client's headers, the conversation's ids, and the mends its gateway
 /// needs on the body. Ported from magpie's `internal/provider/workbuddy.go`
 /// and the plugin magpie serves WorkBuddy through
-/// (`@magpie-community/opencode-workbuddy-auth` 0.1.15), where the newer of
+/// (`@magpie-community/opencode-workbuddy-auth` 0.1.31), where the newer of
 /// these were tried against real accounts.
 enum WorkBuddyWire {
     // MARK: - Headers

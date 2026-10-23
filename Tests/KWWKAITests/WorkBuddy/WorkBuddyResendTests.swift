@@ -5,9 +5,10 @@ import Testing
 import FoundationNetworking
 #endif
 
-// The plugin's aftertools.test.mjs and systemasuser.test.mjs
-// (`@magpie-community/opencode-workbuddy-auth` 0.1.20, 0.1.29): a WorkBuddy
-// that refuses a chat as the real one did, and what kwwk sends it again.
+// The plugin's aftertools.test.mjs, systemasuser.test.mjs, reset.test.mjs
+// and unauthorized.test.mjs (`@magpie-community/opencode-workbuddy-auth`
+// 0.1.20, 0.1.29, 0.1.24, 0.1.31): a WorkBuddy that refuses a chat as the
+// real one did, and what kwwk sends it again.
 
 /// A WorkBuddy that answers each request by what it holds, recording each.
 private final class ScriptedWorkBuddy: HTTPClient, @unchecked Sendable {
@@ -433,5 +434,97 @@ struct WorkBuddyResendTests {
             .replacingOccurrences(of: "Read calc.py.", with: "")
             .replacingOccurrences(of: WorkBuddyWire.defaultSystemPrompt, with: "")
         #expect(added.range(of: "magpie|workbuddy|codebuddy|opencode|claude|codex|kwwk", options: [.regularExpression, .caseInsensitive]) == nil)
+    }
+
+    // MARK: - A reset past 2 MiB
+
+    /// The front door as measured: a refused token on a body past 2 MiB is
+    /// a reset connection, the billing API a 401.
+    private static func frontDoor(meter: Int, challenge: String? = nil) -> ScriptedWorkBuddy {
+        ScriptedWorkBuddy { sent in
+            if sent.url.path == "/billing/meter/get-user-resource-summary" {
+                return .init(status: meter, body: "", headers: challenge.map { ["WWW-Authenticate": $0] } ?? [:])
+            }
+            if (sent.body?.count ?? 0) > WorkBuddyChatClient.edgeReads { throw URLError(.networkConnectionLost) }
+            return .init(status: 401, body: "<html><body>401 Authorization Required</body></html>")
+        }
+    }
+
+    private static let long = Context(
+        systemPrompt: "You are kwwk.",
+        messages: [.user(UserMessage(text: String(repeating: "a", count: WorkBuddyChatClient.edgeReads + 1)))]
+    )
+
+    @Test("A chat past 2 MiB reset with a refused sign-in is that 401, a token to renew")
+    func resetPastEdge() async throws {
+        let service = Self.frontDoor(meter: 401, challenge: #"Bearer realm="copilot", error="invalid_token""#)
+        let provider = WorkBuddyProvider(site: .international, client: service)
+        let reply = await run(provider, model: "glm-5.3", Self.long)
+        let failure = try #require(reply.failure)
+        #expect(failure.httpStatus == 401)
+        #expect(failure.category == .authentication)
+        #expect(failure.isCredentialRejection)
+        #expect(failure.message.hasPrefix("WorkBuddy AI refused this account's sign-in (401). It closes the connection"))
+        #expect(failure.message.contains("this one was 2.0 MiB"))
+
+        // The chat once, the billing API once, asked with the chat's sign-in.
+        #expect(service.chats.count == 1)
+        let meter = try #require(service.sent.last)
+        #expect(meter.url.absoluteString == "https://www.workbuddy.ai/billing/meter/get-user-resource-summary")
+        #expect(meter.body == Data("{}".utf8))
+        #expect(meter.headers["Authorization"] == "Bearer own-access")
+        #expect(meter.headers["X-User-Id"] == "u1")
+        #expect(meter.headers["X-Domain"] == "www.workbuddy.ai")
+        #expect(meter.headers["User-Agent"] == "WorkBuddy/5.5.6")
+        #expect(meter.headers["X-Conversation-ID"] == nil)
+    }
+
+    @Test("A reset the billing API doesn't explain, a smaller chat and a cancelled one stay as they were")
+    func resetOtherwise() async throws {
+        let accepted = Self.frontDoor(meter: 200)
+        let kept = await run(WorkBuddyProvider(site: .china, client: accepted), model: "glm-5.3", Self.long)
+        #expect(kept.failure?.category == .transport)
+        #expect(accepted.sent.count == 2)
+
+        // A smaller chat the front door answers itself; the billing API isn't asked.
+        let small = ScriptedWorkBuddy { sent in
+            if sent.url.path.hasPrefix("/billing") { return .init(status: 401, body: "") }
+            throw URLError(.networkConnectionLost)
+        }
+        let short = await run(WorkBuddyProvider(site: .china, client: small), model: "glm-5.3", Context(
+            systemPrompt: "You are kwwk.", messages: [.user(UserMessage(text: "hi"))]
+        ))
+        #expect(short.failure?.category == .transport)
+        #expect(small.sent.count == 1)
+
+        let timedOut = ScriptedWorkBuddy { sent in
+            if sent.url.path.hasPrefix("/billing") { return .init(status: 401, body: "") }
+            throw URLError(.timedOut)
+        }
+        _ = await run(WorkBuddyProvider(site: .china, client: timedOut), model: "glm-5.3", Self.long)
+        #expect(timedOut.sent.count == 1)
+    }
+
+    // The plugin's unauthorized.test.mjs (0.1.31, f658842): a chat 401 is
+    // renewed once and sent again. kwwk's agent loop does that for any
+    // refused credential (`isCredentialRejection`), so the front door's
+    // HTML 401 must read as one after WorkBuddy's own wording is applied.
+    @Test("The front door's 401 page is a refused credential, for the agent loop to renew once")
+    func unauthorizedPage() async throws {
+        let service = ScriptedWorkBuddy { _ in
+            .init(
+                status: 401,
+                body: "<html>\r\n<head><title>401 Authorization Required</title></head>\r\n<body><center><h1>401 Authorization Required</h1></center>\r\n<hr><center>APISIX</center>\r\n</body>\r\n</html>",
+                headers: ["WWW-Authenticate": #"Bearer realm="copilot", error="invalid_token""#]
+            )
+        }
+        let reply = await run(WorkBuddyProvider(site: .international, client: service), model: "glm-5.3", Context(
+            systemPrompt: "You are kwwk.", messages: [.user(UserMessage(text: "hi"))]
+        ))
+        let failure = try #require(reply.failure)
+        #expect(failure.httpStatus == 401)
+        #expect(failure.isCredentialRejection)
+        #expect(failure.outcome == .signInRequired)
+        #expect(service.chats.count == 1)
     }
 }
