@@ -360,6 +360,19 @@ struct ProviderVariantsTests {
         #expect(payload["store"] as? Bool == false)
     }
 
+    @Test("An API-key login takes the catalog's compat and thinking levels",
+          arguments: [("anthropic-api-key", "claude-fable-5"), ("openai-api-key", "gpt-4"), ("google-api-key", "gemini-3-flash-preview")])
+    func apiKeyCatalogEntry(storeId: String, id: String) async throws {
+        let store = OAuthStore()
+        try await store.set(OAuthCredentials(access: "key", refresh: "", expires: Int64.max), for: storeId)
+        let resolved = try #require(try await registerStored(
+            storeId: storeId, store: store, modelOverride: id, primeToken: false
+        ))
+        let catalog = try #require(ModelsCatalog.models(for: storeId.replacingOccurrences(of: "-api-key", with: "")).first { $0.id == id })
+        #expect(resolved.model.compat == catalog.compat)
+        #expect(resolved.model.thinkingLevelMap == catalog.thinkingLevelMap)
+    }
+
     @Test("A Codex login takes the catalog's tiers, and ultrafast reaches only a model that lists it",
           arguments: [("gpt-6.1-sol", [ServiceTier.priority, .ultrafast], "ultrafast"), ("gpt-6-sol", [.priority], nil)])
     func codexUltrafast(id: String, tiers: [ServiceTier], sent: String?) async throws {

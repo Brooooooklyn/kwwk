@@ -7,6 +7,8 @@ public struct AgentLoopConfig: Sendable {
     public var model: Model
     public var reasoning: ReasoningLevel?
     public var thinkingBudgets: ThinkingBudgets?
+    /// Processing tier sent with every turn's request. Nil = provider default.
+    public var serviceTier: ServiceTier?
     public var sessionId: String?
     /// Workspace root reported to providers with a server-driven harness
     /// (Cursor's requestContext env). Nil = don't report one.

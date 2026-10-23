@@ -564,6 +564,36 @@ struct AgentIntegrationTests {
         #expect(streamed?.options?.resolvedAuth?.token == "resolved-token")
         #expect(streamed?.options?.metadata?["deployment"] == .string("prod"))
     }
+
+    @Test("sends the state's service tier with each turn")
+    func sendsServiceTier() async throws {
+        let registration = await registerFauxProvider()
+        defer { registration.unregister() }
+
+        let capture = StreamAuthCapture()
+        let streamFn: StreamFn = { model, _, options in
+            await capture.record(model: model, options: options)
+            let message = AssistantMessage(
+                content: [.text(TextContent(text: "ok"))],
+                api: model.api,
+                provider: model.provider,
+                model: model.id
+            )
+            let stream = AssistantMessageStream()
+            stream.push(.start(partial: message))
+            stream.push(.done(reason: .stop, message: message))
+            stream.end(message)
+            return stream
+        }
+        let agent = Agent(initialState: AgentInitialState(model: registration.getModel()), streamFn: streamFn)
+
+        try await agent.prompt("hi")
+        #expect(await capture.streamed?.options?.serviceTier == nil)
+
+        agent.state.serviceTier = .priority
+        try await agent.prompt("again")
+        #expect(await capture.streamed?.options?.serviceTier == .priority)
+    }
 }
 
 @Suite("Agent.continue")

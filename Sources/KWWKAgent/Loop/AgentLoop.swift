@@ -722,6 +722,7 @@ public enum AgentLoop {
                 reasoning: terminalToolOnly ? nil : config.reasoning,
                 thinkingBudgets: terminalToolOnly ? nil : config.thinkingBudgets,
                 cancellation: cancellation,
+                serviceTier: config.serviceTier,
                 toolChoice: terminalToolOnly
                     ? config.terminalToolName.map { ToolChoice.tool(name: $0) }
                     : (finalTextOnly ? ToolChoice.none : config.toolChoice),
