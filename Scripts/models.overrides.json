@@ -1,7 +1,7 @@
 {
   "$note": "kwwk's corrections to pi-mono's catalog, laid over it by kwwk-generate-models. Objects merge key by key, other values replace, null removes. Say why and when beside each group.",
   "kimi-coding": {
-    "$note": "kwwk speaks Anthropic Messages to Kimi's coding endpoint (registerKimiCoding pins anthropic-messages), so the Chat Completions wire pi-mono moved kimi-coding to on 2026-10-15 is held back here: base URL without /v1, Anthropic compat, no Chat Completions flags. That endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k and the k3.1-pro pair are priced, not free (the pair at Moonshot API's list price, 2026-10-24); k3.1 has no thinking levels upstream yet, so its map stays pi's.",
+    "$note": "kwwk speaks Anthropic Messages to Kimi's coding endpoint (registerKimiCoding pins anthropic-messages), so the Chat Completions wire pi-mono moved kimi-coding to on 2026-10-15 is held back here: base URL without /v1, Anthropic compat, no Chat Completions flags. That endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k and the k3.1-pro pair are priced, not free (the pair at Moonshot API's list price, 2026-10-24); the k3.1 pair takes k3's map, since models.dev lists the same efforts for both (low, high, max; 2026-10-24) and pi reads them only for its k3-style ids.",
     "k3-256k": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.kimi.com/coding",
@@ -86,6 +86,16 @@
         "input": 2,
         "output": 10,
         "cacheRead": 0.2
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
       }
     },
     "k3.1-pro-highspeed": {
@@ -100,6 +110,118 @@
         "input": 4,
         "output": 20,
         "cacheRead": 0.2
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    }
+  },
+  "moonshotai": {
+    "$note": "pi gives Kimi K3.1 Pro on Moonshot's API the generic wire (deepseek thinking, no reasoning_effort, no levels) because its K3 rules match the id kimi-k3 only. K3.1 is served on the same endpoint as K3 and models.dev lists the same efforts for both (low, high, max; 2026-10-24), so the pair takes kimi-k3's compat and map as they are.",
+    "kimi-k3.1-pro": {
+      "compat": {
+        "$replace": true,
+        "maxTokensField": "max_tokens",
+        "requiresReasoningContentOnAssistantMessages": true,
+        "supportsDeveloperRole": false,
+        "supportsMidConvoSystemMessages": true,
+        "supportsMidConvoToolAdditions": true,
+        "supportsReasoningEffort": true,
+        "supportsStore": false,
+        "supportsStrictMode": false,
+        "thinkingFormat": "openai"
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    },
+    "kimi-k3.1-pro-highspeed": {
+      "compat": {
+        "$replace": true,
+        "maxTokensField": "max_tokens",
+        "requiresReasoningContentOnAssistantMessages": true,
+        "supportsDeveloperRole": false,
+        "supportsMidConvoSystemMessages": true,
+        "supportsMidConvoToolAdditions": true,
+        "supportsReasoningEffort": true,
+        "supportsStore": false,
+        "supportsStrictMode": false,
+        "thinkingFormat": "openai"
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    }
+  },
+  "moonshotai-cn": {
+    "$note": "As moonshotai: Moonshot's China endpoint serves the same K3.1 pair, given kimi-k3's compat and map.",
+    "kimi-k3.1-pro": {
+      "compat": {
+        "$replace": true,
+        "maxTokensField": "max_tokens",
+        "requiresReasoningContentOnAssistantMessages": true,
+        "supportsDeveloperRole": false,
+        "supportsMidConvoSystemMessages": true,
+        "supportsMidConvoToolAdditions": true,
+        "supportsReasoningEffort": true,
+        "supportsStore": false,
+        "supportsStrictMode": false,
+        "thinkingFormat": "openai"
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
+      }
+    },
+    "kimi-k3.1-pro-highspeed": {
+      "compat": {
+        "$replace": true,
+        "maxTokensField": "max_tokens",
+        "requiresReasoningContentOnAssistantMessages": true,
+        "supportsDeveloperRole": false,
+        "supportsMidConvoSystemMessages": true,
+        "supportsMidConvoToolAdditions": true,
+        "supportsReasoningEffort": true,
+        "supportsStore": false,
+        "supportsStrictMode": false,
+        "thinkingFormat": "openai"
+      },
+      "thinkingLevelMap": {
+        "$replace": true,
+        "high": "high",
+        "low": "low",
+        "max": "max",
+        "medium": null,
+        "minimal": null,
+        "off": null,
+        "xhigh": null
       }
     }
   },

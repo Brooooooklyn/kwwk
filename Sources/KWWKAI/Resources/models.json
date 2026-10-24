@@ -19098,7 +19098,13 @@
       "provider" : "kimi-coding",
       "reasoning" : true,
       "thinkingLevelMap" : {
-        "off" : null
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
       }
     },
     "k3.1-pro-highspeed" : {
@@ -19135,7 +19141,13 @@
       "provider" : "kimi-coding",
       "reasoning" : true,
       "thinkingLevelMap" : {
-        "off" : null
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
       }
     },
     "kimi-for-coding" : {
@@ -20822,11 +20834,14 @@
       "baseUrl" : "https:\/\/api.moonshot.ai\/v1",
       "compat" : {
         "maxTokensField" : "max_tokens",
+        "requiresReasoningContentOnAssistantMessages" : true,
         "supportsDeveloperRole" : false,
-        "supportsReasoningEffort" : false,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsMidConvoToolAdditions" : true,
+        "supportsReasoningEffort" : true,
         "supportsStore" : false,
         "supportsStrictMode" : false,
-        "thinkingFormat" : "deepseek"
+        "thinkingFormat" : "openai"
       },
       "contextWindow" : 1048576,
       "cost" : {
@@ -20853,18 +20868,30 @@
       "maxTokens" : 1048576,
       "name" : "Kimi K3.1 Pro",
       "provider" : "moonshotai",
-      "reasoning" : true
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
     },
     "kimi-k3.1-pro-highspeed" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/api.moonshot.ai\/v1",
       "compat" : {
         "maxTokensField" : "max_tokens",
+        "requiresReasoningContentOnAssistantMessages" : true,
         "supportsDeveloperRole" : false,
-        "supportsReasoningEffort" : false,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsMidConvoToolAdditions" : true,
+        "supportsReasoningEffort" : true,
         "supportsStore" : false,
         "supportsStrictMode" : false,
-        "thinkingFormat" : "deepseek"
+        "thinkingFormat" : "openai"
       },
       "contextWindow" : 1048576,
       "cost" : {
@@ -20891,7 +20918,16 @@
       "maxTokens" : 1048576,
       "name" : "Kimi K3.1 Pro Highspeed",
       "provider" : "moonshotai",
-      "reasoning" : true
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
     }
   },
   "moonshotai-cn" : {
@@ -21073,11 +21109,14 @@
       "baseUrl" : "https:\/\/api.moonshot.cn\/v1",
       "compat" : {
         "maxTokensField" : "max_tokens",
+        "requiresReasoningContentOnAssistantMessages" : true,
         "supportsDeveloperRole" : false,
-        "supportsReasoningEffort" : false,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsMidConvoToolAdditions" : true,
+        "supportsReasoningEffort" : true,
         "supportsStore" : false,
         "supportsStrictMode" : false,
-        "thinkingFormat" : "deepseek"
+        "thinkingFormat" : "openai"
       },
       "contextWindow" : 1048576,
       "cost" : {
@@ -21104,18 +21143,30 @@
       "maxTokens" : 1048576,
       "name" : "Kimi K3.1 Pro",
       "provider" : "moonshotai-cn",
-      "reasoning" : true
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
     },
     "kimi-k3.1-pro-highspeed" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/api.moonshot.cn\/v1",
       "compat" : {
         "maxTokensField" : "max_tokens",
+        "requiresReasoningContentOnAssistantMessages" : true,
         "supportsDeveloperRole" : false,
-        "supportsReasoningEffort" : false,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsMidConvoToolAdditions" : true,
+        "supportsReasoningEffort" : true,
         "supportsStore" : false,
         "supportsStrictMode" : false,
-        "thinkingFormat" : "deepseek"
+        "thinkingFormat" : "openai"
       },
       "contextWindow" : 1048576,
       "cost" : {
@@ -21142,7 +21193,16 @@
       "maxTokens" : 1048576,
       "name" : "Kimi K3.1 Pro Highspeed",
       "provider" : "moonshotai-cn",
-      "reasoning" : true
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
     }
   },
   "nvidia" : {
