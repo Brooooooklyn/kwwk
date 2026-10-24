@@ -68,12 +68,16 @@ final class IgnoreMatcher {
         let regex: NSRegularExpression
         let negated: Bool
         let dirOnly: Bool
+        /// Paths outside this directory prefix (relative, ending in `/`)
+        /// cannot match; empty means any path. Lets a deep tree with many
+        /// nested ignore files skip most rules without running a regex.
+        let scope: String
     }
     private var rules: [Rule] = []
 
     /// Add raw gitignore patterns (already prefix-adjusted). Each becomes one
     /// ordered rule; invalid patterns are skipped.
-    func add(_ patterns: [String]) {
+    func add(_ patterns: [String], scope: String = "") {
         for raw in patterns {
             var pattern = raw
             var negated = false
@@ -88,7 +92,7 @@ final class IgnoreMatcher {
             }
             guard !pattern.isEmpty else { continue }
             guard let regex = IgnoreMatcher.compile(pattern) else { continue }
-            rules.append(Rule(regex: regex, negated: negated, dirOnly: dirOnly))
+            rules.append(Rule(regex: regex, negated: negated, dirOnly: dirOnly, scope: scope))
         }
     }
 
@@ -104,6 +108,7 @@ final class IgnoreMatcher {
         let path = isDir ? String(relPath.dropLast()) : relPath
         var matched = false
         for rule in rules {
+            if !rule.scope.isEmpty && !path.hasPrefix(rule.scope) { continue }
             // A dir-only rule matches the directory itself and everything under
             // it. For a non-dir query, test the path's ancestor segments too so
             // a re-included directory (`!keep/`) also re-includes its contents
@@ -164,6 +169,19 @@ final class IgnoreMatcher {
             case "?":
                 regex += "[^/]"
                 i += 1
+            case "[":
+                // A bracket expression like `*.py[cod]` or `[!.]*`; an
+                // unclosed `[` is literal.
+                if let (cls, next) = bracketClass(chars, from: i) {
+                    regex += cls
+                    i = next
+                } else {
+                    regex += "\\["
+                    i += 1
+                }
+            case "\\" where i + 1 < chars.count:
+                regex += NSRegularExpression.escapedPattern(for: String(chars[i + 1]))
+                i += 2
             default:
                 regex += NSRegularExpression.escapedPattern(for: String(c))
                 i += 1
@@ -181,6 +199,48 @@ final class IgnoreMatcher {
         // Allow matching a directory and everything beneath it.
         let suffix = "(?:/.*)?$"
         return try? NSRegularExpression(pattern: prefix + regex + suffix)
+    }
+
+    /// Translates a gitignore bracket expression starting at `chars[start]`
+    /// (`[`) into a regex class, returning it and the index after `]`. A
+    /// leading `!` or `^` negates; a `]` right after the opening (or after the
+    /// negation) is literal. Classes never match `/`.
+    static func bracketClass(_ chars: [Character], from start: Int) -> (String, Int)? {
+        var i = start + 1
+        var negated = false
+        if i < chars.count && (chars[i] == "!" || chars[i] == "^") {
+            negated = true
+            i += 1
+        }
+        var body = ""
+        var first = true
+        while i < chars.count {
+            let c = chars[i]
+            if c == "]" && !first {
+                guard !body.isEmpty else { return nil }
+                return ((negated ? "[^/" : "[") + body + "]", i + 1)
+            }
+            first = false
+            switch c {
+            case "\\":
+                if i + 1 < chars.count {
+                    body += "\\" + String(chars[i + 1])
+                    i += 2
+                    continue
+                }
+                body += "\\\\"
+            case "-":
+                body += "-"
+            case "[", "]", "^", "&", "~":
+                body += "\\" + String(c)
+            case "/":
+                return nil
+            default:
+                body += NSRegularExpression.escapedPattern(for: String(c))
+            }
+            i += 1
+        }
+        return nil
     }
 
     // MARK: - pi ports

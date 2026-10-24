@@ -1,5 +1,12 @@
 import Foundation
 import KWWKAI
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 // The engine behind `LocalGrepOperations`: one thread walks the tree while a
 // small pool reads and matches files, all under one time budget.
@@ -28,6 +35,11 @@ struct GrepScanOutcome: Sendable {
 }
 
 /// One search's shared state. Every mutable field is guarded by `condition`.
+///
+/// Memory stays bounded however big the tree is: the walker blocks once
+/// `maxPending` paths wait to be read, workers do not run more than `window`
+/// files ahead of the oldest unfinished one, and each worker reads in bounded
+/// chunks (`GrepFileMatcher`).
 final class GrepScan: @unchecked Sendable {
     struct Configuration: Sendable {
         var root: URL
@@ -38,27 +50,38 @@ final class GrepScan: @unchecked Sendable {
         var maxTotalBytes: Int
         var workers: Int
         var timeBudget: TimeInterval
-        var match: @Sendable (URL, Int) -> [GrepMatch]
+        /// Matches one file: path, match cap, and a check that says the scan
+        /// has ended so a long file can be abandoned.
+        var match: @Sendable (String, Int, () -> Bool) -> [GrepMatch]
         var bytes: @Sendable (GrepMatch) -> Int
     }
+
+    /// Paths found but not yet claimed, at most.
+    static let maxPending = 4096
+    /// How far past the oldest unfinished file workers may claim. Bounds the
+    /// results held out of order behind a slow file.
+    static let window = 4096
 
     private let configuration: Configuration
     private let condition = NSCondition()
 
-    // Walk output, appended by the walker thread.
-    private var files: [URL] = []
+    // Found paths not yet claimed, each with its walk-order index.
+    private var pending: [(index: Int, path: String)] = []
+    private var pendingHead = 0
+    private var filesFound = 0
     private var walkComplete = false
-    // Next file index a worker will claim.
-    private var nextIndex = 0
-    // Per-file results; nil while the file is unsearched or in flight.
-    private var results: [[GrepMatch]?] = []
+    private var walkerWaiting = false
+    private var windowWaiters = 0
     private var filesSearched = 0
-    // Contiguous searched prefix [0, prefixEnd) and what it holds, so the
-    // match limit and byte budget can stop the scan as soon as the first
-    // `limit` matches in walk order are known (identical to a serial scan).
+    // Results in walk order for [0, prefixEnd); later finished files wait in
+    // `ahead` (only those with matches) and `done` until the prefix reaches
+    // them. The limit and byte budget apply to the prefix, so a stop returns
+    // exactly what a serial scan returns.
     private var prefixEnd = 0
-    private var prefixMatches = 0
+    private var prefixMatches: [GrepMatch] = []
     private var prefixBytes = 0
+    private var ahead: [Int: [GrepMatch]] = [:]
+    private var done: Set<Int> = []
 
     private var runningWorkers = 0
     private var stop: GrepScanStop?
@@ -89,11 +112,19 @@ final class GrepScan: @unchecked Sendable {
         condition.lock()
         runningWorkers = workers
         if !configuration.rootIsDirectory {
-            files = [configuration.root]
-            results = [nil]
+            pending = [(0, configuration.root.path)]
+            filesFound = 1
             walkComplete = true
         }
+        let alreadyFinished = finished
         condition.unlock()
+        if alreadyFinished {
+            // Cancelled before it started: no threads.
+            condition.lock()
+            runningWorkers = 0
+            condition.unlock()
+            return
+        }
 
         if configuration.rootIsDirectory {
             let walker = Thread { [self] in walk() }
@@ -105,8 +136,25 @@ final class GrepScan: @unchecked Sendable {
             worker.name = "kwwk.grep.\(n)"
             worker.start()
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + configuration.timeBudget) { [self] in
-            halt(.timeBudget)
+        // The budget has its own thread rather than a Dispatch timer: the
+        // global queues are only as wide as the CPU count, and a busy process
+        // (on a 4-core CI runner, 9 s late) can starve the timer.
+        let deadline = Date(timeIntervalSinceNow: configuration.timeBudget)
+        let watchdog = Thread { [self] in watch(until: deadline) }
+        watchdog.name = "kwwk.grep.deadline"
+        watchdog.start()
+    }
+
+    /// Ends the scan at `deadline` unless it ends first; wakes on every
+    /// broadcast, so it exits as soon as the scan finishes.
+    private func watch(until deadline: Date) {
+        condition.lock()
+        defer { condition.unlock() }
+        while !finished {
+            if !condition.wait(until: deadline) && !finished && Date() >= deadline {
+                stop = .timeBudget
+                finishLocked()
+            }
         }
     }
 
@@ -123,8 +171,8 @@ final class GrepScan: @unchecked Sendable {
 
     // MARK: - Ending
 
-    /// Stops the scan for `reason` unless it already ended. Workers still
-    /// inside a read finish it in the background and then exit.
+    /// Stops the scan for `reason` unless it already ended. Workers inside a
+    /// file notice within one chunk and exit.
     private func halt(_ reason: GrepScanStop) {
         condition.lock()
         if !finished {
@@ -142,24 +190,30 @@ final class GrepScan: @unchecked Sendable {
         pending?.resume()
     }
 
+    private func isFinished() -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return finished
+    }
+
     private func outcome() -> GrepScanOutcome {
         condition.lock()
         defer { condition.unlock() }
-        var matches: [GrepMatch] = []
+        var matches = prefixMatches
         switch stop {
-        case .limit, .bytes:
-            // Only the contiguous prefix: exactly what a serial scan returns.
-            for i in 0..<prefixEnd { matches += results[i] ?? [] }
-            if stop == .limit { matches = Array(matches.prefix(configuration.limit)) }
-        case nil, .timeBudget, .cancelled:
-            // Everything searched so far, in walk order.
-            for result in results { matches += result ?? [] }
+        case .limit:
+            matches = Array(matches.prefix(configuration.limit))
+        case .timeBudget, .cancelled:
+            // Also what finished beyond the prefix, in walk order.
+            for index in ahead.keys.sorted() { matches += ahead[index] ?? [] }
+        case nil, .bytes:
+            break
         }
         return GrepScanOutcome(
             matches: matches,
             stop: stop,
             filesSearched: filesSearched,
-            filesFound: files.count,
+            filesFound: filesFound,
             walkComplete: walkComplete
         )
     }
@@ -169,38 +223,60 @@ final class GrepScan: @unchecked Sendable {
     private func work() {
         while true {
             condition.lock()
-            while !finished && nextIndex >= files.count && !walkComplete {
+            var waitingOnWindow = false
+            while !finished {
+                if pendingHead < pending.count {
+                    if pending[pendingHead].index < prefixEnd + Self.window { break }
+                    waitingOnWindow = true
+                } else if walkComplete {
+                    break
+                }
+                if waitingOnWindow { windowWaiters += 1 }
                 condition.wait()
+                if waitingOnWindow { windowWaiters -= 1 }
+                waitingOnWindow = false
             }
-            if finished || nextIndex >= files.count {
+            if finished || pendingHead >= pending.count {
                 runningWorkers -= 1
                 if runningWorkers == 0 && !finished { finishLocked() }
                 condition.unlock()
                 return
             }
-            let index = nextIndex
-            nextIndex += 1
-            let url = files[index]
+            let item = pending[pendingHead]
+            pendingHead += 1
+            if pendingHead >= 1024 && pendingHead * 2 >= pending.count {
+                pending.removeFirst(pendingHead)
+                pendingHead = 0
+            }
+            if walkerWaiting { condition.broadcast() }
             condition.unlock()
 
-            let found = configuration.match(url, configuration.limit)
+            let found = drainingAutoreleasePool {
+                configuration.match(item.path, configuration.limit) { [self] in isFinished() }
+            }
 
             condition.lock()
-            record(found, at: index)
+            record(found, at: item.index)
             condition.unlock()
         }
     }
 
     private func record(_ found: [GrepMatch], at index: Int) {
         guard !finished else { return }
-        results[index] = found
         filesSearched += 1
-        while prefixEnd < results.count, let result = results[prefixEnd] {
-            prefixEnd += 1
-            prefixMatches += result.count
-            for match in result { prefixBytes += configuration.bytes(match) }
+        guard index == prefixEnd else {
+            done.insert(index)
+            if !found.isEmpty { ahead[index] = found }
+            return
         }
-        if prefixMatches >= configuration.limit {
+        append(found)
+        prefixEnd += 1
+        while done.remove(prefixEnd) != nil {
+            append(ahead.removeValue(forKey: prefixEnd) ?? [])
+            prefixEnd += 1
+        }
+        if windowWaiters > 0 { condition.broadcast() }
+        if prefixMatches.count >= configuration.limit {
             stop = .limit
             finishLocked()
         } else if prefixBytes > configuration.maxTotalBytes {
@@ -209,15 +285,31 @@ final class GrepScan: @unchecked Sendable {
         }
     }
 
+    private func append(_ found: [GrepMatch]) {
+        for match in found {
+            prefixMatches.append(match)
+            prefixBytes += configuration.bytes(match)
+        }
+    }
+
     // MARK: - Walk
 
-    private func publish(_ url: URL) -> Bool {
+    /// Queues one path for the workers, waiting while the queue is full.
+    /// False once the scan has ended.
+    private func publish(_ path: String) -> Bool {
         condition.lock()
         defer { condition.unlock() }
+        while !finished && pending.count - pendingHead >= Self.maxPending {
+            walkerWaiting = true
+            condition.wait()
+        }
+        walkerWaiting = false
         if finished { return false }
-        files.append(url)
-        results.append(nil)
-        condition.signal()
+        pending.append((filesFound, path))
+        filesFound += 1
+        // A plain signal could wake a worker that is waiting on the window
+        // and leave an idle one asleep.
+        if windowWaiters > 0 { condition.broadcast() } else { condition.signal() }
         return true
     }
 
@@ -233,57 +325,112 @@ final class GrepScan: @unchecked Sendable {
         let globRegex = configuration.glob.flatMap { try? NSRegularExpression(pattern: Glob.patternToRegex($0)) }
         let globMatchesRelative = configuration.glob?.contains("/") ?? false
         let pruned = configuration.includeIgnored ? grepAlwaysPrunedDirectoryNames : ignoredWalkDirectoryNames
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
 
         // Depth-first, names sorted, so results come back in a stable order.
         var stack: [String] = [rootPath]
         while let dir = stack.popLast() {
-            condition.lock()
-            let stopped = finished
-            condition.unlock()
-            if stopped { return }
-
-            guard let entries = try? fm.contentsOfDirectory(
-                at: URL(fileURLWithPath: dir),
-                includingPropertiesForKeys: keys
-            ) else { continue }
-            let names = Set(entries.map(\.lastPathComponent))
-            ignore?.enter(directory: dir, names: names)
+            if isFinished() { return }
+            guard let entries = Self.listDirectory(dir) else { continue }
+            ignore?.enter(directory: dir, names: Set(entries.lazy.map(\.name)))
 
             var subdirectories: [String] = []
-            for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-                let values = try? entry.resourceValues(forKeys: Set(keys))
-                if values?.isSymbolicLink == true { continue }
-                let path = (dir as NSString).appendingPathComponent(entry.lastPathComponent)
-                if values?.isDirectory == true {
-                    if pruned.contains(entry.lastPathComponent) { continue }
-                    if ignore?.ignores(path, isDirectory: true) == true { continue }
-                    subdirectories.append(path)
-                    continue
-                }
-                guard values?.isRegularFile == true else { continue }
-                if ignore?.ignores(path, isDirectory: false) == true { continue }
-                if let globRegex {
-                    let candidate = globMatchesRelative
-                        ? Self.relativePath(of: path, under: rootPath)
-                        : entry.lastPathComponent
-                    let ns = candidate as NSString
-                    if globRegex.firstMatch(in: candidate, options: [], range: NSRange(location: 0, length: ns.length)) == nil {
-                        continue
+            let keepGoing = drainingAutoreleasePool { () -> Bool in
+                for entry in entries {
+                    let path = dir.hasSuffix("/") ? dir + entry.name : dir + "/" + entry.name
+                    switch entry.kind {
+                    case .directory:
+                        if pruned.contains(entry.name) { continue }
+                        if ignore?.ignores(path, isDirectory: true) == true { continue }
+                        subdirectories.append(path)
+                    case .file:
+                        if ignore?.ignores(path, isDirectory: false) == true { continue }
+                        if let globRegex {
+                            let candidate = globMatchesRelative ? Self.relativePath(of: path, under: rootPath) : entry.name
+                            let ns = candidate as NSString
+                            if globRegex.firstMatch(in: candidate, options: [], range: NSRange(location: 0, length: ns.length)) == nil {
+                                continue
+                            }
+                        }
+                        if !publish(path) { return false }
                     }
                 }
-                if !publish(URL(fileURLWithPath: path)) { return }
+                return true
             }
+            if !keepGoing { return }
             // Reversed so the stack pops them in name order.
             stack.append(contentsOf: subdirectories.reversed())
         }
     }
 
-    static func relativePath(of path: String, under root: String) -> String {
-        let prefix = root.hasSuffix("/") ? root.count : root.count + 1
-        return path.count > prefix ? String(path.dropFirst(prefix)) : path
+    enum EntryKind { case file, directory }
+
+    /// The regular files and directories in `path`, sorted by name; symlinks
+    /// and special files are left out. Reads the type from the directory
+    /// entry, so most filesystems need no `stat` per entry, and holds only
+    /// names, so a directory of a million entries costs megabytes, not the
+    /// gigabyte a `URL` per entry does. Nil when the directory can't be read.
+    static func listDirectory(_ path: String) -> [(name: String, kind: EntryKind)]? {
+        guard let dir = opendir(path) else { return nil }
+        defer { closedir(dir) }
+        var out: [(name: String, kind: EntryKind)] = []
+        while true {
+            errno = 0
+            guard let entry = readdir(dir) else {
+                // Under gVisor a signal during a FUSE readdir surfaces as
+                // EINTR; readdir resumes where it stopped.
+                if errno == EINTR { continue }
+                break
+            }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: entry.pointee.d_name)) {
+                    String(cString: $0)
+                }
+            }
+            if name == "." || name == ".." { continue }
+            let type = Int(entry.pointee.d_type)
+            if type == Int(DT_DIR) {
+                out.append((name, .directory))
+            } else if type == Int(DT_REG) {
+                out.append((name, .file))
+            } else if type == Int(DT_UNKNOWN) {
+                // Some filesystems leave the type out; ask, without following
+                // a symlink.
+                var info = stat()
+                let full = path.hasSuffix("/") ? path + name : path + "/" + name
+                guard lstat(full, &info) == 0 else { continue }
+                let mode = Int(info.st_mode) & Int(S_IFMT)
+                if mode == Int(S_IFDIR) {
+                    out.append((name, .directory))
+                } else if mode == Int(S_IFREG) {
+                    out.append((name, .file))
+                }
+            }
+        }
+        out.sort { $0.name < $1.name }
+        return out
     }
+
+    /// `path` relative to `root`, or `path` itself when it is not under it.
+    static func relativePath(of path: String, under root: String) -> String {
+        let rootBytes = root.utf8.count
+        let prefix = root.hasSuffix("/") ? rootBytes : rootBytes + 1
+        let utf8 = path.utf8
+        guard utf8.count > prefix else { return path }
+        return String(Substring(utf8.dropFirst(prefix)))
+    }
+}
+
+/// Runs `body` in its own autorelease pool on Apple platforms. The scan's
+/// threads are long-lived and never return to a run loop, so Foundation's
+/// autoreleased temporaries (bridged strings, directory URLs) would otherwise
+/// pile up until the thread exits.
+@inline(__always)
+func drainingAutoreleasePool<T>(_ body: () -> T) -> T {
+    #if canImport(ObjectiveC)
+    return autoreleasepool(invoking: body)
+    #else
+    return body()
+    #endif
 }
 
 /// Pruned even when the caller asks to include ignored files: version-control
@@ -352,7 +499,7 @@ final class GrepIgnore {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
-        matcher.add(lines.compactMap { Self.pattern(String($0), prefix: prefix) })
+        matcher.add(lines.compactMap { Self.pattern(String($0), prefix: prefix) }, scope: prefix)
     }
 
     /// One gitignore line, rebased onto `prefix` (its directory relative to
