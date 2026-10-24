@@ -1,7 +1,7 @@
 {
   "$note": "kwwk's corrections to pi-mono's catalog, laid over it by kwwk-generate-models. Objects merge key by key, other values replace, null removes. Say why and when beside each group.",
   "kimi-coding": {
-    "$note": "kwwk speaks Anthropic Messages to Kimi's coding endpoint (registerKimiCoding pins anthropic-messages), so the Chat Completions wire pi-mono moved kimi-coding to on 2026-10-15 is held back here: base URL without /v1, Anthropic compat, no Chat Completions flags. That endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k is priced, not free.",
+    "$note": "kwwk speaks Anthropic Messages to Kimi's coding endpoint (registerKimiCoding pins anthropic-messages), so the Chat Completions wire pi-mono moved kimi-coding to on 2026-10-15 is held back here: base URL without /v1, Anthropic compat, no Chat Completions flags. That endpoint returns thinking with an empty signature and refuses a replay that drops it (kwwk #183, 2026-10-11); k3-256k and the k3.1-pro pair are priced, not free (the pair at Moonshot API's list price, 2026-10-24); k3.1 has no thinking levels upstream yet, so its map stays pi's.",
     "k3-256k": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.kimi.com/coding",
@@ -72,6 +72,34 @@
         "minimal": null,
         "off": null,
         "xhigh": null
+      }
+    },
+    "k3.1-pro": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
+      "compat": {
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "cost": {
+        "input": 2,
+        "output": 10,
+        "cacheRead": 0.2
+      }
+    },
+    "k3.1-pro-highspeed": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.kimi.com/coding",
+      "compat": {
+        "$replace": true,
+        "allowEmptySignature": true,
+        "forceAdaptiveThinking": true
+      },
+      "cost": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.2
       }
     }
   },
