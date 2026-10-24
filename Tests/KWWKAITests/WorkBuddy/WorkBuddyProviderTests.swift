@@ -387,6 +387,87 @@ struct WorkBuddyProviderTests {
         ])]))
     }
 
+    // The plugin's tools.test.mjs (0.1.22, a6bed5e / plugins#122): each
+    // shape below was refused by Kimi with 11133 on a real account and
+    // passed once mended as here, on Kimi, DeepSeek (11129 before) and GLM.
+    private func params(_ json: String) throws -> JSONValue {
+        WorkBuddyWire.fitParameters(try #require(parseJSONObject(json)))
+    }
+
+    private func prop(_ json: String) throws -> JSONValue? {
+        guard case .object(let root) = try params(#"{"type":"object","properties":{"a":\#(json)}}"#),
+              case .object(let properties)? = root["properties"] else { return nil }
+        return properties["a"]
+    }
+
+    private func json(_ text: String) -> JSONValue? { parseJSONObject(text) }
+
+    @Test("An enum with no type takes its values' type, or that and null")
+    func untypedEnum() throws {
+        #expect(try prop(#"{"enum":["x","y"],"description":"d"}"#) == json(#"{"enum":["x","y"],"description":"d","type":"string"}"#))
+        #expect(try prop(#"{"enum":[1,2]}"#) == json(#"{"enum":[1,2],"type":"integer"}"#))
+        #expect(try prop(#"{"enum":[1,2.5]}"#) == json(#"{"enum":[1,2.5],"type":"number"}"#))
+        #expect(try prop(#"{"enum":[true,null]}"#) == json(#"{"enum":[true,null],"type":["boolean","null"]}"#))
+        #expect(try prop(#"{"enum":[null]}"#) == json(#"{"enum":[null],"type":"null"}"#))
+        // Under items, anyOf and an unused $defs alike.
+        #expect(try prop(#"{"type":"array","items":{"enum":["a"]}}"#) == json(#"{"type":"array","items":{"enum":["a"],"type":"string"}}"#))
+        #expect(try prop(#"{"anyOf":[{"enum":["a"]},{"type":"integer"}]}"#)
+            == json(#"{"anyOf":[{"enum":["a"],"type":"string"},{"type":"integer"}]}"#))
+        #expect(try params(#"{"type":"object","properties":{},"$defs":{"x":{"enum":["a"]}}}"#)
+            == json(#"{"type":"object","properties":{},"$defs":{"x":{"enum":["a"],"type":"string"}}}"#))
+    }
+
+    @Test("An enum of several types is an anyOf of an enum for each, typed or not")
+    func mixedEnum() throws {
+        let split = #"[{"type":"string","enum":["x"]},{"type":"integer","enum":[1]},{"type":"null"}]"#
+        #expect(try prop(#"{"enum":["x",1,null],"description":"d"}"#) == json(#"{"description":"d","anyOf":\#(split)}"#))
+        #expect(try prop(#"{"type":["string","integer","null"],"enum":["x",1,null]}"#) == json(#"{"anyOf":\#(split)}"#))
+        #expect(try prop(#"{"anyOf":[{"minLength":1}],"enum":["x",1]}"#)
+            == json(#"{"anyOf":[{"minLength":1}],"allOf":[{"anyOf":[{"type":"string","enum":["x"]},{"type":"integer","enum":[1]}]}]}"#))
+    }
+
+    @Test("An enum Kimi takes is left: typed T, or T and null", arguments: [
+        #"{"type":"string","enum":["a"]}"#,
+        #"{"type":["integer","null"],"enum":[1,null]}"#,
+        #"{"type":["null","string"],"enum":[null,"a"]}"#,
+        #"{"type":"null","enum":[null]}"#,
+        #"{"type":"string","enum":[1]}"#,
+    ])
+    func typedEnum(schema: String) throws {
+        #expect(try prop(schema) == json(schema))
+    }
+
+    @Test("An empty enum, a required that isn't a list, and a type Kimi doesn't know are left out")
+    func unknownShapes() throws {
+        #expect(try prop(#"{"type":"string","enum":[]}"#) == json(#"{"type":"string"}"#))
+        #expect(try prop(#"{"type":"object","properties":{"x":{"type":"string"}},"required":"x"}"#)
+            == json(#"{"type":"object","properties":{"x":{"type":"string"}}}"#))
+        #expect(try prop(#"{"type":"String"}"#) == json(#"{"type":"string"}"#))
+        #expect(try prop(#"{"type":"any"}"#) == json(#"{}"#))
+        #expect(try prop(#"{"type":["Integer","foo","null"]}"#) == json(#"{"type":["integer","null"]}"#))
+    }
+
+    @Test("true and false where a schema goes are {} and {not: {}}; additionalProperties is left")
+    func booleanSchemas() throws {
+        let fitted = try params(#"""
+        {"type":"object","additionalProperties":false,"properties":{"a":true,"b":false,
+         "c":{"type":"array","items":true},"d":{"type":"object","additionalProperties":true}}}
+        """#)
+        #expect(fitted == json(#"""
+        {"type":"object","additionalProperties":false,"properties":{"a":{},"b":{"not":{}},
+         "c":{"type":"array","items":{}},"d":{"type":"object","additionalProperties":true}}}
+        """#))
+    }
+
+    @Test("A property named enum, type or required is a name, not a keyword")
+    func keywordNames() throws {
+        let schema = #"""
+        {"type":"object","properties":{"enum":{"type":"string"},"type":{"type":"string","enum":["a"]},
+         "required":{"type":"boolean"}},"required":["enum"]}
+        """#
+        #expect(try params(schema) == json(schema))
+    }
+
     // MARK: - Refusals
 
     private func refusal(status: Int, _ body: String) async -> ProviderFailure? {
@@ -465,6 +546,58 @@ struct WorkBuddyProviderTests {
         #expect(!failure.isRetryable)
     }
 
+    // The plugin's refused.test.mjs (0.1.17, caf3908): the body WorkBuddy AI
+    // answered for an account it restricted, as the reporter posted it. The
+    // plugin's case of an OpenAI-shaped `{"error": {"code": 11140}}` isn't
+    // here: the chat provider keeps no number code of that shape, and the
+    // gateway's own refusal is `{code, msg}` at the root.
+    private static let restrictedBody = #"""
+    {"code":11140,"msg":"request illegal",
+     "displayMsg":{"en":"Your account has been restricted due to unusual activity",
+                   "zh":"账号存在异常行为，已被限制使用","zh-hant":"帳號存在異常行為，已被限制使用"},
+     "displayTips":{"en":"We detected unusual activity on this account. Submit feedback to appeal this restriction",
+                    "zh":"系统检测到该账号存在异常使用行为，如需申诉请提交反馈"},
+     "actions":["EDIT_INPUT","SUBMIT_FEEDBACK"]}
+    """#
+
+    @Test("A restricted account's 11140 says its msg, then what can be done, and is no sign-in to renew", arguments: [
+        restrictedBody,
+        #"{"code":"11140","msg":"request illegal"}"#,
+        #"{"error":{"data":{"code":11140,"msg":"request illegal"}}}"#,
+        #"{"code":11140,"msg":"request ill"#,
+    ])
+    func restricted(body: String) async throws {
+        let failure = try #require(await refusal(status: 403, body))
+        #expect(failure.message.hasSuffix(" — \(WorkBuddyWire.restrictedHint)"))
+        #expect(failure.providerCode == "11140")
+        #expect(failure.httpStatus == 403)
+        #expect(!failure.isCredentialRejection)
+        #expect(!failure.isRetryable)
+        #expect(failure.outcome == .accessDenied)
+    }
+
+    @Test("The restriction's hint is magpie's word for word, and the channel refusal's names no client")
+    func hints() async throws {
+        #expect(try #require(await refusal(status: 403, Self.restrictedBody)).message
+            == "request illegal — \(WorkBuddyWire.restrictedHint)")
+        #expect(WorkBuddyWire.restrictedHint == "WorkBuddy restricted this account for unusual activity; it stays out until "
+            + "WorkBuddy lifts that, which an appeal (Submit feedback in WorkBuddy) asks for")
+        #expect(WorkBuddyWire.refusedHint.range(of: "codex|claude|deepseek", options: [.regularExpression, .caseInsensitive]) == nil)
+    }
+
+    @Test("A code that only begins with 11140, and 11128, are not a restriction")
+    func notRestricted() async throws {
+        for body in [#"{"code":111400,"msg":"request illegal"}"#, #"{"error":{"code":111400,"message":"x"}}"#] {
+            let failure = try #require(await refusal(status: 403, body))
+            #expect(!failure.message.contains(WorkBuddyWire.restrictedHint))
+            #expect(failure.providerCode != "11140")
+        }
+        let channel = try #require(await refusal(
+            status: 403, #"{"error":{"message":"Illegal API invocation from an unapproved channel","code":11128}}"#
+        ))
+        #expect(channel.message.hasSuffix(WorkBuddyWire.refusedHint))
+    }
+
     @Test("A code that only begins with 14018 is another error")
     func otherCode() async throws {
         let failure = try #require(await refusal(status: 429, #"{"code":140185,"msg":"busy"}"#))
@@ -515,6 +648,27 @@ struct WorkBuddyWireTests {
         }
     }
 
+    // The plugin's unflag.test.mjs (0.1.30, 575f1e2 / plugins#291).
+    @Test("A refused line quoted back into an assistant message is reworded there too")
+    func quotedBack() throws {
+        let line = "There is a Web GUI whose URL the runtime context names. When the user refers to it, open it."
+        let fixed = "There is a Web GUI whose URL the runtime context names. The interface, when the user refers to it, open it."
+        #expect(WorkBuddyWire.unflagged(line) == fixed)
+        #expect(WorkBuddyWire.unflagged(line.replacingOccurrences(of: ". When", with: ".\nWhen")) == fixed)
+        #expect(WorkBuddyWire.unflagged(fixed) == fixed)
+        var root: [String: Any] = ["messages": [
+            ["role": "system", "content": "be brief"],
+            ["role": "user", "content": "hi"],
+            ["role": "assistant", "content": line],
+            ["role": "assistant", "content": [["type": "text", "text": line]]],
+            ["role": "user", "content": "go on"],
+        ]]
+        WorkBuddyWire.mendMessages(&root)
+        let messages = try #require(root["messages"] as? [[String: Any]])
+        #expect(messages[2]["content"] as? String == fixed)
+        #expect((messages[3]["content"] as? [[String: Any]])?.first?["text"] as? String == fixed)
+    }
+
     @Test("An object tool choice of any spelling becomes a string, or goes")
     func mendToolChoice() {
         func mended(_ choice: Any) -> [String: Any] {
@@ -552,6 +706,11 @@ struct WorkBuddyWireTests {
         #expect(WorkBuddyWire.unflagged("the Codex CLI is an open source project led by OpenAI.")
             == "the Codex CLI is an open source project led by OpenAI.")
         #expect(WorkBuddyWire.unflagged("You are kwwk. $1 \\0") == "You are kwwk. $1 \\0")
+        // DeepSeek Harness's opening line (plugin 0.1.27, plugins#279).
+        #expect(WorkBuddyWire.unflagged("You are an AI agent powered by DeepSeek Harness. Be brief.")
+            == "You are an AI agent that helps the user with programming tasks. Be brief.")
+        #expect(WorkBuddyWire.unflagged("YOU ARE AN AI AGENT POWERED BY DEEPSEEK HARNESS")
+            == "You are an AI agent that helps the user with programming tasks.")
 
         // A system message that was the billing header alone goes; a user
         // message's text is reworded where it stands, its other parts kept.
@@ -789,6 +948,66 @@ struct WorkBuddyModelsTests {
         #expect(listings.map(\.creditRate) == [0, 0.03, 1, 1.5, 0, nil, nil, nil])
         // Two models WorkBuddy names alike are told apart.
         #expect(listings.prefix(2).map(\.model.name) == ["Deepseek-V4.1-Flash", "Deepseek-V4.1-Flash (SG)"])
+    }
+
+    // The plugin's efforts.test.mjs (plugins#255): WorkBuddy AI's own
+    // config of 2026-10-20, cut to the models it names.
+    @Test("A model that says only supportsReasoning and a default takes low, high, max and its default")
+    func defaultEffortOnly() throws {
+        let config = try #require(JSONSerialization.jsonObject(with: Data(#"""
+        {"agents":[{"name":"cli","models":["default-model","fast-model","primary-model","deepseek-v4.1-flash-sg","hy3","gpt-5.6-sol","glm-5.2","kimi-k3"]}],
+         "models":[{"id":"default-model","name":"Default"},
+          {"id":"fast-model","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"medium","summary":"auto"}},
+          {"id":"primary-model","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"high","summary":"auto"}},
+          {"id":"deepseek-v4.1-flash-sg","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"high","summary":"auto"}},
+          {"id":"hy3","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"canDisableThinking":false,"defaultEffort":"high","supportedEfforts":["low","high"]}},
+          {"id":"gpt-5.6-sol","supportsReasoning":true,"onlyReasoning":false,"reasoning":{"canDisableThinking":true,"defaultEffort":"high","supportedEfforts":["low","medium","high","xhigh","max"]}},
+          {"id":"glm-5.2","supportsReasoning":true,"onlyReasoning":false,"reasoning":{"canDisableThinking":true,"defaultEffort":"high","supportedEfforts":["high","xhigh"]}},
+          {"id":"kimi-k3","supportsReasoning":true,"onlyReasoning":true,"reasoning":{"effort":"medium","summary":"auto"}}]}
+        """#.utf8)) as? [String: Any])
+        let models = Dictionary(
+            uniqueKeysWithValues: WorkBuddyModels.listings(fromConfig: config, site: .international).map { ($0.model.id, $0.model) }
+        )
+        func levels(_ id: String) throws -> [ModelThinkingLevel] { supportedThinkingLevels(try #require(models[id])) }
+        #expect(try levels("fast-model") == [.low, .medium, .high, .max])
+        #expect(try levels("kimi-k3") == [.low, .medium, .high, .max])
+        #expect(try levels("primary-model") == [.low, .high, .max])
+        #expect(try levels("deepseek-v4.1-flash-sg") == [.low, .high, .max])
+        #expect(models["fast-model"]?.reasoning == true)
+        // Listed levels are kept as they are; a model that doesn't reason
+        // gets none.
+        #expect(try levels("hy3") == [.low, .high])
+        #expect(try levels("gpt-5.6-sol") == [.off, .low, .medium, .high, .xhigh, .max])
+        #expect(try levels("glm-5.2") == [.off, .high, .xhigh])
+        #expect(models["default-model"]?.reasoning == false)
+    }
+
+    // The plugin's usage.test.mjs, "WorkBuddy AI's GLM models are text-only"
+    // (0.1.16, cb90931).
+    @Test("WorkBuddy AI's GLM models are text-only; its others and China's GLM keep images")
+    func glmTextOnly() throws {
+        let ids = ["glm-5.3-flash", "glm-5.3", "glm-5.2", "glm-6", "deepseek-v4.1-flash", "kimi-k3", "gemini-3.5-flash", "gpt-5.5", "hy3"]
+        let config: [String: Any] = [
+            "agents": [["name": "cli", "models": ids + ["said-nothing"]]],
+            "models": ids.map { ["id": $0, "name": $0, "supportsImages": $0 != "hy3"] } + [["id": "said-nothing"]],
+        ]
+        func images(_ site: WorkBuddySite) -> [String: Bool] {
+            Dictionary(uniqueKeysWithValues: WorkBuddyModels.listings(fromConfig: config, site: site).map {
+                ($0.model.id, $0.model.input.contains(.image))
+            })
+        }
+        #expect(images(.international) == [
+            "glm-5.3-flash": false, "glm-5.3": false, "glm-5.2": false, "glm-6": false,
+            "deepseek-v4.1-flash": true, "kimi-k3": true, "gemini-3.5-flash": true, "gpt-5.5": true,
+            "hy3": false, "said-nothing": false,
+        ])
+        #expect(images(.china) == [
+            "glm-5.3-flash": true, "glm-5.3": true, "glm-5.2": true, "glm-6": true,
+            "deepseek-v4.1-flash": true, "kimi-k3": true, "gemini-3.5-flash": true, "gpt-5.5": true,
+            "hy3": false, "said-nothing": false,
+        ])
+        // The family, by its id's start: not a model whose id only has glm in it.
+        #expect(!WorkBuddyModels.textOnly(site: .international, id: "my-glm-5"))
     }
 
     // magpie's TestWorkBuddyDistinctNames.

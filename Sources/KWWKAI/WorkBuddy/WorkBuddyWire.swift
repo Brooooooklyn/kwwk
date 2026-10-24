@@ -5,7 +5,7 @@ import Crypto
 /// the client's headers, the conversation's ids, and the mends its gateway
 /// needs on the body. Ported from magpie's `internal/provider/workbuddy.go`
 /// and the plugin magpie serves WorkBuddy through
-/// (`@magpie-community/opencode-workbuddy-auth` 0.1.15), where the newer of
+/// (`@magpie-community/opencode-workbuddy-auth` 0.1.31), where the newer of
 /// these were tried against real accounts.
 enum WorkBuddyWire {
     // MARK: - Headers
@@ -217,11 +217,24 @@ enum WorkBuddyWire {
     /// main branch in the first user message), and pays no mind to case.
     /// Claude Code's billing header means nothing to WorkBuddy's models and
     /// goes.
+    ///
+    /// DeepSeek Harness opens its system prompt with a line refused as 11128
+    /// (plugin 0.1.27, 82452c5 / plugins#279), and a line of its prompt a
+    /// model can quote back into an assistant message is refused there
+    /// (0.1.30, 575f1e2 / plugins#291, measured 400 then 200 with this
+    /// wording by the reporter). An assistant message can't be moved as the
+    /// system prompt is (`systemAsUser`), so these are reworded in every
+    /// message.
     private static let flagged: [(NSRegularExpression, String)] = [
         (#"x-anthropic-billing-header:[^\n]*\n?"#, ""),
         (#"You are Claude Code, Anthropic['’]s official CLI for Claude"#, "You are Claude Code, Anthropic's CLI for Claude"),
         (#"Main branch \(you will usually use this for PRs\)"#, "Main branch (usually the base for PRs)"),
         (#"(?<!the )Codex CLI is an open source project led by OpenAI\."#, "The Codex CLI is an open source project led by OpenAI."),
+        (#"You are an AI agent powered by DeepSeek Harness\.?"#, "You are an AI agent that helps the user with programming tasks."),
+        (
+            #"Web GUI whose URL the runtime context names\.\s+When the user refers"#,
+            "Web GUI whose URL the runtime context names. The interface, when the user refers"
+        ),
     ].map { (try! NSRegularExpression(pattern: $0.0, options: .caseInsensitive), $0.1) }
 
     static func unflagged(_ text: String) -> String {
@@ -232,6 +245,106 @@ enum WorkBuddyWire {
                 withTemplate: NSRegularExpression.escapedTemplate(for: rule.1)
             )
         }
+    }
+
+    // MARK: - Sent again
+
+    /// A chat ending with tool results then the user's message(s), with an
+    /// empty assistant message between them, as if the model had said
+    /// nothing after the results; nil for any other chat. WorkBuddy AI's
+    /// gemini-3.8-flash answers 400 code 11153 "the conversation must end
+    /// with a user message" to tool results followed by a user message,
+    /// which kwwk sends for a tool's images, a message steered in mid-task,
+    /// and a result hoisted ahead of a user message. The chat does end with
+    /// a user message; with any other message between, it is served. Tried
+    /// on a real account (plugin 0.1.20, a4f8178 / plugins#113;
+    /// `aftertools.test.mjs`): the model follows the user's message as the
+    /// user's, where folded into the tool's result it was read as the
+    /// tool's output and its ask left undone. A chat ending with the
+    /// assistant's message is a prefill, refused as it is.
+    static func replyAfterTools(_ root: [String: Any]) -> [String: Any]? {
+        guard var messages = root["messages"] as? [[String: Any]] else { return nil }
+        var index = messages.count - 1
+        while index >= 0, messages[index]["role"] as? String == "user" { index -= 1 }
+        guard index != messages.count - 1, index >= 0, messages[index]["role"] as? String == "tool" else { return nil }
+        messages.insert(["role": "assistant", "content": ""], at: index + 1)
+        var root = root
+        root["messages"] = messages
+        return root
+    }
+
+    /// The tags a moved system prompt is read to the model in. They name no
+    /// one.
+    static let instructionTags = ("<instructions>\n", "\n</instructions>")
+
+    /// A chat with its system prompt read to the model as the first thing
+    /// the user says, in `instructionTags`, and the default system prompt
+    /// first, as both builds want a system message there; a system message
+    /// later in the chat becomes the user's where it stands. Nil when there
+    /// is nothing to move.
+    ///
+    /// WorkBuddy's channel check reads the system and assistant messages
+    /// only: each refused line was served in a user message, a user
+    /// message's parts and a tool's result, and refused again in the system
+    /// or an assistant message. It matches a line whole and exactly, so
+    /// `flagged` only ever knows the lines met so far, and an agent's line
+    /// not met yet is refused until one is added. A chat refused as an
+    /// unapproved channel is sent once more moved (plugin 0.1.29, af360a5;
+    /// `systemasuser.test.mjs`, tried with real accounts on both builds).
+    static func systemAsUser(_ root: [String: Any]) -> [String: Any]? {
+        guard let messages = root["messages"] as? [[String: Any]] else { return nil }
+        var lead: [String] = []
+        var index = 0
+        while index < messages.count, messages[index]["role"] as? String == "system" {
+            lead.append(text(of: messages[index]["content"]))
+            index += 1
+        }
+        let said = lead.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var later = false
+        var rest = messages[index...].map { message -> [String: Any] in
+            guard message["role"] as? String == "system" else { return message }
+            later = true
+            var message = message
+            message["role"] = "user"
+            return message
+        }
+        let moved = !said.isEmpty && said != defaultSystemPrompt
+        guard moved || later else { return nil }
+        if moved {
+            let instructions = instructionTags.0 + said + instructionTags.1
+            if let user = rest.firstIndex(where: { $0["role"] as? String == "user" }) {
+                if let content = rest[user]["content"] as? String {
+                    rest[user]["content"] = instructions + "\n\n" + content
+                } else if let parts = rest[user]["content"] as? [Any] {
+                    rest[user]["content"] = [["type": "text", "text": instructions] as [String: Any]] + parts
+                } else {
+                    rest[user]["content"] = instructions
+                }
+            } else {
+                rest.insert(["role": "user", "content": instructions], at: 0)
+            }
+        }
+        var root = root
+        root["messages"] = [["role": "system", "content": defaultSystemPrompt]] + rest
+        return root
+    }
+
+    /// The text of a chat's system messages, which a system prompt refused
+    /// once is known by; "" for the default one, which is never moved.
+    static func systemKey(_ root: [String: Any]) -> String {
+        let messages = root["messages"] as? [[String: Any]] ?? []
+        let key = messages.filter { $0["role"] as? String == "system" }
+            .map { text(of: $0["content"]) }
+            .joined(separator: "\n")
+        return key.trimmingCharacters(in: .whitespacesAndNewlines) == defaultSystemPrompt ? "" : key
+    }
+
+    private static func text(of content: Any?) -> String {
+        if let text = content as? String { return text }
+        let parts = content as? [Any] ?? []
+        return parts.compactMap { ($0 as? [String: Any])?["text"] as? String }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
     }
 
     // MARK: - Tools
@@ -300,7 +413,9 @@ enum WorkBuddyWire {
         guard case .object = parameters else {
             return .object(["type": .string("object"), "properties": .object([:])])
         }
-        guard case .object(var root) = ToolSchemaRoot.objectRoot(fitSchema(parameters)) else { return parameters }
+        guard case .object(var root) = ToolSchemaRoot.objectRoot(fitShape(fitSchema(parameters))) else {
+            return parameters
+        }
         if root["type"] != .string("object") {
             root["type"] = .string("object")
             if case .object? = root["properties"] {} else { root["properties"] = .object([:]) }
@@ -332,6 +447,145 @@ enum WorkBuddyWire {
         }
     }
 
+    // MARK: Shapes Kimi takes
+
+    /// Kimi (kimi-k3-1, kimi-k2.7) answers 11133 too, to the tools of an MCP
+    /// server or a plugin, and DeepSeek 11129 (plugin 0.1.22, a6bed5e /
+    /// plugins#122; `tools.test.mjs`). Tried on a real account 2026-10-14,
+    /// each alone in an otherwise plain chat: Kimi turns away an enum with
+    /// no type (`["a","b"]` as much as `[1,"a",null]`), an empty enum, an
+    /// enum whose type lists two types besides null, a schema that is
+    /// `true` or `false` where a schema goes (`properties.x: true`,
+    /// `items: true`), a `required` that isn't a list, and a type it doesn't
+    /// know (`"any"`, `"String"`). It takes an enum typed T or `[T, "null"]`,
+    /// an `anyOf` of such enums, `{"not": {}}`, `{}`, and
+    /// `additionalProperties: true` or `false`. `fitShape` gives each the
+    /// shape it takes, meaning the same: none of it narrows or widens what
+    /// a call may hold, except that an empty enum, which nothing fits, is
+    /// left out.
+    private static let schemaTypes: Set = ["string", "number", "integer", "boolean", "object", "array", "null"]
+    /// The keywords whose value is a schema, a list of schemas, and a map of
+    /// names to schemas. `additionalProperties` and `unevaluatedProperties`
+    /// are left as they are when `true` or `false`.
+    private static let oneSchema = [
+        "items", "additionalItems", "unevaluatedItems", "contains", "not", "if", "then", "else", "propertyNames",
+        "additionalProperties", "unevaluatedProperties",
+    ]
+    private static let schemaLists = ["anyOf", "oneOf", "allOf", "prefixItems"]
+    private static let schemaMaps = ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]
+    private static let booleanKept: Set = ["additionalProperties", "unevaluatedProperties"]
+
+    /// Mends a schema and each schema under it into the shapes Kimi takes;
+    /// a name under `properties` is never read as a keyword.
+    static func fitShape(_ schema: JSONValue, depth: Int = 0) -> JSONValue {
+        guard depth <= 64, case .object(var object) = schema else { return schema }
+        if let type = object["type"] {
+            let listed: [JSONValue] = if case .array(let types) = type { types } else { [type] }
+            var known: [String] = []
+            for case .string(let name) in listed {
+                let name = name.lowercased()
+                if schemaTypes.contains(name), !known.contains(name) { known.append(name) }
+            }
+            object["type"] = known.isEmpty ? nil : known.count == 1 ? .string(known[0])
+                : .array(known.map(JSONValue.string))
+        }
+        switch object["required"] {
+        case .array(let names)?:
+            object["required"] = .array(names.filter { if case .string = $0 { true } else { false } })
+        case nil:
+            break
+        default:
+            object["required"] = nil
+        }
+        fitEnum(&object)
+        for key in oneSchema {
+            guard let value = object[key] else { continue }
+            object[key] = fitShape(subSchema(value, key: key), depth: depth + 1)
+        }
+        for key in schemaLists {
+            guard case .array(let values)? = object[key] else { continue }
+            object[key] = .array(values.map { fitShape(subSchema($0, key: key), depth: depth + 1) })
+        }
+        for key in schemaMaps {
+            guard case .object(let values)? = object[key] else { continue }
+            object[key] = .object(values.mapValues { fitShape(subSchema($0, key: key), depth: depth + 1) })
+        }
+        return .object(object)
+    }
+
+    /// A schema found under `key` as an object Kimi takes: `true` is `{}`,
+    /// `false` is `{"not": {}}`.
+    private static func subSchema(_ value: JSONValue, key: String) -> JSONValue {
+        guard case .bool(let allows) = value, !booleanKept.contains(key) else { return value }
+        return allows ? .object([:]) : .object(["not": .object([:])])
+    }
+
+    /// Gives a schema's enum a type: the one its values have, or that and
+    /// `"null"`; values of several types are an `anyOf` of an enum for each.
+    private static func fitEnum(_ object: inout [String: JSONValue]) {
+        guard let values = object["enum"] else { return }
+        guard case .array(let values) = values, !values.isEmpty else {
+            object["enum"] = nil
+            return
+        }
+        let listed: [JSONValue] = switch object["type"] {
+        case .array(let types)?: types
+        case .string(let type)?: [.string(type)]
+        default: []
+        }
+        if listed.filter({ $0 != .string("null") }).count == 1 { return }
+        var byType: [(type: String, values: [JSONValue])] = []
+        for value in values {
+            let type = valueType(value)
+            if let index = byType.firstIndex(where: { $0.type == type }) {
+                byType[index].values.append(value)
+            } else {
+                byType.append((type, [value]))
+            }
+        }
+        if let integers = byType.firstIndex(where: { $0.type == "integer" }),
+           let numbers = byType.firstIndex(where: { $0.type == "number" }) {
+            byType[numbers].values += byType[integers].values
+            byType.remove(at: integers)
+        }
+        let hasNull = byType.contains { $0.type == "null" }
+        byType.removeAll { $0.type == "null" }
+        if byType.count <= 1 {
+            let want: JSONValue = switch byType.first?.type {
+            case nil: .string("null")
+            case let type? where hasNull: .array([.string(type), .string("null")])
+            case let type?: .string(type)
+            }
+            object["type"] = want
+            return
+        }
+        var split = byType.map { JSONValue.object(["type": .string($0.type), "enum": .array($0.values)]) }
+        if hasNull { split.append(.object(["type": .string("null")])) }
+        object["enum"] = nil
+        object["type"] = nil
+        if case .array = object["anyOf"] {
+            var all: [JSONValue] = if case .array(let all)? = object["allOf"] { all } else { [] }
+            all.append(.object(["anyOf": .array(split)]))
+            object["allOf"] = .array(all)
+        } else {
+            object["anyOf"] = .array(split)
+        }
+    }
+
+    /// The JSON Schema type of an enum's value; a whole number is an
+    /// integer, however it was written.
+    private static func valueType(_ value: JSONValue) -> String {
+        switch value {
+        case .null: "null"
+        case .bool: "boolean"
+        case .int: "integer"
+        case .double(let number): number.rounded() == number && number.isFinite ? "integer" : "number"
+        case .string: "string"
+        case .array: "array"
+        case .object: "object"
+        }
+    }
+
     /// A regex's `\0` (the NUL character) as `\u0000`, stepping over each
     /// `\\` (a backslash) so that a `\\0` is left; `\01`, an octal escape, is
     /// left too.
@@ -358,15 +612,28 @@ enum WorkBuddyWire {
 
     /// What can be done about "Illegal API invocation from an unapproved
     /// channel". Both builds answer it, 400 with code 11101 or 11128, to a
-    /// chat holding words of Codex's or Claude Code's own prompts, at any
-    /// reasoning level, on any account and whatever the headers (magpie #182,
-    /// 2033df0f): it is about what the chat says, never about the account.
-    /// `flagged` rewords the ones known; this is for one it doesn't know.
-    /// magpie's own hint (`WBRefusedHint`) names the agents it routes for;
-    /// this one says the same of a prompt.
+    /// chat whose system or assistant messages hold a line it knows from
+    /// another agent, at any reasoning level, on any account and whatever
+    /// the headers (magpie #182, 2033df0f): it is about what the chat says,
+    /// never about the account. Codex's and Claude Code's lines were the
+    /// first, DeepSeek Harness's and Claude Desktop's came later, so the
+    /// hint names no client (plugin 0.1.28, 3fd9625). `flagged` rewords the
+    /// lines known and a refused system prompt is sent again as the user's
+    /// instructions (`systemAsUser`); this is for a refusal that stands after
+    /// both, which is in an assistant message, and only a new conversation
+    /// clears.
     static let refusedHint =
-        "WorkBuddy refuses chats that hold words of Codex's or Claude Code's own prompts, whatever the account; "
-        + "take them out of the system prompt, or use another provider"
+        "WorkBuddy refused words in this chat (most often its system prompt, or a line quoted back in an "
+        + "assistant message), whatever the account; start a new conversation, or use another provider"
+
+    /// What can be done about WorkBuddy's 403 code 11140 "request illegal",
+    /// whose `displayMsg` says "Your account has been restricted due to
+    /// unusual activity" (plugin 0.1.17, caf3908 / magpie #1849): the account
+    /// is out until WorkBuddy lifts the restriction, which an appeal asks
+    /// for. The words are magpie's own (`WBRestrictedHint`).
+    static let restrictedHint =
+        "WorkBuddy restricted this account for unusual activity; it stays out until WorkBuddy lifts that, "
+        + "which an appeal (Submit feedback in WorkBuddy) asks for"
 
     /// WorkBuddy wants an active credit package even for a model it serves
     /// free: an account with no package, or none left, is answered 429 with
@@ -386,33 +653,27 @@ enum WorkBuddyWire {
         pattern: #"credits exhausted|额度已用尽|["']code["']\s*:\s*["']?14018(?![\d.])"#,
         options: .caseInsensitive
     )
+    /// The restriction's code, matched whole as 14018's is, in a body cut
+    /// short too; never by its words.
+    private static let restricted = try! NSRegularExpression(
+        pattern: #"["']code["']\s*:\s*["']?11140(?![\d.])"#,
+        options: .caseInsensitive
+    )
 
     /// A failed chat's failure in WorkBuddy's own words. Its gateway answers
     /// `{"code", "msg"}`, which reads as no error body of OpenAI's shape and
     /// would be shown whole; the message is its `msg` and the code its
-    /// `code`. The channel refusal and spent credits say what to do, and
-    /// spent credits are named `insufficient_quota`, as the plugin names
-    /// them, so they read as quota.
+    /// `code`. The channel refusal, a restricted account and spent credits
+    /// say what to do, and spent credits are named `insufficient_quota`, as
+    /// the plugin names them, so they read as quota. A restricted account
+    /// keeps its code, 11140: it is the account's, but no sign-in renews it.
     static func explained(_ failure: ProviderFailure) -> ProviderFailure {
         let raw = failure.message
         var failure = failure
         var code = failure.providerCode
-        if case .object(let root)? = parseJSONObject(raw) {
-            let error = object(root["error"]) ?? root
-            code = [object(error["data"])?["code"], error["code"], root["code"], object(root["data"])?["code"]]
-                .lazy.compactMap(text).first ?? code
-            let said = [
-                error["message"],
-                object(error["data"])?["msg"],
-                root["error"],
-                root["msg"],
-                object(root["data"])?["msg"]
-            ]
-                .lazy.compactMap { value -> String? in
-                    guard case .string(let words)? = value, !words.isEmpty else { return nil }
-                    return words
-                }.first
-            if let said {
+        if let refusal = refusal(raw) {
+            code = refusal.code ?? code
+            if let said = refusal.message {
                 failure.message = said
                 failure.upstreamMessage = failure.upstreamMessage ?? raw
             }
@@ -420,11 +681,45 @@ enum WorkBuddyWire {
         }
         if matches(refused, raw) {
             failure.message += " — \(refusedHint)"
+        } else if code == "11140" || matches(restricted, raw) {
+            failure.message += " — \(restrictedHint)"
+            failure.providerCode = "11140"
         } else if code == "14018" || matches(exhausted, raw) {
             failure.message += " — \(exhaustedHint)"
             failure.providerCode = "insufficient_quota"
         }
         return failure
+    }
+
+    /// A refusal's code and words, where WorkBuddy puts them: its gateway's
+    /// own `{code, msg}`, under `data` or `error` as some endpoints nest it,
+    /// or OpenAI's `{"error": {"message"}}`. Nil for a body that isn't JSON.
+    static func refusal(_ body: String) -> (code: String?, message: String?)? {
+        guard case .object(let root)? = parseJSONObject(body) else { return nil }
+        let error = object(root["error"]) ?? root
+        let code = [object(error["data"])?["code"], error["code"], root["code"], object(root["data"])?["code"]]
+            .lazy.compactMap(text).first
+        let message = [error["message"], object(error["data"])?["msg"], root["error"], root["msg"], object(root["data"])?["msg"]]
+            .lazy.compactMap { value -> String? in
+                guard case .string(let words)? = value, !words.isEmpty else { return nil }
+                return words
+            }.first
+        return (code, message)
+    }
+
+    /// Whether a 400 is the channel refusal the system prompt's move answers
+    /// (`systemAsUser`): code 11101 or 11128. The gateway gives 11128 to
+    /// "first message is not system prompt" too, which no move mends, so
+    /// the code's words are read as well.
+    static func refusesChannel(_ body: String) -> Bool {
+        guard let refusal = refusal(body), ["11101", "11128"].contains(refusal.code) else { return false }
+        return matches(refused, refusal.message ?? "")
+    }
+
+    /// Whether a 400 is code 11153, "the conversation must end with a user
+    /// message", which `replyAfterTools` answers.
+    static func refusesAfterTools(_ body: String) -> Bool {
+        refusal(body)?.code == "11153"
     }
 
     private static func matches(_ pattern: NSRegularExpression, _ text: String) -> Bool {

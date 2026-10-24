@@ -86,7 +86,7 @@ public enum WorkBuddyModels {
                 let reasoning = detail["reasoning"] as? [String: Any] ?? [:]
                 // The levels WorkBuddy offers the model, and off where it
                 // offers that; a model it gives no levels isn't asked for one.
-                var efforts = reasoning["supportedEfforts"] as? [String] ?? []
+                var efforts = efforts(of: detail)
                 if !efforts.isEmpty, detail["onlyReasoning"] as? Bool != true,
                    reasoning["canDisableThinking"] as? Bool != false {
                     efforts.insert("none", at: 0)
@@ -102,7 +102,7 @@ public enum WorkBuddyModels {
                         contextWindow: (detail["maxInputTokens"] as? Int).flatMap { $0 > 0 ? $0 : nil }
                             ?? model(site: site, id: id).contextWindow,
                         maxTokens: detail["maxOutputTokens"] as? Int ?? 0,
-                        images: detail["supportsImages"] as? Bool == true,
+                        images: detail["supportsImages"] as? Bool == true && !textOnly(site: site, id: id),
                         efforts: efforts
                     ),
                     creditRate: creditRate(detail["credits"])
@@ -110,6 +110,38 @@ public enum WorkBuddyModels {
             }
         }
         return distinctNames(out)
+    }
+
+    /// The reasoning levels a config model takes. Most list them in
+    /// `reasoning.supportedEfforts`; some (fast-model, deepseek-v4.1-flash,
+    /// kimi-k3, gemini-3.5-flash … on both builds) say only
+    /// `supportsReasoning` and a default `reasoning.effort`. Those take low,
+    /// high and max, which the plugin's authors had each answered with
+    /// reasoning under a real account, and their own default (plugin 0.1.26,
+    /// 68170b3 / plugins#255; `efforts.test.mjs`). Every one of them is
+    /// `onlyReasoning`, so none is offered off.
+    static func efforts(of detail: [String: Any]) -> [String] {
+        let reasoning = detail["reasoning"] as? [String: Any] ?? [:]
+        if let said = reasoning["supportedEfforts"] as? [String], !said.isEmpty { return said }
+        guard detail["supportsReasoning"] as? Bool == true else { return [] }
+        let order = ["low", "medium", "high", "xhigh", "max"]
+        var taken: Set = ["low", "high", "max"]
+        if let own = reasoning["effort"] as? String, order.contains(own) { taken.insert(own) }
+        return order.filter(taken.contains)
+    }
+
+    /// Whether `site` drops the images sent to a model whatever its config
+    /// says. WorkBuddy AI's config marks every model `supportsImages`, but an
+    /// image sent to its GLM models (glm-5.3-flash, glm-5.3, glm-5.2) is
+    /// taken out by the server and the model is told "[System reminder: the
+    /// current model does not support images. Content filtered. ...]"; its
+    /// other models read them, and so does WorkBuddy (China)'s GLM (plugin
+    /// 0.1.16, cb90931, tried on a real account 2026-10-13). Listed
+    /// text-only, the model is told the image was left out by kwwk's own
+    /// placeholder, and no image is sent to be dropped. The family goes by
+    /// its id's start, so a later GLM is covered.
+    static func textOnly(site: WorkBuddySite, id: String) -> Bool {
+        site == .international && id.hasPrefix("glm-")
     }
 
     /// A model's credits, the multiple WorkBuddy's picker shows by it:
