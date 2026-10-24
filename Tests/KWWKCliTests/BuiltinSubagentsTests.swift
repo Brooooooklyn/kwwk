@@ -14,13 +14,12 @@ struct BuiltinSubagentsTests {
         #expect(agents.first { $0.name == "plan" }?.tools == .readOnly)
     }
 
-    @Test("bash-enabled CLI tools expose the constrained test runner")
+    @Test("bash-enabled CLI tools expose the builtin lineup")
     func bashBuiltins() {
         let agents = defaultCLISubagents(for: .standard)
         let names = agents.map(\.name)
-        #expect(names == ["explore", "plan", "code-reviewer", "test-runner", "general"])
+        #expect(names == ["explore", "plan", "code-reviewer", "general"])
         #expect(agents.first { $0.name == "general" }?.tools == nil)
-        #expect(agents.first { $0.name == "test-runner" }?.bashCommandPolicy == .buildAndTestOnly)
     }
 
     @Test("CLI subagent selection can disable or narrow builtins")
@@ -40,7 +39,7 @@ struct BuiltinSubagentsTests {
             for: .standard,
             runInBackgroundByDefault: true
         )
-        #expect(interactive.map(\.name) == ["explore", "plan", "code-reviewer", "test-runner", "general"])
+        #expect(interactive.map(\.name) == ["explore", "plan", "code-reviewer", "general"])
         #expect(interactive.allSatisfy { $0.runInBackgroundByDefault })
     }
 }

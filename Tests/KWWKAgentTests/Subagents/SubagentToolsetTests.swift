@@ -46,7 +46,7 @@ struct SubagentToolsetTests {
 
         // The builtin lineup for .standard reaches the model through the
         // tool description's agent list.
-        for builtin in ["explore", "plan", "code-reviewer", "test-runner", "general"] {
+        for builtin in ["explore", "plan", "code-reviewer", "general"] {
             #expect(agentTool.description.contains(builtin), "missing builtin \(builtin)")
         }
     }
