@@ -302,7 +302,7 @@ let agent = await makeCodingAgent(CodingAgentConfig(
     cwd: FileManager.default.currentDirectoryPath,
     tools: .standard,
     bashEnvironment: shellEnvironment
-).withBuiltinSubagents([.general, .explore, .plan, .codeReviewer, .testRunner])).agent
+).withBuiltinSubagents([.general, .explore, .plan, .codeReviewer])).agent
 ```
 
 SDK users can also run a subagent directly:
@@ -416,17 +416,13 @@ model-facing notification. Background-task snapshots retain the structured
 outcome, including usage and cost. `agent.backgroundSubagentRuns()` exposes the
 terminal cross-run aggregate to SDK hosts.
 
-The interactive `kwwk` CLI enables five built-ins by default: `explore`,
-`plan`, `code-reviewer`, `test-runner`, and `general`. `subagent_type` is
+The interactive `kwwk` CLI enables four built-ins by default: `explore`,
+`plan`, `code-reviewer`, and `general`. `subagent_type` is
 required, and the tool description orders narrower specialists before
 `general`; there is no silent fallback to a full-power child. `general`
 inherits the parent agent's tools and is reserved for implementation work.
-`explore`, `plan`, and `code-reviewer` are read-only specialists.
-`test-runner` has Bash but enforces a conservative runtime policy: exactly one
-direct build/test process per tool call; shell composition, redirection,
-command substitution, cleanup arguments, and unrelated executables are
-rejected before spawn. This is an accidental-destruction boundary, not an OS
-sandbox—the selected build system still executes trusted project code. Interactive
+`explore`, `plan`, and `code-reviewer` are read-only specialists; builds and
+tests run in `general`. Interactive
 CLI built-ins default to background execution so independent team fan-out
 does not turn the parent into a wait-all barrier; pass
 `run_in_background: false` when the parent must block for one result.
@@ -434,7 +430,7 @@ does not turn the parent into a wait-all barrier; pass
 parent work remains. `task_list({})` exposes live status plus a bounded
 progress/output tail, and completion is delivered as an internal runtime aside
 rather than an editable user queue item. Use `--no-subagents` to disable them or
-`--subagents read-only` or `--subagents general,test-runner` to enable only a
+`--subagents read-only` or `--subagents general,explore` to enable only a
 subset. The SDK does not enable those automatically. `readOnly` is a
 tool whitelist, not an operating-system filesystem sandbox. The built-in
 `explore` and `plan` definitions additionally use canonical workspace path

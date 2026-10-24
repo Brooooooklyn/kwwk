@@ -134,10 +134,8 @@ public struct BuiltinSubagentSelection: OptionSet, Sendable, Hashable {
     public static let general = BuiltinSubagentSelection(rawValue: 1 << 0)
     public static let explore = BuiltinSubagentSelection(rawValue: 1 << 1)
     public static let plan = BuiltinSubagentSelection(rawValue: 1 << 2)
-    public static let testRunner = BuiltinSubagentSelection(rawValue: 1 << 3)
     public static let codeReviewer = BuiltinSubagentSelection(rawValue: 1 << 4)
-    /// Least-privilege investigation/review bundle. Test execution is omitted
-    /// because it requires a constrained Bash capability.
+    /// Least-privilege investigation/review bundle.
     public static let readOnly: BuiltinSubagentSelection = [
         .explore,
         .plan,
@@ -147,7 +145,6 @@ public struct BuiltinSubagentSelection: OptionSet, Sendable, Hashable {
         .general,
         .explore,
         .plan,
-        .testRunner,
         .codeReviewer,
     ]
 
@@ -163,8 +160,6 @@ public struct BuiltinSubagentSelection: OptionSet, Sendable, Hashable {
             return .explore
         case "plan":
             return .plan
-        case "test-runner", "test", "tests":
-            return .testRunner
         case "code-reviewer", "review", "reviewer":
             return .codeReviewer
         case "read-only", "readonly":
@@ -203,7 +198,7 @@ public struct BuiltinSubagentSelection: OptionSet, Sendable, Hashable {
         return selection
     }
 
-    public static let validNames = "general, explore, plan, test-runner, code-reviewer, read-only, all, none"
+    public static let validNames = "general, explore, plan, code-reviewer, read-only, all, none"
 }
 
 public extension SubagentDefinition {
@@ -311,38 +306,6 @@ public extension SubagentDefinition {
         )
     }
 
-    static func testRunner(
-        tools: CodingTools = [.read, .grep, .find, .ls, .bash]
-    ) -> SubagentDefinition {
-        var safeTools = tools.intersection(.readOnly)
-        if tools.contains(.bash) { safeTools.insert(.bash) }
-        if tools.contains(.task) { safeTools.insert(.task) }
-        return SubagentDefinition(
-            name: "test-runner",
-            description: "Use for running tests and analyzing test or build failures.",
-            prompt: """
-            You are a test-running specialist.
-
-            Responsibilities:
-            - Inspect project files to identify the appropriate test or build command before running it.
-            - Run focused tests when possible.
-            - Analyze failures and report likely causes.
-            - Do not edit, create, delete, or move files.
-            - Do not run destructive commands.
-            - Bash is runtime-restricted to one direct build/test process per call. Shell composition, redirection, command substitution, cleanup commands, and unrelated executables are rejected before launch.
-            - Prefer non-interactive commands and bounded timeouts.
-
-            Output:
-            - Command(s) run.
-            - Result summary.
-            - Failure analysis with relevant log excerpts.
-            - Recommended next steps.
-            """,
-            tools: safeTools,
-            bashCommandPolicy: .buildAndTestOnly
-        )
-    }
-
     static func builtins(
         for tools: CodingTools,
         selection: BuiltinSubagentSelection = .all
@@ -359,9 +322,6 @@ public extension SubagentDefinition {
         }
         if selection.contains(.codeReviewer) {
             if !readOnly.isEmpty { agents.append(.codeReviewer(tools: readOnly)) }
-        }
-        if selection.contains(.testRunner), tools.contains(.bash) {
-            agents.append(.testRunner(tools: tools))
         }
         // Keep the broad, mutating agent last so the model sees narrower
         // specialists first and must make an explicit choice for full access.

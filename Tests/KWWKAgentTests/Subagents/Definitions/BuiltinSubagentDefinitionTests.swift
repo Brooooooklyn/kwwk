@@ -22,9 +22,6 @@ struct BuiltinSubagentDefinitionTests {
         #expect(plan.tools == .readOnly)
         #expect(plan.prompt.contains("read-only implementation planner"))
 
-        let testRunner = SubagentDefinition.testRunner(tools: .standard)
-        #expect(testRunner.tools == [.read, .grep, .find, .ls, .bash, .task])
-        #expect(testRunner.bashCommandPolicy == .buildAndTestOnly)
     }
 
     @Test("builtins respect selection and available tools")
@@ -48,7 +45,7 @@ struct BuiltinSubagentDefinitionTests {
         #expect(BuiltinSubagentSelection.parseList("general,Explore") == [.general, .explore])
         #expect(BuiltinSubagentSelection.parseList("none") == BuiltinSubagentSelection.none)
         #expect(BuiltinSubagentSelection.parseList("all") == .all)
-        #expect(BuiltinSubagentSelection.parseList("test-runner") == .testRunner)
+        #expect(BuiltinSubagentSelection.parseList("test-runner") == nil)
         #expect(BuiltinSubagentSelection.parseList("read-only") == .readOnly)
         #expect(BuiltinSubagentSelection.parseList("bad") == nil)
     }

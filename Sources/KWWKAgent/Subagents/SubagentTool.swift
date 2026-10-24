@@ -1346,7 +1346,7 @@ private enum SubagentPromptBuilder {
         \(agents.isEmpty ? "(none)" : agents)
 
         Usage notes:
-        - `subagent_type` is required. Choose the narrowest matching specialist; use `test-runner` for builds/tests and reserve `general` for implementation work that truly needs mutation.
+        - `subagent_type` is required. Choose the narrowest matching specialist; use `general` for work that runs commands (builds, tests) or changes files.
         - Always include a short `description` summarizing the work.
         - The subagent does not inherit the parent transcript. Put all necessary file paths, errors, goals, and constraints in `prompt`.
         - The subagent's output is returned only to you as this tool result; summarize it for the user when relevant.
