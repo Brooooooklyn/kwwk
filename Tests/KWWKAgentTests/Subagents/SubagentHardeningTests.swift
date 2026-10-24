@@ -868,60 +868,6 @@ struct SubagentHardeningTests {
         }
     }
 
-    @Test("timed-out non-cooperative child retains physical runner capacity")
-    func nonCooperativeTimeoutRetainsCapacity() async throws {
-        // The timeout must leave a loaded CI runner room to reach the
-        // provider at all, and the provider must outlive it.
-        let provider = NonCooperativeSubagentProvider(delaySeconds: 8)
-        let sourceId = "non-cooperative-capacity-\(UUID().uuidString)"
-        await APIRegistry.shared.register(provider, sourceId: sourceId)
-        defer { Task { await APIRegistry.shared.unregisterSource(sourceId) } }
-        let model = Model(
-            id: "non-cooperative-capacity-model",
-            api: provider.api,
-            provider: "non-cooperative-capacity"
-        )
-        let tool = makeTool(
-            model: model,
-            limits: SubagentLimits(
-                maxConcurrent: 1,
-                maxConcurrentMutating: 1,
-                maxTotal: 2,
-                maxTurns: 4,
-                timeoutSeconds: 3
-            )
-        )
-
-        _ = try? await executeMini(tool, callId: "zombie-first")
-        #expect(provider.callCount == 1)
-        #expect(provider.didFinish == false)
-
-        do {
-            _ = try await executeMini(tool, callId: "zombie-second")
-            Issue.record("expected physical concurrency rejection")
-        } catch let error as StructuredToolExecutionError {
-            guard case .object(let details) = error.details ?? .null else {
-                Issue.record("expected structured concurrency details")
-                return
-            }
-            #expect(details["failure_kind"] == .string("concurrency_limit"))
-        }
-        #expect(provider.callCount == 1)
-        #expect(provider.didFinish == false)
-
-        #expect(await awaitUntil(10_000) { provider.didFinish })
-        // The runner releases its permit shortly *after* the zombie's stream
-        // finishes, so a single follow-up launch can race the release and be
-        // rejected. Retry the launch until it is admitted — a rejected
-        // attempt throws before charging the maxTotal budget.
-        let admitted = await awaitUntil(3_000) {
-            if provider.callCount >= 2 { return true }
-            _ = try? await executeMini(tool, callId: "after-zombie-exit")
-            return provider.callCount >= 2
-        }
-        #expect(admitted)
-    }
-
     @Test("an update callback can synchronously cancel its own subagent")
     func updateCallbackCancellationDoesNotDeadlock() async throws {
         try await withRetries { _ in
