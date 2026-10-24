@@ -5,16 +5,21 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same branch makes the running check moot.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-macos:
-    # macos-15 covers the oldest supported toolchain on both Apple Silicon and
-    # Intel; macos-26 tracks the newest Swift. Normal Homebrew installs use a
-    # prebuilt package, but this matrix keeps each bottle architecture plus
-    # source/HEAD installs and SwiftPM consumers buildable.
+    # macos-15 covers the oldest supported toolchain; macos-26 tracks the
+    # newest Swift. Intel is left to the release workflow, which builds the
+    # Intel bottle anyway: a third macOS job here only queued behind the
+    # account's macOS concurrency limit.
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-15-intel, macos-26]
+        os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -49,18 +54,12 @@ jobs:
         run: swift test
 
   build-ios:
-    # The libraries and the `kwwk` CLI cross-compiled for iOS at the
-    # Package.swift floor, on the oldest and newest supported toolchains.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, macos-26]
-    runs-on: ${{ matrix.os }}
+    # The `kwwk` CLI cross-compiled for iOS at the Package.swift floor, on the
+    # newest toolchain. The Swift 6.1 floor itself is covered by macos-15 and
+    # Linux 6.1 above.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-      - name: Select Swift 6.1 toolchain
-        if: matrix.os == 'macos-15'
-        run: sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
       - name: swift build (iOS 15, kwwk CLI)
         # There is no Swift SDK bundle for iOS, so each stage gets the
         # iPhoneOS sysroot by hand: frontend, C, link driver and ld. The native
@@ -80,6 +79,13 @@ jobs:
           vtool -show-build "$bin"
           vtool -show-build "$bin" | grep -qE '^ *platform (IOS|2)$'
           vtool -show-build "$bin" | grep -qE '^ *minos 15\.0$'
+
+  build-catalyst:
+    # The libraries for Mac Catalyst, in its own job so it builds beside the
+    # iOS CLI rather than after it.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
       - name: xcodebuild (Mac Catalyst 15, libraries)
         run: |
           xcodebuild build -scheme KWWKMCP \
