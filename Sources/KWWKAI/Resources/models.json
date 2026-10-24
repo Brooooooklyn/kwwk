@@ -19064,6 +19064,80 @@
         "xhigh" : null
       }
     },
+    "k3.1-pro" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/api.kimi.com\/coding",
+      "compat" : {
+        "allowEmptySignature" : true,
+        "forceAdaptiveThinking" : true
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 0,
+        "input" : 2,
+        "output" : 10
+      },
+      "id" : "k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 131072,
+      "name" : "Kimi K3.1 Pro",
+      "provider" : "kimi-coding",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
+    },
+    "k3.1-pro-highspeed" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/api.kimi.com\/coding",
+      "compat" : {
+        "allowEmptySignature" : true,
+        "forceAdaptiveThinking" : true
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 0,
+        "input" : 4,
+        "output" : 20
+      },
+      "id" : "k3.1-pro-highspeed",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 131072,
+      "name" : "Kimi K3.1 Pro Highspeed",
+      "provider" : "kimi-coding",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
+    },
     "kimi-for-coding" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/api.kimi.com\/coding",
@@ -20742,6 +20816,82 @@
         "off" : null,
         "xhigh" : null
       }
+    },
+    "kimi-k3.1-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/api.moonshot.ai\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : false,
+        "thinkingFormat" : "deepseek"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 2,
+        "input" : 2,
+        "output" : 10
+      },
+      "id" : "kimi-k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro",
+      "provider" : "moonshotai",
+      "reasoning" : true
+    },
+    "kimi-k3.1-pro-highspeed" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/api.moonshot.ai\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : false,
+        "thinkingFormat" : "deepseek"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 4,
+        "input" : 4,
+        "output" : 20
+      },
+      "id" : "kimi-k3.1-pro-highspeed",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro Highspeed",
+      "provider" : "moonshotai",
+      "reasoning" : true
     }
   },
   "moonshotai-cn" : {
@@ -20917,6 +21067,82 @@
         "off" : null,
         "xhigh" : null
       }
+    },
+    "kimi-k3.1-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/api.moonshot.cn\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : false,
+        "thinkingFormat" : "deepseek"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.1944,
+        "cacheWrite" : 1.9437,
+        "input" : 1.9437,
+        "output" : 10.1671
+      },
+      "id" : "kimi-k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro",
+      "provider" : "moonshotai-cn",
+      "reasoning" : true
+    },
+    "kimi-k3.1-pro-highspeed" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/api.moonshot.cn\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsReasoningEffort" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : false,
+        "thinkingFormat" : "deepseek"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.1944,
+        "cacheWrite" : 3.8874,
+        "input" : 3.8874,
+        "output" : 20.3342
+      },
+      "id" : "kimi-k3.1-pro-highspeed",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro Highspeed",
+      "provider" : "moonshotai-cn",
+      "reasoning" : true
     }
   },
   "nvidia" : {
@@ -26766,7 +26992,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.3,
-        "cacheWrite" : 0,
+        "cacheWrite" : 3,
         "input" : 3,
         "output" : 15
       },
@@ -27917,7 +28143,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.3,
-        "cacheWrite" : 0,
+        "cacheWrite" : 3,
         "input" : 3,
         "output" : 15
       },
@@ -27943,6 +28169,51 @@
       "thinkingLevelMap" : {
         "high" : null,
         "low" : null,
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : null
+      }
+    },
+    "kimi-k3.1-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/inference\/go\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : true
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 2,
+        "input" : 2,
+        "output" : 10
+      },
+      "id" : "kimi-k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 131072,
+      "name" : "Kimi K3.1 Pro",
+      "provider" : "opencode-go",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
         "max" : "max",
         "medium" : null,
         "minimal" : null,
@@ -28629,10 +28900,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.002,
+        "cacheRead" : 0.014999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.019,
-        "output" : 0.6
+        "input" : 0.02,
+        "output" : 1
       },
       "id" : "~deepseek\/deepseek-flash-latest",
       "input" : [
@@ -28709,10 +28980,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0275,
+        "cacheRead" : 0.028000000000000001,
         "cacheWrite" : 0,
         "input" : 0.042200000000000001,
-        "output" : 0.1729
+        "output" : 0.1694
       },
       "id" : "~deepseek\/deepseek-v4-flash-latest",
       "input" : [
@@ -29229,10 +29500,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0051999999999999998,
+        "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.0051999999999999998,
-        "output" : 0.1985
+        "input" : 0.0304,
+        "output" : 0.085199999999999998
       },
       "id" : "~z-ai\/glm-flash-latest",
       "input" : [
@@ -29249,7 +29520,7 @@
           }
         }
       },
-      "maxTokens" : 943718,
+      "maxTokens" : 131072,
       "name" : "Z.ai: GLM Flash Latest",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -31654,10 +31925,10 @@
       },
       "contextWindow" : 1024000,
       "cost" : {
-        "cacheRead" : 0.072079000000000004,
+        "cacheRead" : 0.055187,
         "cacheWrite" : 0,
-        "input" : 0.864954,
-        "output" : 1.729908
+        "input" : 0.6622440000000001,
+        "output" : 1.324488
       },
       "id" : "deepseek\/deepseek-v4-pro",
       "input" : [
@@ -31724,10 +31995,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0060000000000000001,
+        "cacheRead" : 0.014999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.3,
-        "output" : 1.2
+        "input" : 0.02,
+        "output" : 1
       },
       "id" : "deepseek\/deepseek-v4.1-flash",
       "input" : [
@@ -33229,10 +33500,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.050000000000000003,
+        "cacheRead" : 0.037499999999999999,
         "cacheWrite" : 0,
-        "input" : 0.089999999999999997,
-        "output" : 0.3
+        "input" : 0.067500000000000004,
+        "output" : 0.225
       },
       "id" : "google\/gemma-4-26b-a4b-it",
       "input" : [
@@ -35440,7 +35711,7 @@
         "cacheRead" : 0.21,
         "cacheWrite" : 0,
         "input" : 0.239,
-        "output" : 11.936
+        "output" : 10.8
       },
       "id" : "moonshotai\/kimi-k3",
       "input" : [
@@ -35504,6 +35775,51 @@
       },
       "maxTokens" : 16384,
       "name" : "MoonshotAI: Kimi K3 (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : null,
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : null
+      }
+    },
+    "moonshotai\/kimi-k3.1-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsDeveloperRole" : false,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 0,
+        "input" : 2,
+        "output" : 10
+      },
+      "id" : "moonshotai\/kimi-k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 943718,
+      "name" : "MoonshotAI: Kimi K3.1 Pro",
       "provider" : "openrouter",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -42348,10 +42664,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.020625000000000001,
+        "cacheRead" : 0.033000000000000002,
         "cacheWrite" : 0,
-        "input" : 0.082500000000000004,
-        "output" : 0.33
+        "input" : 0.132,
+        "output" : 0.528
       },
       "id" : "tencent\/hy3",
       "input" : [
@@ -42416,10 +42732,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0378,
+        "cacheRead" : 0.042000000000000003,
         "cacheWrite" : 0,
-        "input" : 0.7506,
-        "output" : 2.2509
+        "input" : 0.834,
+        "output" : 2.501
       },
       "id" : "tencent\/hy4-preview",
       "input" : [
@@ -43508,7 +43824,7 @@
       },
       "contextWindow" : 131072,
       "cost" : {
-        "cacheRead" : 0.055,
+        "cacheRead" : 0.050000000000000003,
         "cacheWrite" : 0,
         "input" : 0.3,
         "output" : 0.9
@@ -53076,6 +53392,72 @@
       },
       "maxTokens" : 131072,
       "name" : "Kimi K3 Fast",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "moonshotai\/kimi-k3.1-pro" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "compat" : {
+        "allowEmptySignature" : true
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 2,
+        "input" : 2,
+        "output" : 10
+      },
+      "id" : "moonshotai\/kimi-k3.1-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true
+    },
+    "moonshotai\/kimi-k3.1-pro-highspeed" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "compat" : {
+        "allowEmptySignature" : true
+      },
+      "contextWindow" : 1048576,
+      "cost" : {
+        "cacheRead" : 0.2,
+        "cacheWrite" : 4,
+        "input" : 4,
+        "output" : 20
+      },
+      "id" : "moonshotai\/kimi-k3.1-pro-highspeed",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 1048576,
+      "name" : "Kimi K3.1 Pro Highspeed",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
     },
