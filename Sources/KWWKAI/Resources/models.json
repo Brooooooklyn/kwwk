@@ -1125,6 +1125,44 @@
         "xhigh" : "xhigh"
       }
     },
+    "au.anthropic.claude-sonnet-5-5" : {
+      "api" : "bedrock-converse-stream",
+      "baseUrl" : "https:\/\/bedrock-runtime.us-east-1.amazonaws.com",
+      "compat" : {
+        "supportsStrictMode" : true
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0.11,
+        "cacheWrite" : 2.75,
+        "input" : 2.2,
+        "output" : 11
+      },
+      "id" : "au.anthropic.claude-sonnet-5-5",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "maxPerMessage" : 20,
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "Claude Sonnet 5.5 (AU)",
+      "provider" : "amazon-bedrock",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "max" : "max",
+        "xhigh" : "xhigh"
+      }
+    },
     "ca.amazon.nova-lite-v1:0" : {
       "api" : "bedrock-converse-stream",
       "baseUrl" : "https:\/\/bedrock-runtime.us-east-1.amazonaws.com",
@@ -20846,7 +20884,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.2,
-        "cacheWrite" : 2,
+        "cacheWrite" : 0,
         "input" : 2,
         "output" : 10
       },
@@ -20896,7 +20934,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.2,
-        "cacheWrite" : 4,
+        "cacheWrite" : 0,
         "input" : 4,
         "output" : 20
       },
@@ -21121,7 +21159,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.1944,
-        "cacheWrite" : 1.9437,
+        "cacheWrite" : 0,
         "input" : 1.9437,
         "output" : 10.1671
       },
@@ -21171,7 +21209,7 @@
       "contextWindow" : 1048576,
       "cost" : {
         "cacheRead" : 0.1944,
-        "cacheWrite" : 3.8874,
+        "cacheWrite" : 0,
         "input" : 3.8874,
         "output" : 20.3342
       },
@@ -27776,17 +27814,17 @@
         "xhigh" : null
       }
     },
-    "gemini-4-argon-contributor" : {
+    "gemini-4-argon" : {
       "api" : "google-generative-ai",
       "baseUrl" : "https:\/\/opencode.ai\/inference\/go\/v1",
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.2,
+        "cacheRead" : 0.1,
         "cacheWrite" : 0,
-        "input" : 4,
-        "output" : 20
+        "input" : 2,
+        "output" : 10
       },
-      "id" : "gemini-4-argon-contributor",
+      "id" : "gemini-4-argon",
       "input" : [
         "text",
         "image"
@@ -27802,7 +27840,7 @@
         }
       },
       "maxTokens" : 65536,
-      "name" : "Gemini 4 Argon Contributor",
+      "name" : "Gemini 4 Argon",
       "provider" : "opencode-go",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -28153,6 +28191,31 @@
         "xhigh" : null
       }
     },
+    "iceman-contributor-free" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/opencode.ai\/inference\/go\/v1",
+      "compat" : {
+        "maxTokensField" : "max_tokens",
+        "supportsDeveloperRole" : false,
+        "supportsStore" : false,
+        "supportsStrictMode" : true
+      },
+      "contextWindow" : 262144,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0,
+        "output" : 0
+      },
+      "id" : "iceman-contributor-free",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 131072,
+      "name" : "Iceman Contributor Free",
+      "provider" : "opencode-go",
+      "reasoning" : true
+    },
     "kimi-k2.7-code" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/opencode.ai\/inference\/go\/v1",
@@ -28242,6 +28305,8 @@
       "compat" : {
         "maxTokensField" : "max_tokens",
         "supportsDeveloperRole" : false,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsMidConvoToolAdditions" : true,
         "supportsStore" : false,
         "supportsStrictMode" : true
       },
@@ -29005,9 +29070,9 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.12,
+        "cacheRead" : 0.26,
         "cacheWrite" : 0,
-        "input" : 0.1188,
+        "input" : 0.2565,
         "output" : 8
       },
       "id" : "~deepseek\/deepseek-pro-latest",
@@ -29042,8 +29107,8 @@
       "cost" : {
         "cacheRead" : 0.028000000000000001,
         "cacheWrite" : 0,
-        "input" : 0.042200000000000001,
-        "output" : 0.1694
+        "input" : 0.047500000000000001,
+        "output" : 0.1568
       },
       "id" : "~deepseek\/deepseek-v4-flash-latest",
       "input" : [
@@ -29164,10 +29229,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.228,
+        "cacheRead" : 0.142,
         "cacheWrite" : 0,
-        "input" : 0.238,
-        "output" : 16
+        "input" : 0.152,
+        "output" : 20
       },
       "id" : "~moonshotai\/kimi-latest",
       "input" : [
@@ -29562,8 +29627,8 @@
       "cost" : {
         "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.0304,
-        "output" : 0.085199999999999998
+        "input" : 0.041300000000000003,
+        "output" : 0.075800000000000006
       },
       "id" : "~z-ai\/glm-flash-latest",
       "input" : [
@@ -29605,9 +29670,9 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.078,
+        "cacheRead" : 0.068900000000000003,
         "cacheWrite" : 0,
-        "input" : 0.079000000000000001,
+        "input" : 0.069900000000000004,
         "output" : 1.4
       },
       "id" : "~z-ai\/glm-latest",
@@ -31904,10 +31969,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0014139999999999999,
+        "cacheRead" : 0.014,
         "cacheWrite" : 0,
-        "input" : 0.04444,
-        "output" : 0.13332
+        "input" : 0.44,
+        "output" : 1.32
       },
       "id" : "deepseek\/deepseek-v4-flash-0731",
       "input" : [
@@ -31985,10 +32050,10 @@
       },
       "contextWindow" : 1024000,
       "cost" : {
-        "cacheRead" : 0.055187,
+        "cacheRead" : 0.079604999999999995,
         "cacheWrite" : 0,
-        "input" : 0.6622440000000001,
-        "output" : 1.324488
+        "input" : 0.95526,
+        "output" : 1.91052
       },
       "id" : "deepseek\/deepseek-v4-pro",
       "input" : [
@@ -32020,10 +32085,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.021999999999999999,
+        "cacheRead" : 0.043999999999999997,
         "cacheWrite" : 0,
-        "input" : 0.66,
-        "output" : 1.98
+        "input" : 1.32,
+        "output" : 3.96
       },
       "id" : "deepseek\/deepseek-v4-pro-0813",
       "input" : [
@@ -32101,10 +32166,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0030000000000000001,
+        "cacheRead" : 0.0060000000000000001,
         "cacheWrite" : 0,
-        "input" : 0.15,
-        "output" : 0.6
+        "input" : 0.3,
+        "output" : 1.2
       },
       "id" : "deepseek\/deepseek-v4.1-flash-1017",
       "input" : [
@@ -33560,10 +33625,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.037499999999999999,
+        "cacheRead" : 0.050000000000000003,
         "cacheWrite" : 0,
-        "input" : 0.067500000000000004,
-        "output" : 0.225
+        "input" : 0.089999999999999997,
+        "output" : 0.3
       },
       "id" : "google\/gemma-4-26b-a4b-it",
       "input" : [
@@ -33632,10 +33697,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0,
+        "cacheRead" : 0.1,
         "cacheWrite" : 0,
-        "input" : 0.2,
-        "output" : 0.4
+        "input" : 0.1,
+        "output" : 0.34
       },
       "id" : "google\/gemma-4-31b-it",
       "input" : [
@@ -33652,7 +33717,7 @@
           }
         }
       },
-      "maxTokens" : 16384,
+      "maxTokens" : 235929,
       "name" : "Google: Gemma 4 31B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -33914,6 +33979,34 @@
       "name" : "inclusionAI: Ling 3.1 Flash",
       "provider" : "openrouter",
       "reasoning" : true
+    },
+    "liquid\/lfm-2.5-2.6b" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsDeveloperRole" : false,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 128000,
+      "cost" : {
+        "cacheRead" : 0.040000000000000001,
+        "cacheWrite" : 0,
+        "input" : 0.35,
+        "output" : 0.5
+      },
+      "id" : "liquid\/lfm-2.5-2.6b",
+      "input" : [
+        "text"
+      ],
+      "maxTokens" : 8192,
+      "name" : "LiquidAI: LFM2.5-2.6B",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "off" : null
+      }
     },
     "liquid\/lfm-2.5-2.6b:free" : {
       "api" : "openai-completions",
@@ -34593,18 +34686,18 @@
         "supportsStrictMode" : true,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 198000,
+      "contextWindow" : 204800,
       "cost" : {
         "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.27,
-        "output" : 0.95
+        "input" : 0.3,
+        "output" : 1.2
       },
       "id" : "minimax\/minimax-m2.5",
       "input" : [
         "text"
       ],
-      "maxTokens" : 32768,
+      "maxTokens" : 131072,
       "name" : "MiniMax: MiniMax M2.5",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -35768,10 +35861,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.21,
+        "cacheRead" : 0.142,
         "cacheWrite" : 0,
-        "input" : 0.239,
-        "output" : 10.8
+        "input" : 0.152,
+        "output" : 20
       },
       "id" : "moonshotai\/kimi-k3",
       "input" : [
@@ -35878,7 +35971,7 @@
           }
         }
       },
-      "maxTokens" : 943718,
+      "maxTokens" : 131072,
       "name" : "MoonshotAI: Kimi K3.1 Pro",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -36256,30 +36349,6 @@
       "provider" : "openrouter",
       "reasoning" : true
     },
-    "openai\/gpt-3.5-turbo" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 16385,
-      "cost" : {
-        "cacheRead" : 0,
-        "cacheWrite" : 0,
-        "input" : 0.5,
-        "output" : 1.5
-      },
-      "id" : "openai\/gpt-3.5-turbo",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 4096,
-      "name" : "OpenAI: GPT-3.5 Turbo",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
     "openai\/gpt-3.5-turbo-16k" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -36325,30 +36394,6 @@
       ],
       "maxTokens" : 3685,
       "name" : "OpenAI: GPT-3.5 Turbo (older v0613)",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
-    "openai\/gpt-3.5-turbo:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 16385,
-      "cost" : {
-        "cacheRead" : 0,
-        "cacheWrite" : 0,
-        "input" : 0.25,
-        "output" : 0.75
-      },
-      "id" : "openai\/gpt-3.5-turbo:batch",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 4096,
-      "name" : "OpenAI: GPT-3.5 Turbo (batch)",
       "provider" : "openrouter",
       "reasoning" : false
     },
@@ -36561,7 +36606,7 @@
       },
       "contextWindow" : 1047576,
       "cost" : {
-        "cacheRead" : 0.025000000000000001,
+        "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
         "input" : 0.1,
         "output" : 0.4
@@ -36581,7 +36626,7 @@
           }
         }
       },
-      "maxTokens" : 32768,
+      "maxTokens" : 942818,
       "name" : "OpenAI: GPT-4.1 Nano",
       "provider" : "openrouter",
       "reasoning" : false
@@ -41528,8 +41573,8 @@
       "cost" : {
         "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.4,
-        "output" : 3.2
+        "input" : 0.26,
+        "output" : 2.08
       },
       "id" : "qwen\/qwen3.5-122b-a10b",
       "input" : [
@@ -41724,10 +41769,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.025000000000000001,
+        "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.25,
-        "output" : 2
+        "input" : 0.32,
+        "output" : 3.2
       },
       "id" : "qwen\/qwen3.6-27b",
       "input" : [
@@ -41744,7 +41789,7 @@
           }
         }
       },
-      "maxTokens" : 65536,
+      "maxTokens" : 81920,
       "name" : "Qwen: Qwen3.6 27B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -44079,9 +44124,9 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.078,
+        "cacheRead" : 0.068900000000000003,
         "cacheWrite" : 0,
-        "input" : 0.079000000000000001,
+        "input" : 0.069900000000000004,
         "output" : 1.4
       },
       "id" : "z-ai\/glm-5.3",
@@ -53483,7 +53528,7 @@
           }
         }
       },
-      "maxTokens" : 1048576,
+      "maxTokens" : 131072,
       "name" : "Kimi K3.1 Pro",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
@@ -53516,7 +53561,7 @@
           }
         }
       },
-      "maxTokens" : 1048576,
+      "maxTokens" : 131072,
       "name" : "Kimi K3.1 Pro Highspeed",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true
