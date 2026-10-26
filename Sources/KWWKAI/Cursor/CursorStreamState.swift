@@ -192,21 +192,38 @@ final class CursorStreamState: Sendable {
     /// Append a completed `toolCall` block for a tool the provider already
     /// executed over the exec channel (native bridge, or an MCP exec without a
     /// matching streamed block). Marked resolved so the agent loop skips it.
+    ///
+    /// Cursor sends one tool call id on every exec of a single tool (an edit
+    /// reads the file, then writes it), so an id already in this message is
+    /// taken as `<id>_<n>`, the lowest free `n`. Returns the id the block
+    /// got; the exec runs under it so its result pairs with this block.
+    @discardableResult
     func synthesizeResolvedToolCall(
         id: String,
         name: String,
         arguments: JSONValue,
         emit: (AssistantMessageEvent) -> Void
-    ) {
+    ) -> String {
         endText(emit: emit)
         endThinking(emit: emit)
         let (index, call): (Int, ToolCall) = state.withLockedValue { state in
+            let used = Set(state.blocks.compactMap { block -> String? in
+                if case .toolCall(let call) = block { return call.id }
+                return nil
+            })
+            var id = id
+            if used.contains(id) {
+                var n = 2
+                while used.contains("\(id)_\(n)") { n += 1 }
+                id = "\(id)_\(n)"
+            }
             let call = ToolCall(id: id, name: name, arguments: arguments, cursorExecResolved: true)
             state.blocks.append(.toolCall(call))
             return (state.blocks.count - 1, call)
         }
         emit(.toolCallStart(contentIndex: index, partial: snapshot()))
         emit(.toolCallEnd(contentIndex: index, toolCall: call, partial: snapshot()))
+        return call.id
     }
 
     /// Mark the tool-call block with `id` as resolved (the provider executed it

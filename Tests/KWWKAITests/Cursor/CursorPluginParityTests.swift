@@ -120,6 +120,23 @@ struct CursorEmptyReplyParityTests {
         #expect(blank.emptyReplyFailure(how: "Cursor ended the turn") != nil)
     }
 
+    /// Cursor sends one tool call id on both execs of an edit (read, then
+    /// write); each block still gets an id of its own (2026-10-26).
+    @Test("execs that share Cursor's tool call id get distinct ids")
+    func sharedExecIdsStayDistinct() {
+        let state = makeState()
+        let read = state.synthesizeResolvedToolCall(id: "toolu_1", name: "read", arguments: [:], emit: { _ in })
+        let write = state.synthesizeResolvedToolCall(id: "toolu_1", name: "write", arguments: [:], emit: { _ in })
+        let again = state.synthesizeResolvedToolCall(id: "toolu_1", name: "read", arguments: [:], emit: { _ in })
+        let other = state.synthesizeResolvedToolCall(id: "toolu_2", name: "bash", arguments: [:], emit: { _ in })
+        #expect([read, write, again, other] == ["toolu_1", "toolu_1_2", "toolu_1_3", "toolu_2"])
+        let ids = state.snapshot().content.compactMap { block -> String? in
+            if case .toolCall(let call) = block { return call.id }
+            return nil
+        }
+        #expect(ids == ["toolu_1", "toolu_1_2", "toolu_1_3", "toolu_2"])
+    }
+
     /// conversation.test.mjs "an empty reply says what the Run sent before
     /// it" (#60): what was not read is named by its agent.v1 field number.
     @Test("an empty reply names what Cursor sent that was not read")

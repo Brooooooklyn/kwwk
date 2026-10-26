@@ -27,6 +27,7 @@ public enum TransformMessages {
         result = stripCrossModelThinking(result, model: model, preserveAnthropicFallback: preserveAnthropicFallback)
         result = fillEmptyToolCallIds(result)
         result = normalizeToolCallIds(result, model: model)
+        result = uniquifyToolCallIds(result, model: model)
         result = sanitizeSurrogates(result)
         result = repairToolFlow(result)
         return result
@@ -250,6 +251,79 @@ public enum TransformMessages {
             case .user, .system:
                 return message
             }
+        }
+    }
+
+    /// Gives every replayed tool call an id no other call in the transcript
+    /// has, and each of its results the same id. Anthropic refuses a request
+    /// in which two `tool_use` blocks share an id, and the stored transcript
+    /// would then fail on every later turn. Cursor sends one id on each exec
+    /// of a single tool (an edit reads, then writes), so a Cursor turn
+    /// replayed to another provider held the same id twice (2026-10-26).
+    ///
+    /// The first call with an id keeps it; a later one becomes `<id>_<n>`
+    /// with the lowest free `n`, or `hashMark` and a SHA-256 when that is not
+    /// a safe id within the target's length. The results in a turn's span,
+    /// up to the next assistant message, go to that turn's calls with the
+    /// id in order, a call of the same tool first. The mapping depends only
+    /// on the transcript, so it is the same on every request. Errored and
+    /// aborted turns are left out, as ``repairToolFlow(_:)`` drops them.
+    public static func uniquifyToolCallIds(_ messages: [Message], model: Model) -> [Message] {
+        var taken = Set<String>()
+        for case .assistant(let a) in messages {
+            for case .toolCall(let tc) in a.content { taken.insert(tc.id) }
+        }
+        var claimed = Set<String>()
+        /// This turn's calls by their id before renaming: the id sent and the
+        /// tool, in order, each struck off when a result takes it.
+        var span: [String: [(id: String, name: String)]] = [:]
+        var renamed = false
+        let result = messages.map { message -> Message in
+            switch message {
+            case .assistant(var a):
+                span = [:]
+                if a.stopReason == .error || a.stopReason == .aborted { return message }
+                var changed = false
+                a.content = a.content.map { block in
+                    guard case .toolCall(var tc) = block else { return block }
+                    let original = tc.id
+                    if !claimed.insert(original).inserted {
+                        tc.id = freshId(for: original, taken: &taken, model: model)
+                        claimed.insert(tc.id)
+                        changed = true
+                    }
+                    span[original, default: []].append((tc.id, tc.name))
+                    return .toolCall(tc)
+                }
+                guard changed else { return message }
+                renamed = true
+                return .assistant(a)
+            case .toolResult(var r):
+                guard var calls = span[r.toolCallId], !calls.isEmpty else { return message }
+                let match = calls.firstIndex { $0.name == r.toolName } ?? 0
+                let id = calls.remove(at: match).id
+                span[r.toolCallId] = calls
+                guard id != r.toolCallId else { return message }
+                r.toolCallId = id
+                return .toolResult(r)
+            case .user, .system:
+                return message
+            }
+        }
+        return renamed ? result : messages
+    }
+
+    private static func freshId(for id: String, taken: inout Set<String>, model: Model) -> String {
+        let limit = model.provider == "openai" ? 40 : 64
+        var n = 2
+        while true {
+            var candidate = "\(id)_\(n)"
+            if !isSafeId(candidate) || candidate.count > limit {
+                let digest = SHA256.hash(data: Data("\(id)#\(n)".utf8)).map { String(format: "%02x", $0) }.joined()
+                candidate = hashMark + String(digest.prefix(limit - hashMark.count))
+            }
+            if taken.insert(candidate).inserted { return candidate }
+            n += 1
         }
     }
 

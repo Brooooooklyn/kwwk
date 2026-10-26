@@ -160,4 +160,115 @@ struct ToolCallIdCollisionTests {
             #expect(results[sent] == "out of \(original)")
         }
     }
+
+    // MARK: - Repeated ids
+
+    private static func cursorTurn(_ calls: [(String, String)], results: [(String, String, String)]) -> [Message] {
+        var messages: [Message] = [.user(UserMessage(text: "go"))]
+        messages.append(.assistant(AssistantMessage(
+            content: calls.map { .toolCall(ToolCall(id: $0.0, name: $0.1, arguments: [:])) },
+            api: "cursor-agent", provider: "cursor", model: "claude-opus-5-5-high", stopReason: .stop
+        )))
+        for (id, name, text) in results {
+            messages.append(.toolResult(ToolResultMessage(
+                toolCallId: id, toolName: name, content: [.text(TextContent(text: text))])))
+        }
+        return messages
+    }
+
+    @Test("a Cursor edit's read and write under one id go as two ids, each with its own result")
+    func repeatedIdInOneTurn() {
+        let messages = Self.cursorTurn(
+            [("toolu_1", "read"), ("toolu_1", "write"), ("toolu_2", "bash")],
+            results: [("toolu_1", "read", "read out"), ("toolu_1", "write", "write out"), ("toolu_2", "bash", "bash out")]
+        )
+        let out = TransformMessages.uniquifyToolCallIds(messages, model: Self.claude)
+        let (calls, results) = Self.pairs(out)
+        #expect(calls == ["toolu_1", "toolu_1_2", "toolu_2"])
+        #expect(results == ["toolu_1": "read out", "toolu_1_2": "write out", "toolu_2": "bash out"])
+    }
+
+    @Test("results go to the call of the same tool, whatever order they come in")
+    func repeatedIdResultsByName() {
+        let messages = Self.cursorTurn(
+            [("toolu_1", "read"), ("toolu_1", "write")],
+            results: [("toolu_1", "write", "write out"), ("toolu_1", "read", "read out")]
+        )
+        let (_, results) = Self.pairs(TransformMessages.uniquifyToolCallIds(messages, model: Self.claude))
+        #expect(results == ["toolu_1": "read out", "toolu_1_2": "write out"])
+    }
+
+    @Test("an id reused in a later turn is renamed there, with that turn's result")
+    func repeatedIdAcrossTurns() {
+        var messages = Self.cursorTurn([("call_0", "bash")], results: [("call_0", "bash", "one")])
+        messages += Self.cursorTurn([("call_0", "bash")], results: [("call_0", "bash", "two")])
+        let (calls, results) = Self.pairs(TransformMessages.uniquifyToolCallIds(messages, model: Self.claude))
+        #expect(calls == ["call_0", "call_0_2"])
+        #expect(results == ["call_0": "one", "call_0_2": "two"])
+    }
+
+    @Test("a renamed id never takes an id already in the transcript")
+    func renameSkipsTakenIds() {
+        let messages = Self.cursorTurn(
+            [("a", "f"), ("a", "f"), ("a_2", "f")],
+            results: [("a", "f", "1"), ("a", "f", "2"), ("a_2", "f", "3")]
+        )
+        let (calls, results) = Self.pairs(TransformMessages.uniquifyToolCallIds(messages, model: Self.claude))
+        #expect(calls == ["a", "a_3", "a_2"])
+        #expect(results == ["a": "1", "a_3": "2", "a_2": "3"])
+    }
+
+    @Test("an errored turn's ids do not make a later call's id a repeat")
+    func erroredTurnClaimsNothing() {
+        let messages: [Message] = [
+            .assistant(AssistantMessage(
+                content: [.toolCall(ToolCall(id: "a", name: "f", arguments: [:]))],
+                api: "a", provider: "p", model: "m", stopReason: .error
+            )),
+        ] + Self.cursorTurn([("a", "f")], results: [("a", "f", "ok")])
+        let (calls, _) = Self.pairs(TransformMessages.uniquifyToolCallIds(messages, model: Self.claude))
+        #expect(calls == ["a", "a"])
+    }
+
+    @Test("a transcript with no repeated id is returned as it is")
+    func noRepeatsUnchanged() {
+        let messages = Self.history(["x", "y"])
+        let out = TransformMessages.uniquifyToolCallIds(messages, model: Self.claude)
+        #expect(Self.pairs(out).calls == ["x", "y"])
+        #expect(Self.pairs(out).results == Self.pairs(messages).results)
+    }
+
+    @Test("a renamed id over the length limit is hashed to fit")
+    func longRepeatHashed() {
+        let long = String(repeating: "a", count: 40)
+        let messages = Self.cursorTurn([(long, "f"), (long, "f")], results: [(long, "f", "1"), (long, "f", "2")])
+        let (calls, results) = Self.pairs(TransformMessages.uniquifyToolCallIds(messages, model: Self.openai))
+        #expect(calls[0] == long)
+        #expect(calls[1].hasPrefix(TransformMessages.hashMark) && calls[1].count == 40)
+        #expect(results[calls[1]] == "2")
+    }
+
+    @Test("a Cursor turn with a repeated id reaches the Anthropic request with unique tool_use ids")
+    func repeatedIdThroughAnthropicProvider() async throws {
+        let client = StubSSEClient(body: AnthropicToolChoiceTests.minimalSSE)
+        let provider = AnthropicProvider(client: client, defaultAPIKey: "test")
+        let messages = Self.cursorTurn(
+            [("toolu_1", "read"), ("toolu_1", "write")],
+            results: [("toolu_1", "read", "read out"), ("toolu_1", "write", "write out")]
+        )
+        _ = await provider.stream(model: Self.claude, context: Context(messages: messages), options: nil).result()
+        let data = try #require(client.lastRequest?.body)
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sent = try #require(body["messages"] as? [[String: Any]])
+        var uses: [String] = []
+        var resultIds: [String] = []
+        for message in sent {
+            for block in message["content"] as? [[String: Any]] ?? [] {
+                if block["type"] as? String == "tool_use", let id = block["id"] as? String { uses.append(id) }
+                if block["type"] as? String == "tool_result", let id = block["tool_use_id"] as? String { resultIds.append(id) }
+            }
+        }
+        #expect(uses == ["toolu_1", "toolu_1_2"])
+        #expect(resultIds == ["toolu_1", "toolu_1_2"])
+    }
 }
