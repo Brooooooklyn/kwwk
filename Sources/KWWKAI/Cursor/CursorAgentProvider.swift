@@ -783,9 +783,8 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             send(rejected("Tool not available"))
             return
         }
-        let callId = toolCallId.isEmpty ? UUID().uuidString : toolCallId
-        session.state.synthesizeResolvedToolCall(
-            id: callId,
+        let callId = session.state.synthesizeResolvedToolCall(
+            id: toolCallId.isEmpty ? UUID().uuidString : toolCallId,
             name: toolName,
             arguments: arguments,
             emit: session.emit
@@ -832,9 +831,8 @@ public final class CursorAgentProvider: APIProvider, APIProviderSessionLifecycle
             return
         }
 
-        let callId = args.toolCallId.isEmpty ? UUID().uuidString : args.toolCallId
-        session.state.synthesizeResolvedToolCall(
-            id: callId,
+        let callId = session.state.synthesizeResolvedToolCall(
+            id: args.toolCallId.isEmpty ? UUID().uuidString : args.toolCallId,
             name: "bash",
             arguments: Self.bashArguments(args),
             emit: session.emit
