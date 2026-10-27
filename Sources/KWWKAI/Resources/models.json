@@ -8567,6 +8567,48 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6.1-terra" : {
+      "api" : "azure-openai-responses",
+      "baseUrl" : "",
+      "compat" : {
+        "supportsOpenAIGrammarTools" : true
+      },
+      "contextWindow" : 272000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5
+      },
+      "id" : "gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra",
+      "provider" : "azure",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
+    },
     "gpt-daybreak-blue-latest" : {
       "api" : "azure-openai-responses",
       "baseUrl" : "",
@@ -14728,6 +14770,65 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6.1-terra" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
+      "compat" : {
+        "supportsAdditionalTools" : true,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsOpenAIGrammarTools" : true
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "headers" : {
+        "Copilot-Integration-Id" : "vscode-chat",
+        "Editor-Plugin-Version" : "copilot-chat\/0.35.0",
+        "Editor-Version" : "vscode\/1.107.0",
+        "User-Agent" : "GitHubCopilotChat\/0.35.0"
+      },
+      "id" : "gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra",
+      "provider" : "github-copilot",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
+    },
     "grok-4.5" : {
       "api" : "openai-responses",
       "baseUrl" : "https:\/\/api.individual.githubcopilot.com",
@@ -17465,6 +17566,49 @@
       "name" : "MiniMax-M3",
       "provider" : "huggingface",
       "reasoning" : true
+    },
+    "MiniMaxAI\/MiniMax-M3.1-Flash" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/router.huggingface.co\/v1",
+      "compat" : {
+        "supportsDeveloperRole" : false,
+        "supportsStrictMode" : true
+      },
+      "contextWindow" : 1000000,
+      "cost" : {
+        "cacheRead" : 0,
+        "cacheWrite" : 0,
+        "input" : 0.15,
+        "output" : 0.6
+      },
+      "id" : "MiniMaxAI\/MiniMax-M3.1-Flash",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 512000,
+      "name" : "MiniMax-M3.1-Flash",
+      "provider" : "huggingface",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
     },
     "moonshotai\/Kimi-K2-Instruct" : {
       "api" : "openai-completions",
@@ -23578,6 +23722,65 @@
         "xhigh" : "xhigh"
       }
     },
+    "gpt-6.1-terra" : {
+      "api" : "openai-responses",
+      "baseUrl" : "https:\/\/api.openai.com\/v1",
+      "compat" : {
+        "supportsAdditionalTools" : true,
+        "supportsExplicitPromptCacheMode" : true,
+        "supportsMidConvoEffort" : true,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsOpenAIGrammarTools" : true,
+        "supportsStrictMode" : true,
+        "supportsToolSearch" : true
+      },
+      "contextWindow" : 272000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "id" : "gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "maxPerRequest" : 1500,
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        },
+        "maxRequestBytes" : 536870912
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra",
+      "provider" : "openai",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
+    },
     "gpt-daybreak-blue-latest" : {
       "api" : "openai-responses",
       "baseUrl" : "https:\/\/api.openai.com\/v1",
@@ -24362,6 +24565,63 @@
         "off" : null,
         "xhigh" : "xhigh"
       }
+    },
+    "gpt-6.1-terra" : {
+      "api" : "openai-codex-responses",
+      "baseUrl" : "https:\/\/chatgpt.com\/backend-api",
+      "compat" : {
+        "serviceTiers" : [
+          "priority"
+        ],
+        "supportsAdditionalTools" : true,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsOpenAIGrammarTools" : true,
+        "supportsToolSearch" : true
+      },
+      "contextWindow" : 500000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "id" : "gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra",
+      "provider" : "openai-codex",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : "low",
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
     }
   },
   "opencode" : {
@@ -24952,42 +25212,6 @@
         "xhigh" : "xhigh"
       }
     },
-    "deepseek-v4-flash" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/opencode.ai\/inference\/v1",
-      "compat" : {
-        "maxTokensField" : "max_tokens",
-        "requiresReasoningContentOnAssistantMessages" : true,
-        "supportsDeveloperRole" : false,
-        "supportsLongCacheRetention" : false,
-        "supportsStore" : false,
-        "supportsStrictMode" : true
-      },
-      "contextWindow" : 1000000,
-      "cost" : {
-        "cacheRead" : 0.028000000000000001,
-        "cacheWrite" : 0,
-        "input" : 0.14,
-        "output" : 0.28
-      },
-      "id" : "deepseek-v4-flash",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 384000,
-      "name" : "DeepSeek V4 Flash",
-      "provider" : "opencode",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "high" : "high",
-        "low" : "low",
-        "max" : "max",
-        "medium" : null,
-        "minimal" : null,
-        "off" : null,
-        "xhigh" : null
-      }
-    },
     "deepseek-v4-pro" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/opencode.ai\/inference\/v1",
@@ -25031,6 +25255,7 @@
         "maxTokensField" : "max_tokens",
         "requiresReasoningContentOnAssistantMessages" : true,
         "supportsDeveloperRole" : false,
+        "supportsLongCacheRetention" : false,
         "supportsStore" : false,
         "supportsStrictMode" : true
       },
@@ -29028,7 +29253,7 @@
         "cacheRead" : 0.014999999999999999,
         "cacheWrite" : 0,
         "input" : 0.02,
-        "output" : 1
+        "output" : 0.232973
       },
       "id" : "~deepseek\/deepseek-flash-latest",
       "input" : [
@@ -29070,9 +29295,9 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.26,
+        "cacheRead" : 0.22,
         "cacheWrite" : 0,
-        "input" : 0.2565,
+        "input" : 0.2211,
         "output" : 8
       },
       "id" : "~deepseek\/deepseek-pro-latest",
@@ -29229,10 +29454,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.142,
+        "cacheRead" : 0.19,
         "cacheWrite" : 0,
-        "input" : 0.152,
-        "output" : 20
+        "input" : 0.19,
+        "output" : 8.94
       },
       "id" : "~moonshotai\/kimi-latest",
       "input" : [
@@ -29481,17 +29706,17 @@
       },
       "contextWindow" : 1050000,
       "cost" : {
-        "cacheRead" : 0.2,
-        "cacheWrite" : 2.5,
-        "input" : 2,
-        "output" : 12,
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
         "tiers" : [
           {
-            "cacheRead" : 0.4,
-            "cacheWrite" : 5,
-            "input" : 4,
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
             "inputTokensAbove" : 272000,
-            "output" : 18
+            "output" : 7.5
           }
         ]
       },
@@ -29627,8 +29852,8 @@
       "cost" : {
         "cacheRead" : 0.029999999999999999,
         "cacheWrite" : 0,
-        "input" : 0.041300000000000003,
-        "output" : 0.075800000000000006
+        "input" : 0.051299999999999998,
+        "output" : 0.070099999999999996
       },
       "id" : "~z-ai\/glm-flash-latest",
       "input" : [
@@ -31281,34 +31506,6 @@
         "xhigh" : "xhigh"
       }
     },
-    "arcee-ai\/trinity-large-thinking" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 262144,
-      "cost" : {
-        "cacheRead" : 0.059999999999999998,
-        "cacheWrite" : 0,
-        "input" : 0.25,
-        "output" : 0.8
-      },
-      "id" : "arcee-ai\/trinity-large-thinking",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 80000,
-      "name" : "Arcee AI: Trinity Large Thinking",
-      "provider" : "openrouter",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "off" : null
-      }
-    },
     "auto" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -31932,18 +32129,18 @@
         "supportsStrictMode" : true,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 1048575,
+      "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.018200000000000001,
+        "cacheRead" : 0.028000000000000001,
         "cacheWrite" : 0,
-        "input" : 0.090999999999999998,
-        "output" : 0.182
+        "input" : 0.14,
+        "output" : 0.28
       },
       "id" : "deepseek\/deepseek-v4-flash",
       "input" : [
         "text"
       ],
-      "maxTokens" : 943717,
+      "maxTokens" : 131072,
       "name" : "DeepSeek: DeepSeek V4 Flash 0423",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -31969,16 +32166,16 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.014,
+        "cacheRead" : 0.023800000000000002,
         "cacheWrite" : 0,
-        "input" : 0.44,
-        "output" : 1.32
+        "input" : 0.119,
+        "output" : 0.238
       },
       "id" : "deepseek\/deepseek-v4-flash-0731",
       "input" : [
         "text"
       ],
-      "maxTokens" : 131072,
+      "maxTokens" : 943718,
       "name" : "DeepSeek: DeepSeek V4 Flash 0731",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -32085,10 +32282,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.043999999999999997,
+        "cacheRead" : 0.021999999999999999,
         "cacheWrite" : 0,
-        "input" : 1.32,
-        "output" : 3.96
+        "input" : 0.66,
+        "output" : 1.98
       },
       "id" : "deepseek\/deepseek-v4-pro-0813",
       "input" : [
@@ -32120,10 +32317,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.014999999999999999,
+        "cacheRead" : 0.0041999999999999997,
         "cacheWrite" : 0,
-        "input" : 0.02,
-        "output" : 1
+        "input" : 0.14,
+        "output" : 0.42
       },
       "id" : "deepseek\/deepseek-v4.1-flash",
       "input" : [
@@ -32140,7 +32337,7 @@
           }
         }
       },
-      "maxTokens" : 943718,
+      "maxTokens" : 131072,
       "name" : "DeepSeek: DeepSeek V4.1 Flash",
       "provider" : "openrouter",
       "reasoning" : true,
@@ -32166,10 +32363,10 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.0060000000000000001,
+        "cacheRead" : 0.0030000000000000001,
         "cacheWrite" : 0,
-        "input" : 0.3,
-        "output" : 1.2
+        "input" : 0.15,
+        "output" : 0.6
       },
       "id" : "deepseek\/deepseek-v4.1-flash-1017",
       "input" : [
@@ -33625,10 +33822,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.050000000000000003,
+        "cacheRead" : 0.042500000000000003,
         "cacheWrite" : 0,
-        "input" : 0.089999999999999997,
-        "output" : 0.3
+        "input" : 0.076499999999999999,
+        "output" : 0.255
       },
       "id" : "google\/gemma-4-26b-a4b-it",
       "input" : [
@@ -33697,10 +33894,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.1,
+        "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.1,
-        "output" : 0.34
+        "input" : 0.2,
+        "output" : 0.4
       },
       "id" : "google\/gemma-4-31b-it",
       "input" : [
@@ -33717,7 +33914,7 @@
           }
         }
       },
-      "maxTokens" : 235929,
+      "maxTokens" : 16384,
       "name" : "Google: Gemma 4 31B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -34839,31 +35036,6 @@
       "provider" : "openrouter",
       "reasoning" : false
     },
-    "mistralai\/codestral-2508:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 256000,
-      "cost" : {
-        "cacheRead" : 0.014999999999999999,
-        "cacheWrite" : 0,
-        "input" : 0.15,
-        "output" : 0.45
-      },
-      "id" : "mistralai\/codestral-2508:batch",
-      "input" : [
-        "text"
-      ],
-      "maxTokens" : 204800,
-      "name" : "Mistral: Codestral 2508 (batch)",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
     "mistralai\/devstral-2512" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -34958,42 +35130,6 @@
       },
       "maxTokens" : 209715,
       "name" : "Mistral: Ministral 3 8B 2512",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
-    "mistralai\/ministral-8b-2512:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 262144,
-      "cost" : {
-        "cacheRead" : 0.0074999999999999997,
-        "cacheWrite" : 0,
-        "input" : 0.074999999999999997,
-        "output" : 0.074999999999999997
-      },
-      "id" : "mistralai\/ministral-8b-2512:batch",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "inputLimits" : {
-        "images" : {
-          "resize" : {
-            "jpegQuality" : 80,
-            "maxBytes" : 4718592,
-            "maxHeight" : 2000,
-            "maxWidth" : 2000
-          }
-        }
-      },
-      "maxTokens" : 209715,
-      "name" : "Mistral: Ministral 3 8B 2512 (batch)",
       "provider" : "openrouter",
       "reasoning" : false
     },
@@ -35164,42 +35300,6 @@
       "provider" : "openrouter",
       "reasoning" : false
     },
-    "mistralai\/mistral-large-2512:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 262144,
-      "cost" : {
-        "cacheRead" : 0.025000000000000001,
-        "cacheWrite" : 0,
-        "input" : 0.25,
-        "output" : 0.75
-      },
-      "id" : "mistralai\/mistral-large-2512:batch",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "inputLimits" : {
-        "images" : {
-          "resize" : {
-            "jpegQuality" : 80,
-            "maxBytes" : 4718592,
-            "maxHeight" : 2000,
-            "maxWidth" : 2000
-          }
-        }
-      },
-      "maxTokens" : 209715,
-      "name" : "Mistral: Mistral Large 3 2512 (batch)",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
     "mistralai\/mistral-medium-3" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -35362,42 +35462,6 @@
       "provider" : "openrouter",
       "reasoning" : false
     },
-    "mistralai\/mistral-medium-3.1:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 131072,
-      "cost" : {
-        "cacheRead" : 0.02,
-        "cacheWrite" : 0,
-        "input" : 0.2,
-        "output" : 1
-      },
-      "id" : "mistralai\/mistral-medium-3.1:batch",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "inputLimits" : {
-        "images" : {
-          "resize" : {
-            "jpegQuality" : 80,
-            "maxBytes" : 4718592,
-            "maxHeight" : 2000,
-            "maxWidth" : 2000
-          }
-        }
-      },
-      "maxTokens" : 104857,
-      "name" : "Mistral: Mistral Medium 3.1 (batch)",
-      "provider" : "openrouter",
-      "reasoning" : false
-    },
     "mistralai\/mistral-nemo" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -35553,51 +35617,6 @@
       },
       "maxTokens" : 209715,
       "name" : "Mistral: Mistral Small 4",
-      "provider" : "openrouter",
-      "reasoning" : true,
-      "thinkingLevelMap" : {
-        "high" : "high",
-        "low" : null,
-        "max" : null,
-        "medium" : null,
-        "minimal" : null,
-        "off" : "none",
-        "xhigh" : null
-      }
-    },
-    "mistralai\/mistral-small-2603:batch" : {
-      "api" : "openai-completions",
-      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
-      "compat" : {
-        "sendSessionAffinityHeaders" : true,
-        "supportsDeveloperRole" : false,
-        "supportsStrictMode" : true,
-        "thinkingFormat" : "openrouter"
-      },
-      "contextWindow" : 262144,
-      "cost" : {
-        "cacheRead" : 0.0074999999999999997,
-        "cacheWrite" : 0,
-        "input" : 0.074999999999999997,
-        "output" : 0.3
-      },
-      "id" : "mistralai\/mistral-small-2603:batch",
-      "input" : [
-        "text",
-        "image"
-      ],
-      "inputLimits" : {
-        "images" : {
-          "resize" : {
-            "jpegQuality" : 80,
-            "maxBytes" : 4718592,
-            "maxHeight" : 2000,
-            "maxWidth" : 2000
-          }
-        }
-      },
-      "maxTokens" : 209715,
-      "name" : "Mistral: Mistral Small 4 (batch)",
       "provider" : "openrouter",
       "reasoning" : true,
       "thinkingLevelMap" : {
@@ -35824,8 +35843,8 @@
       "cost" : {
         "cacheRead" : 0.15,
         "cacheWrite" : 0,
-        "input" : 0.6712,
-        "output" : 3.35
+        "input" : 0.5600000000000001,
+        "output" : 3.1
       },
       "id" : "moonshotai\/kimi-k2.7-code",
       "input" : [
@@ -35861,9 +35880,9 @@
       },
       "contextWindow" : 1048576,
       "cost" : {
-        "cacheRead" : 0.142,
+        "cacheRead" : 0.19,
         "cacheWrite" : 0,
-        "input" : 0.152,
+        "input" : 0.2,
         "output" : 20
       },
       "id" : "moonshotai\/kimi-k3",
@@ -39950,6 +39969,219 @@
         "xhigh" : "xhigh"
       }
     },
+    "openai\/gpt-6.1-terra" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsMidConvoSystemMessages" : true,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6.1 Terra",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6.1-terra-pro" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra-pro",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6.1 Terra Pro",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6.1-terra-pro:batch" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.025000000000000001,
+        "cacheWrite" : 0.625,
+        "input" : 0.5,
+        "output" : 2.5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.050000000000000003,
+            "cacheWrite" : 1.25,
+            "input" : 1,
+            "inputTokensAbove" : 272000,
+            "output" : 3.75
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra-pro:batch",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6.1 Terra Pro (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : null,
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6.1-terra:batch" : {
+      "api" : "openai-completions",
+      "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
+      "compat" : {
+        "sendSessionAffinityHeaders" : true,
+        "supportsStrictMode" : true,
+        "thinkingFormat" : "openrouter"
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.025000000000000001,
+        "cacheWrite" : 0.625,
+        "input" : 0.5,
+        "output" : 2.5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.050000000000000003,
+            "cacheWrite" : 1.25,
+            "input" : 1,
+            "inputTokensAbove" : 272000,
+            "output" : 3.75
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra:batch",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "OpenAI: GPT-6.1 Terra (batch)",
+      "provider" : "openrouter",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "high" : "high",
+        "low" : "low",
+        "max" : "max",
+        "medium" : "medium",
+        "minimal" : null,
+        "off" : "none",
+        "xhigh" : "xhigh"
+      }
+    },
     "openai\/gpt-audio" : {
       "api" : "openai-completions",
       "baseUrl" : "https:\/\/openrouter.ai\/api\/v1",
@@ -41046,7 +41278,7 @@
       "cost" : {
         "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.089999999999999997,
+        "input" : 0.1,
         "output" : 0.3
       },
       "id" : "qwen\/qwen3-30b-a3b-instruct-2507",
@@ -41499,10 +41731,10 @@
       },
       "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.27,
+        "cacheRead" : 0,
         "cacheWrite" : 0,
-        "input" : 0.27,
-        "output" : 2.16
+        "input" : 0.26,
+        "output" : 2.6
       },
       "id" : "qwen\/qwen3.5-27b",
       "input" : [
@@ -41519,7 +41751,7 @@
           }
         }
       },
-      "maxTokens" : 65536,
+      "maxTokens" : 81920,
       "name" : "Qwen: Qwen3.5-27B",
       "provider" : "openrouter",
       "reasoning" : true
@@ -43622,12 +43854,12 @@
         "supportsStrictMode" : true,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 1050000,
+      "contextWindow" : 1000000,
       "cost" : {
-        "cacheRead" : 0.0025500000000000002,
+        "cacheRead" : 0.080000000000000002,
         "cacheWrite" : 0,
-        "input" : 0.119,
-        "output" : 0.238
+        "input" : 0.4,
+        "output" : 2
       },
       "id" : "xiaomi\/mimo-v2.5",
       "input" : [
@@ -43644,7 +43876,7 @@
           }
         }
       },
-      "maxTokens" : 945000,
+      "maxTokens" : 65536,
       "name" : "Xiaomi: MiMo-V2.5",
       "provider" : "openrouter",
       "reasoning" : true
@@ -43658,18 +43890,18 @@
         "supportsStrictMode" : true,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 1050000,
+      "contextWindow" : 262144,
       "cost" : {
-        "cacheRead" : 0.0028,
+        "cacheRead" : 0.096000000000000002,
         "cacheWrite" : 0,
-        "input" : 0.3045,
-        "output" : 0.609
+        "input" : 0.48,
+        "output" : 1.8
       },
       "id" : "xiaomi\/mimo-v2.5-pro",
       "input" : [
         "text"
       ],
-      "maxTokens" : 945000,
+      "maxTokens" : 235929,
       "name" : "Xiaomi: MiMo-V2.5-Pro",
       "provider" : "openrouter",
       "reasoning" : true
@@ -44063,18 +44295,18 @@
         "supportsStrictMode" : true,
         "thinkingFormat" : "openrouter"
       },
-      "contextWindow" : 202752,
+      "contextWindow" : 200000,
       "cost" : {
-        "cacheRead" : 0.26,
+        "cacheRead" : 0.1794,
         "cacheWrite" : 0,
-        "input" : 1.4,
-        "output" : 4.4
+        "input" : 0.966,
+        "output" : 3.036
       },
       "id" : "z-ai\/glm-5.1",
       "input" : [
         "text"
       ],
-      "maxTokens" : 131072,
+      "maxTokens" : 128000,
       "name" : "Z.ai: GLM 5.1",
       "provider" : "openrouter",
       "reasoning" : true
@@ -56488,6 +56720,96 @@
         "xhigh" : "xhigh"
       }
     },
+    "openai\/gpt-6.1-terra" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "compat" : {
+        "allowEmptySignature" : true
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.050000000000000003,
+        "cacheWrite" : 1.25,
+        "input" : 1,
+        "output" : 5,
+        "tiers" : [
+          {
+            "cacheRead" : 0.1,
+            "cacheWrite" : 2.5,
+            "input" : 2,
+            "inputTokensAbove" : 272000,
+            "output" : 7.5
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "xhigh" : "xhigh"
+      }
+    },
+    "openai\/gpt-6.1-terra-fast" : {
+      "api" : "anthropic-messages",
+      "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
+      "compat" : {
+        "allowEmptySignature" : true
+      },
+      "contextWindow" : 1050000,
+      "cost" : {
+        "cacheRead" : 0.1,
+        "cacheWrite" : 2.5,
+        "input" : 2,
+        "output" : 10,
+        "tiers" : [
+          {
+            "cacheRead" : 0.2,
+            "cacheWrite" : 5,
+            "input" : 4,
+            "inputTokensAbove" : 272000,
+            "output" : 15
+          }
+        ]
+      },
+      "id" : "openai\/gpt-6.1-terra-fast",
+      "input" : [
+        "text",
+        "image"
+      ],
+      "inputLimits" : {
+        "images" : {
+          "resize" : {
+            "jpegQuality" : 80,
+            "maxBytes" : 4718592,
+            "maxHeight" : 2000,
+            "maxWidth" : 2000
+          }
+        }
+      },
+      "maxTokens" : 128000,
+      "name" : "GPT-6.1 Terra (Fast)",
+      "provider" : "vercel-ai-gateway",
+      "reasoning" : true,
+      "thinkingLevelMap" : {
+        "xhigh" : "xhigh"
+      }
+    },
     "openai\/gpt-oss-20b" : {
       "api" : "anthropic-messages",
       "baseUrl" : "https:\/\/ai-gateway.vercel.sh",
@@ -58363,7 +58685,7 @@
       "input" : [
         "text"
       ],
-      "maxTokens" : 1000000,
+      "maxTokens" : 262144,
       "name" : "GLM 5.3",
       "provider" : "vercel-ai-gateway",
       "reasoning" : true

@@ -2722,6 +2722,101 @@
   {
     "api" : "cursor-agent",
     "baseUrl" : "https:\/\/api2.cursor.sh",
+    "contextWindow" : 1048576,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "deepseek-v41-flash-1017-high",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 64000,
+    "name" : "DeepSeek V4.1 Flash 1017 High",
+    "provider" : "cursor",
+    "reasoning" : false
+  },
+  {
+    "api" : "cursor-agent",
+    "baseUrl" : "https:\/\/api2.cursor.sh",
+    "contextWindow" : 1048576,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "deepseek-v41-flash-1017-low",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 64000,
+    "name" : "DeepSeek V4.1 Flash 1017 Low",
+    "provider" : "cursor",
+    "reasoning" : false
+  },
+  {
+    "api" : "cursor-agent",
+    "baseUrl" : "https:\/\/api2.cursor.sh",
+    "contextWindow" : 1048576,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "deepseek-v41-flash-1017-max",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 64000,
+    "name" : "DeepSeek V4.1 Flash 1017 Max",
+    "provider" : "cursor",
+    "reasoning" : false
+  },
+  {
+    "api" : "cursor-agent",
+    "baseUrl" : "https:\/\/api2.cursor.sh",
+    "contextWindow" : 1048576,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "deepseek-v41-flash-1017-medium",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 64000,
+    "name" : "DeepSeek V4.1 Flash 1017 Medium",
+    "provider" : "cursor",
+    "reasoning" : false
+  },
+  {
+    "api" : "cursor-agent",
+    "baseUrl" : "https:\/\/api2.cursor.sh",
+    "contextWindow" : 1048576,
+    "cost" : {
+      "cacheRead" : 0,
+      "cacheWrite" : 0,
+      "input" : 0,
+      "output" : 0
+    },
+    "id" : "deepseek-v41-flash-1017-none",
+    "input" : [
+      "text"
+    ],
+    "maxTokens" : 64000,
+    "name" : "DeepSeek V4.1 Flash 1017 None",
+    "provider" : "cursor",
+    "reasoning" : false
+  },
+  {
+    "api" : "cursor-agent",
+    "baseUrl" : "https:\/\/api2.cursor.sh",
     "contextWindow" : 1000000,
     "cost" : {
       "cacheRead" : 0,
