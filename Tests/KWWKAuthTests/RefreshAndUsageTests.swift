@@ -265,6 +265,20 @@ struct UsageTests {
         #expect(windows.first { $0.window == .sevenDay }?.usedPercent == 100)
     }
 
+    @Test("Kimi: an earlier future ratio cannot clear a later live counter")
+    func kimiEarlierFutureRatioKeepsCounter() throws {
+        let now = Date(timeIntervalSince1970: 1_790_064_000)
+        let windows = KimiCodingUsageReader.windows(from: [
+            "usage": ["limit": "100", "used": "100", "resetTime": "2026-09-24T14:00:00Z"],
+            "usages": [
+                "limit_7d": ["used_ratio": 0, "reset_time": "2026-09-24T13:00:00Z"],
+            ],
+        ], now: now)
+        let sevenDay = try #require(windows.first { $0.window == .sevenDay })
+        #expect(sevenDay.usedPercent == 100)
+        #expect(sevenDay.resetsAt != nil)
+    }
+
     @Test("Kimi: one-sided resets preserve recovery time and the strongest constraint")
     func kimiOneSidedResets() throws {
         let now = Date(timeIntervalSince1970: 1_790_064_000)

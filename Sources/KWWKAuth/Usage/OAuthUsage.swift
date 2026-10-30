@@ -418,7 +418,11 @@ public struct KimiCodingUsageReader: OAuthUsageReader {
                     // consumption. Before then the active constraint wins.
                     windows[index] = existingReset > currentReset ? existing : current
                 } else {
+                    // Both periods are active or still ahead: keep the next
+                    // reset, and never clear the stronger constraint.
                     windows[index] = existingReset < currentReset ? existing : current
+                    windows[index].usedPercent = max(existing.usedPercent, current.usedPercent)
+                    windows[index].resetsAt = min(existingReset, currentReset)
                 }
             } else if let datedReset = existing.resetsAt ?? current.resetsAt {
                 let nowMs = Int64(now.timeIntervalSince1970 * 1000)
