@@ -91,9 +91,10 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
             failure.message = error.displayDescription
             return failure
         }
-        // The message is shown to people, so an NSError gives its localized
-        // description, not its dump. The category reads the domain and code
-        // below, and the description's own wording (curl's, for a bare -1).
+        // The message is shown to people: the error's own localized
+        // description when it has one (curl's sentence, on Linux), and its
+        // description when it has none. The category reads the domain and
+        // code below, and that same wording.
         var message = error.displayDescription
         // Linux URLSession reports unmapped curl failures as a bare -1 whose
         // only evidence is curl's text, sometimes on the underlying error.
