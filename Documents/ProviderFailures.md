@@ -7,8 +7,9 @@ partial output. HTTP status, provider code, NSError domain/code, request ID,
 Retry-After, retry veto, and exceptional stop details stay separate from prose.
 HTTP error bodies are bounded to 4096 bytes; a broken body never erases the HTTP
 status. Provider messages remain diagnostics, not trusted end-user copy. A
-captured error's message is its localized description (`Error.displayDescription`),
-never an NSError dump; its domain and code stay in their own fields.
+captured error's message is its own localized description when it has one, and
+its description otherwise (`Error.displayDescription`); its domain and code stay
+in their own fields.
 
 `ProviderFailure` is the shared classifier. Permanent account limits, auth,
 validation, safety refusals, caller cancellation, and context overflow do not

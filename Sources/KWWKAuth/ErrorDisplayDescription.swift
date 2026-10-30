@@ -1,28 +1,33 @@
 import Foundation
 
 public extension Error {
-    /// The text to show a person for this error: its `localizedDescription`,
-    /// never an `NSError` printed whole. `"\(error)"` of a refused connection
-    /// is `Error Domain=NSURLErrorDomain Code=-1004 "(null)"UserInfo={…}` on
-    /// Linux, where the localized description is curl's sentence, or Apple's
-    /// "Could not connect to the server."
+    /// The text to show a person for this error: its own localized
+    /// description when it has one, and its description otherwise.
     ///
-    /// One kind of error keeps its own description: a plain Swift error,
-    /// neither `LocalizedError` nor `CustomNSError` (SwiftNIO's `IOError`, an
-    /// enum that writes no message). Foundation has no text for it, and its
-    /// `localizedDescription` is only "The operation couldn’t be completed.
-    /// (NIOCore.IOError error 1.)". Its description ("Connection reset by
-    /// peer (errno: 104)") is the only account of what happened, and is no
-    /// `NSError` dump. `ProviderFailure` reads that account to tell a dropped
-    /// connection from a rejected request, so it must not be lost either.
+    /// `"\(error)"` of a refused connection is `Error Domain=NSURLErrorDomain
+    /// Code=-1004 "(null)"UserInfo={…}` on Linux, while the error carries
+    /// curl's sentence as its localized description. `localizedDescription`
+    /// alone is no answer either: for an error with no text of its own it is
+    /// Foundation's "The operation couldn't be completed. (NSURLErrorDomain
+    /// error -1004.)", which drops everything the description says.
+    ///
+    /// In order, the first non-empty one of: a `LocalizedError`'s
+    /// `errorDescription`; the bridged NSError's `NSLocalizedDescriptionKey`;
+    /// the description its domain's user-info provider gives (Apple's Cocoa
+    /// domain: "The file doesn't exist."); and last `String(describing:)`.
     var displayDescription: String {
         let error: any Error = self
-        if error is LocalizedError || error is CustomNSError { return error.localizedDescription }
-        // Such an error bridges to an NSError named after its own type; an
-        // NSError proper, URLError and POSIXError carry a domain of their own.
-        if (error as NSError).domain == String(reflecting: type(of: error)) {
-            return String(describing: error)
+        if let text = (error as? LocalizedError)?.errorDescription, !text.isEmpty {
+            return text
         }
-        return error.localizedDescription
+        let bridged = error as NSError
+        if let text = bridged.userInfo[NSLocalizedDescriptionKey] as? String, !text.isEmpty {
+            return text
+        }
+        if let provider = NSError.userInfoValueProvider(forDomain: bridged.domain),
+           let text = provider(bridged, NSLocalizedDescriptionKey) as? String, !text.isEmpty {
+            return text
+        }
+        return String(describing: error)
     }
 }

@@ -5,9 +5,10 @@ import FoundationNetworking
 import Testing
 @testable import KWWKAI
 
-/// A failure's message is what a host shows people, so an NSError reaches it
-/// as its localized description, never as `Error Domain=… UserInfo={…}`.
-/// The category and retry decision stay what they were.
+/// A failure's message is what a host shows people, so an NSError with a
+/// localized description of its own reaches it as that sentence, not as
+/// `Error Domain=… UserInfo={…}`; one without falls back to its description,
+/// as before. The category and retry decision stay what they were.
 @Suite("Provider failure message")
 struct ProviderFailureMessageTests {
     private static let url = URL(string: "http://127.0.0.1:3425/v1/messages")!
@@ -45,11 +46,13 @@ struct ProviderFailureMessageTests {
         #expect(failure.outcome == .network)
     }
 
-    @Test func undescribedURLErrorStillCapturesNoDump() {
+    // Foundation's own placeholder, "The operation couldn't be completed.
+    // (NSURLErrorDomain error -1004.)", would hide the code and the URL.
+    @Test func undescribedURLErrorFallsBackToItsDescription() {
         let error = Self.refusedConnection(description: nil)
         let failure = ProviderFailure.capture(error)
-        #expect(failure.message == error.localizedDescription)
-        Self.expectNoDump(failure.message)
+        #expect(failure.message == String(describing: error))
+        #expect(failure.message != error.localizedDescription)
         #expect(failure.category == .transport)
         #expect(failure.isRetryable)
     }
@@ -80,10 +83,13 @@ struct ProviderFailureMessageTests {
         #expect(failure.message == curl)
         #expect(failure.isRetryable)
 
+        // With no sentence of its own the outer error falls back to its
+        // description, which already carries the underlying curl text, so it
+        // is not appended again.
         let bare = NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: [NSUnderlyingErrorKey: inner])
         let fromUnderlying = ProviderFailure.capture(bare)
-        #expect(fromUnderlying.message.hasSuffix(": \(curl)"))
-        Self.expectNoDump(fromUnderlying.message)
+        #expect(fromUnderlying.message == String(describing: bare))
+        #expect(fromUnderlying.message.contains(curl))
         #expect(fromUnderlying.category == .transport)
     }
 
