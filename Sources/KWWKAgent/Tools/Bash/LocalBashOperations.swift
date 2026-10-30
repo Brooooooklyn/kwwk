@@ -53,7 +53,7 @@ public struct LocalBashOperations: BashOperations {
                 extraEnv: [:]
             )
         } catch {
-            throw CodingToolError.commandFailed(stderr: "\(error)", exitCode: -1)
+            throw CodingToolError.commandFailed(stderr: error.displayDescription, exitCode: -1)
         }
         // Close our copies of the write ends so the read ends see EOF once the
         // child exits and closes its dup'd copies.

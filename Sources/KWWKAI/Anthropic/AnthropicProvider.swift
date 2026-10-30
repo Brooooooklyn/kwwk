@@ -254,9 +254,9 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
             out.push(.error(reason: .error, error: AssistantMessage.makeError(
                 api: api,
                 model: model,
-                text: "Failed to encode request: \(error)"
+                text: "Failed to encode request: \(error.displayDescription)"
             )))
-            out.end(AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)"))
+            out.end(AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error.displayDescription)"))
             return
         }
 
@@ -299,7 +299,8 @@ public final class AnthropicProvider: APIProvider, NativeCompactionProvider, @un
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let failure = ProviderFailure.capture(error)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }

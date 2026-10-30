@@ -299,7 +299,7 @@ struct KwwkCLI {
         do {
             try await body()
         } catch {
-            let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            let msg = error.displayDescription
             FileHandle.standardError.write(Data("kwwk: \(msg)\n".utf8))
             Foundation.exit(1)
         }

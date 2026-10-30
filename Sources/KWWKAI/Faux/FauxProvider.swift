@@ -425,7 +425,7 @@ public final class FauxProvider: APIProvider, Sendable {
                 )
             } catch {
                 let message = FauxProvider.makeErrorMessage(
-                    reason: "\(error)",
+                    reason: error.displayDescription,
                     api: api,
                     provider: provider,
                     modelId: model.id

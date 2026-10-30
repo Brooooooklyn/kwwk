@@ -119,7 +119,7 @@ public struct OAuthCredentialSourceError: Error, LocalizedError {
     }
 
     public var errorDescription: String? {
-        (underlying as? LocalizedError)?.errorDescription ?? String(describing: underlying)
+        underlying.displayDescription
     }
 }
 
@@ -206,7 +206,7 @@ public actor OAuthStore {
             let data = try Data(contentsOf: url)
             self.credentials = try JSONDecoder().decode([String: OAuthCredentials].self, from: data)
         } catch {
-            throw OAuthError.corruptStore(path: url.path, detail: String(describing: error))
+            throw OAuthError.corruptStore(path: url.path, detail: error.displayDescription)
         }
     }
 

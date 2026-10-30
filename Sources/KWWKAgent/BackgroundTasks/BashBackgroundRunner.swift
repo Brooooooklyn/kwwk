@@ -114,7 +114,7 @@ enum BashRunnerImpl {
                 success: false,
                 summary: "spawn failed",
                 details: nil,
-                errorMessage: "\(error)"
+                errorMessage: error.displayDescription
             )
         }
         control.setPid(spawned.pid)

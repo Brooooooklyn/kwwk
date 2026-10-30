@@ -364,7 +364,7 @@ public enum AgentContextCompactor {
         } catch ContextCompactionPipelineError.noCompressibleMessages {
             return .failure(.tooFewMessages(count: context.messages.count))
         } catch {
-            let reason = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            let reason = error.displayDescription
             return .failure(.failed(reason))
         }
     }

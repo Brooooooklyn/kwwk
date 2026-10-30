@@ -190,7 +190,7 @@ enum CursorConnect {
             config.applicationProtocols = ["h2"]
             sslContext = try NIOSSLContext(configuration: config)
         } catch {
-            throw CursorConnectError.tlsSetupFailed(String(describing: error))
+            throw CursorConnectError.tlsSetupFailed(error.displayDescription)
         }
 
         // Bring up the TCP + TLS + HTTP/2 connection channel.
@@ -214,7 +214,7 @@ enum CursorConnect {
                 .connect(host: host, port: port)
                 .get()
         } catch {
-            throw CursorConnectError.connectionFailed(String(describing: error))
+            throw CursorConnectError.connectionFailed(error.displayDescription)
         }
 
         let (stream, continuation) = AsyncThrowingStream<CursorConnectFrame, Error>.makeStream()
@@ -245,7 +245,7 @@ enum CursorConnect {
             streamChannel = try await streamChannelPromise.futureResult.get()
         } catch {
             connection.close(promise: nil)
-            throw CursorConnectError.connectionFailed(String(describing: error))
+            throw CursorConnectError.connectionFailed(error.displayDescription)
         }
 
         // Tear the parent connection down when the stream closes so we don't
@@ -393,7 +393,7 @@ private final class CursorStreamHandler: ChannelInboundHandler, @unchecked Senda
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        finish(throwing: CursorConnectError.transport(String(describing: error)))
+        finish(throwing: CursorConnectError.transport(error.displayDescription))
         context.close(promise: nil)
     }
 

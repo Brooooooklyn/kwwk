@@ -826,7 +826,7 @@ private func handleShakeCommand(_ ctx: SlashContext, _ args: String) async {
     } catch AgentError.alreadyRunning {
         ctx.notify(Style.error("  /shake: agent is busy; stop it first (Esc)"))
     } catch {
-        ctx.notify(Style.error("  /shake: \(error)"))
+        ctx.notify(Style.error("  /shake: \(error.displayDescription)"))
     }
     shakeAgent.resumeQueuedWork()
 }

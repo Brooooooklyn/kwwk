@@ -88,10 +88,13 @@ public struct ProviderFailure: Error, LocalizedError, Codable, Sendable, Hashabl
            let cause = ns.userInfo[NSUnderlyingErrorKey] as? NSError,
            cause !== ns, cause.domain == NSURLErrorDomain || cause.domain == NSPOSIXErrorDomain {
             var failure = capture(cause)
-            failure.message = String(describing: error)
+            failure.message = error.displayDescription
             return failure
         }
-        var message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        // The message is shown to people, so an NSError gives its localized
+        // description, not its dump. The category reads the domain and code
+        // below, and the description's own wording (curl's, for a bare -1).
+        var message = error.displayDescription
         // Linux URLSession reports unmapped curl failures as a bare -1 whose
         // only evidence is curl's text, sometimes on the underlying error.
         if ns.domain == NSURLErrorDomain, ns.code == NSURLErrorUnknown {

@@ -308,7 +308,7 @@ public final class SessionRecorder: Sendable {
                         return true
                     }
                     state.isPersistingFirstOperation = false
-                    state.lastPersistenceError = String(describing: error)
+                    state.lastPersistenceError = error.displayDescription
                     return results
                 }
                 cancelledRewrites.forEach { $0.fail() }

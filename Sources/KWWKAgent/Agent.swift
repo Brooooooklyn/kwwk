@@ -1003,7 +1003,7 @@ extension Agent {
             model: state.model.id,
             usage: Usage(),
             stopReason: aborted ? .aborted : .error,
-            errorMessage: (error as? LocalizedError)?.errorDescription ?? "\(error)",
+            errorMessage: error.displayDescription,
             timestamp: Timestamp.now()
         )
         state.appendMessage(.assistant(failure))

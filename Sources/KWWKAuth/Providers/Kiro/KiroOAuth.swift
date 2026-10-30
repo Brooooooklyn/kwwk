@@ -405,7 +405,7 @@ extension OAuthLogin {
                 callback.reply(.page(
                     succeeded: false,
                     title: "Sign-in didn't finish",
-                    message: (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                    message: error.displayDescription
                 ))
                 throw error
             }

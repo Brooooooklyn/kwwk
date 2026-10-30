@@ -131,7 +131,7 @@ func runHeadlessInternal(
         try await agent.prompt(text)
     } catch {
         await cleanupHeadlessAgent(agent)
-        let msg = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        let msg = error.displayDescription
         writeStderr("kwwk: \(msg)\n")
         return 1
     }

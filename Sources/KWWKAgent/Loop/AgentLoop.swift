@@ -878,7 +878,7 @@ public enum AgentLoop {
                     throw overflow
                 }
                 lastError = error
-                let reason = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                let reason = error.displayDescription
                 if requestModel.api != "cursor-agent",
                    ProviderFailure.capture(error).category == .contextOverflow {
                     let discarded = cursorResults.drain()
@@ -1243,7 +1243,7 @@ public enum AgentLoop {
                     finalizedArgs = effectiveArgs
                     outcome = executeBuiltinFileTool(name: call.name, args: effectiveArgs)
                 } catch {
-                    let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                    let message = error.displayDescription
                     outcome = ExecutedOutcome(result: errorToolResult(message), isError: true)
                 }
             }
@@ -1315,7 +1315,7 @@ public enum AgentLoop {
                 )
             }
         } catch {
-            return ExecutedOutcome(result: errorToolResult("\(error)"), isError: true)
+            return ExecutedOutcome(result: errorToolResult(error.displayDescription), isError: true)
         }
     }
 
@@ -1728,7 +1728,7 @@ public enum AgentLoop {
     }
 
     private static func schemaValidationMessage(_ error: Error) -> String {
-        (error as? JSONSchemaError)?.description ?? "\(error)"
+        error.displayDescription
     }
 
     private static func executePrepared(
@@ -1797,7 +1797,7 @@ public enum AgentLoop {
             if error is CancellationError || (error as? CodingToolError) == .aborted {
                 message = "aborted by user"
             } else {
-                message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                message = error.displayDescription
             }
             if let structured = error as? StructuredToolExecutionError {
                 return ExecutedOutcome(

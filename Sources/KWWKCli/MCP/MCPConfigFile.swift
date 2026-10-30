@@ -290,7 +290,7 @@ enum MCPConfigFile {
 
     private static func describe(_ error: Error) -> String {
         if error is DecodingError { return "invalid JSON" }
-        return (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        return error.displayDescription
     }
 }
 

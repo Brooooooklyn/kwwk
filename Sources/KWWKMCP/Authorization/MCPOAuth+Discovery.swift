@@ -31,7 +31,7 @@ extension MCPOAuth {
         do {
             return try JSONDecoder().decode(MCPProtectedResourceMetadata.self, from: response.body)
         } catch {
-            throw MCPAuthError.requestFailed("Invalid OAuth protected resource metadata: \(error)")
+            throw MCPAuthError.requestFailed("Invalid OAuth protected resource metadata: \(error.displayDescription)")
         }
     }
 
@@ -115,7 +115,7 @@ extension MCPOAuth {
                 metadata = try JSONDecoder().decode(MCPAuthorizationServerMetadata.self, from: response.body)
             } catch {
                 throw MCPAuthError.requestFailed(
-                    "Invalid authorization server metadata from \(url.absoluteString): \(error)"
+                    "Invalid authorization server metadata from \(url.absoluteString): \(error.displayDescription)"
                 )
             }
             if !skipIssuerValidation {
