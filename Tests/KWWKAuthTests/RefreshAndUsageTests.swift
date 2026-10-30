@@ -253,6 +253,34 @@ struct UsageTests {
         #expect(windows.first { $0.window == .sevenDay }?.usedPercent == 0)
     }
 
+    @Test("Kimi: a future reset cannot lower an active window before rollover")
+    func kimiResetTransitionBeforeRollover() throws {
+        let now = Date(timeIntervalSince1970: 1_790_064_000) // 2026-09-23 12:00 UTC
+        let windows = KimiCodingUsageReader.windows(from: [
+            "usage": ["limit": "100", "used": "100", "resetTime": "2026-09-24T02:09:07.465054Z"],
+            "usages": [
+                "limit_7d": ["used_ratio": 0, "reset_time": "2026-10-01T02:09:06Z"],
+            ],
+        ], now: now)
+        #expect(windows.first { $0.window == .sevenDay }?.usedPercent == 100)
+    }
+
+    @Test("Kimi: one-sided resets preserve recovery time and the strongest constraint")
+    func kimiOneSidedResets() throws {
+        let now = Date(timeIntervalSince1970: 1_790_064_000)
+        for legacyUsed in [90, 100] {
+            let windows = KimiCodingUsageReader.windows(from: [
+                "usage": ["limit": "100", "used": legacyUsed],
+                "usages": [
+                    "limit_7d": ["used_ratio": 1.0, "reset_time": "2026-09-24T02:09:06Z"],
+                ],
+            ], now: now)
+            let sevenDay = try #require(windows.first { $0.window == .sevenDay })
+            #expect(sevenDay.usedPercent == 100)
+            #expect(sevenDay.resetsAt != nil)
+        }
+    }
+
     @Test("Kimi: a missing reset keeps the more exhausted reading")
     func kimiMissingReset() throws {
         let windows = KimiCodingUsageReader.windows(from: [

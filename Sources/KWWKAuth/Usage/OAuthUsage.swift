@@ -412,11 +412,34 @@ public struct KimiCodingUsageReader: OAuthUsageReader {
                     windows[index].resetsAt = max(existingReset, currentReset)
                 }
             } else if let existingReset = existing.resetsAt, let currentReset = current.resetsAt {
-                if currentReset > existingReset { windows[index] = current }
-            } else if current.usedPercent > existing.usedPercent {
-                // An unknown ordering must not hide the more exhausted
-                // window; every other usable reading stays visible too.
-                windows[index] = current
+                let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+                if min(existingReset, currentReset) <= nowMs {
+                    // Only an expired window lets the later period lower
+                    // consumption. Before then the active constraint wins.
+                    windows[index] = existingReset > currentReset ? existing : current
+                } else {
+                    windows[index] = existingReset < currentReset ? existing : current
+                }
+            } else if let datedReset = existing.resetsAt ?? current.resetsAt {
+                let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+                if datedReset <= nowMs {
+                    // The dated period is over; the undated reading is the
+                    // only one that can describe the current period.
+                    windows[index] = existing.resetsAt == nil ? existing : current
+                } else {
+                    // Keep the active recovery time and the strongest
+                    // constraint, including when both readings are equal.
+                    if existing.resetsAt == nil {
+                        windows[index] = current
+                        windows[index].usedPercent = max(existing.usedPercent, current.usedPercent)
+                        windows[index].resetsAt = datedReset
+                    } else {
+                        windows[index].usedPercent = max(existing.usedPercent, current.usedPercent)
+                        windows[index].resetsAt = datedReset
+                    }
+                }
+            } else {
+                windows[index].usedPercent = max(existing.usedPercent, current.usedPercent)
             }
         }
         if let monthly = currentQuota(usages["limit_month_total"], now: now) {
