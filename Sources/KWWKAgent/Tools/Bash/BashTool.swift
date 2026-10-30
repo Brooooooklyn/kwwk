@@ -583,7 +583,7 @@ private func runBashForegroundWithFlip(
         )
     } catch {
         try? FileManager.default.removeItem(at: outputFile)
-        throw CodingToolError.commandFailed(stderr: "\(error)", exitCode: -1)
+        throw CodingToolError.commandFailed(stderr: error.displayDescription, exitCode: -1)
     }
     control.setPid(spawned.pid)
     let cancelRegistration = cancellation?.onCancel { _ in control.terminate() }

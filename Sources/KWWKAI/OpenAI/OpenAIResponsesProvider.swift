@@ -242,7 +242,7 @@ public final class OpenAIResponsesProvider:
                 refusedSeals: session.refusedSeals
             )
         } catch {
-            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error.displayDescription)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return .finished
@@ -368,7 +368,8 @@ public final class OpenAIResponsesProvider:
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let failure = ProviderFailure.capture(error)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }
@@ -488,7 +489,7 @@ public final class OpenAIResponsesProvider:
                 message: "WebSocket setup failed; falling back to HTTP",
                 metadata: [
                     "disabled": .bool(failure.disabled),
-                    "error": .string("\(error)"),
+                    "error": .string(error.displayDescription),
                     "failure_count": .int(failure.count),
                 ]
             )
@@ -588,7 +589,7 @@ public final class OpenAIResponsesProvider:
                 await options?.emitVerbose(
                     source: verboseSource,
                     message: "WebSocket stream cancelled",
-                    metadata: ["error": .string("\(error)")]
+                    metadata: ["error": .string(error.displayDescription)]
                 )
                 Self.finishAborted(out: out, state: state)
                 return .completed
@@ -605,7 +606,7 @@ public final class OpenAIResponsesProvider:
                     message: "WebSocket failed before response event; falling back to HTTP",
                     metadata: [
                         "disabled": .bool(failure.disabled),
-                        "error": .string("\(error)"),
+                        "error": .string(error.displayDescription),
                         "failure_count": .int(failure.count),
                     ]
                 )
@@ -616,14 +617,14 @@ public final class OpenAIResponsesProvider:
                 message: "WebSocket failed after response event; returning stream error",
                 metadata: [
                     "disabled": .bool(failure.disabled),
-                    "error": .string("\(error)"),
+                    "error": .string(error.displayDescription),
                     "failure_count": .int(failure.count),
                 ]
             )
             let err = AssistantMessage.makeError(
                 api: api,
                 model: model,
-                text: "WebSocket stream failed: \(error)",
+                text: "WebSocket stream failed: \(error.displayDescription)",
                 failure: .capture(error)
             )
             out.push(.error(reason: .error, error: err))

@@ -43,7 +43,7 @@ public struct LocalGrepOperations: GrepOperations {
         do {
             pattern = try NSRegularExpression(pattern: patternString, options: options)
         } catch {
-            throw CodingToolError.invalidArgument("grep: invalid pattern — \(error)")
+            throw CodingToolError.invalidArgument("grep: invalid pattern — \(error.displayDescription)")
         }
 
         var isDirectory: ObjCBool = false

@@ -30,7 +30,7 @@ public struct AnthropicUsageReader: OAuthUsageReader {
             throw OAuthUsageError.unavailable(
                 providerId: providerId,
                 status: response.statusCode,
-                detail: "undecodable body: \(error)"
+                detail: "undecodable body: \(error.displayDescription)"
             )
         }
     }

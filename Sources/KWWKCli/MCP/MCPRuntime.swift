@@ -176,7 +176,7 @@ func registerMCPSlashCommand(_ registry: SlashCommandRegistry, runtime: MCPRunti
                         ctx.notify(Style.dimmed("  /mcp: signed out of \(server)"))
                     }
                 } catch {
-                    let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                    let message = error.displayDescription
                     ctx.notify(Style.dimmed("  /mcp \(action) \(server): \(message)"))
                 }
                 return

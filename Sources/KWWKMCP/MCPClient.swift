@@ -428,7 +428,7 @@ public actor MCPClient {
     }
 
     static func describe(_ error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        error.displayDescription
     }
 }
 

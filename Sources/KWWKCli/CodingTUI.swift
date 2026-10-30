@@ -819,7 +819,7 @@ func runCodingTUIInternal(
                 await MainActor.run {
                     runner.tui.commit([
                         "",
-                        Style.error("  error: \(error)"),
+                        Style.error("  error: \(error.displayDescription)"),
                     ])
                     updateFrameStatus()
                     runner.tui.requestRender()

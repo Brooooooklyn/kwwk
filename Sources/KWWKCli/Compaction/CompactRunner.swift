@@ -50,7 +50,7 @@ func performCompact(
         outcome = .refusedAgentBusy
         await settle(outcome)
     } catch {
-        outcome = .failed("\(error)")
+        outcome = .failed(error.displayDescription)
         await settle(outcome)
     }
 

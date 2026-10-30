@@ -254,7 +254,7 @@ enum MCPCommand {
             io.err("kwwk mcp \(name): \(error.message)")
             return 2
         } catch {
-            io.err("kwwk mcp \(name): \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
+            io.err("kwwk mcp \(name): \(error.displayDescription)")
             return 1
         }
     }

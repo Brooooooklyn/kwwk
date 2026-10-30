@@ -119,7 +119,7 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
         do {
             body = try Self.encodeBody(model: model, context: context, options: options, env: environment)
         } catch {
-            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error)")
+            let msg = AssistantMessage.makeError(api: api, model: model, text: "Failed to encode request: \(error.displayDescription)")
             out.push(.error(reason: .error, error: msg))
             out.end(msg)
             return
@@ -185,7 +185,8 @@ public final class BedrockProvider: APIProvider, @unchecked Sendable {
                 out.push(.error(reason: .aborted, error: aborted))
                 out.end(aborted)
             } else {
-                let msg = AssistantMessage.makeError(api: api, model: model, text: "\(error)", failure: .capture(error))
+                let failure = ProviderFailure.capture(error)
+                let msg = AssistantMessage.makeError(api: api, model: model, text: failure.message, failure: failure)
                 out.push(.error(reason: .error, error: msg))
                 out.end(msg)
             }

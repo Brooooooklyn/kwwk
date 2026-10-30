@@ -233,7 +233,7 @@ private func editAccessErrorDescription(_ error: Error) -> String {
     if let localized = error as? LocalizedError, let description = localized.errorDescription, !description.isEmpty {
         return description
     }
-    return String(describing: error)
+    return error.displayDescription
 }
 
 private func posixErrorCodeName(_ code: Int32) -> String {

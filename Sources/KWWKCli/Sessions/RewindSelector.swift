@@ -213,7 +213,7 @@ func openRewindSelector(
                         await Task.yield()
                     } catch {
                         if stillCurrent() {
-                            commit(["", Style.error("  rewind failed: \(error)")])
+                            commit(["", Style.error("  rewind failed: \(error.displayDescription)")])
                             requestRender()
                         }
                         return

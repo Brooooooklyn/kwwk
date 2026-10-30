@@ -76,7 +76,7 @@ extension MCPOAuth {
             information.issuer = nil
             return information
         } catch {
-            throw MCPAuthError.requestFailed("Invalid client registration response: \(error)")
+            throw MCPAuthError.requestFailed("Invalid client registration response: \(error.displayDescription)")
         }
     }
 }

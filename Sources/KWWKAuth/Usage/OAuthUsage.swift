@@ -186,7 +186,7 @@ public struct OpenAICodexUsageReader: OAuthUsageReader {
             throw OAuthUsageError.unavailable(
                 providerId: providerId,
                 status: response.statusCode,
-                detail: "undecodable body: \(error)"
+                detail: "undecodable body: \(error.displayDescription)"
             )
         }
         return Self.windows(from: payload)
